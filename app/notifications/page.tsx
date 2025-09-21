@@ -1,66 +1,74 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { supabase } from '@/lib/supabaseClient'
 
-type Notif = {
+type Noti = {
   id: string
   type: string
-  data: any
-  read_at: string | null
+  data: Record<string, any>
   created_at: string
+  read_at: string | null
 }
 
 export default function NotificationsPage() {
-  const [items, setItems] = useState<Notif[]>([])
+  const [items, setItems] = useState<Noti[]>([])
   const [loading, setLoading] = useState(true)
+  const [marking, setMarking] = useState(false)
 
-  useEffect(() => {
-    ;(async () => {
-      const { data: userData } = await supabase.auth.getUser()
-      const uid = userData?.user?.id
-      if (!uid) {
-        setItems([])
-        setLoading(false)
-        return
-      }
-
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('profile_id', uid)
-        .order('created_at', { ascending: false })
-
-      if (!error && data) setItems(data as Notif[])
+  async function load() {
+    setLoading(true)
+    const {
+      data: { user },
+      error: uerr,
+    } = await supabase.auth.getUser()
+    if (uerr || !user) {
+      setItems([])
       setLoading(false)
-    })()
-  }, [])
-
-  async function markAllRead() {
-    const { data: userData } = await supabase.auth.getUser()
-    const uid = userData?.user?.id
-    if (!uid) return
-
-    const nowIso = new Date().toISOString()
-    const { error } = await supabase
-      .from('notifications')
-      .update({ read_at: nowIso })
-      .eq('profile_id', uid)
-      .is('read_at', null)
-
-    if (!error) {
-      // optimistic update so the bell clears immediately
-      setItems((prev) => prev.map((n) => (n.read_at ? n : { ...n, read_at: nowIso })))
+      return
     }
+
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('profile_id', user.id)
+      .order('created_at', { ascending: false })
+
+    if (!error && data) setItems(data as Noti[])
+    setLoading(false)
   }
 
+  async function markAllRead() {
+    setMarking(true)
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return
+
+    await supabase
+      .from('notifications')
+      .update({ read_at: new Date().toISOString() })
+      .eq('profile_id', user.id)
+      .is('read_at', null)
+
+    setMarking(false)
+    load()
+  }
+
+  useEffect(() => {
+    load()
+  }, [])
+
   return (
-    <section className="max-w-3xl space-y-4">
+    <section className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Notifications</h2>
-        <button onClick={markAllRead} className="rounded border px-3 py-1 text-sm">
-          Mark all read
+        <h1 className="text-2xl font-bold">Notifications</h1>
+        <button
+          onClick={markAllRead}
+          disabled={marking || loading}
+          className="rounded border px-3 py-1 disabled:opacity-60"
+        >
+          {marking ? 'Marking…' : 'Mark all read'}
         </button>
       </div>
 
@@ -69,37 +77,19 @@ export default function NotificationsPage() {
       ) : items.length === 0 ? (
         <p>No notifications.</p>
       ) : (
-        <ul className="space-y-2">
-          {items.map((n) => {
-            // simple renderer; extend as needed per type
-            const offerId = n.data?.offer_id as string | undefined
-            const link = offerId ? `/offers/${offerId}` : '/offers'
-            const title =
-              n.type === 'request_received'
-                ? 'You received a new request'
-                : n.type === 'request_accepted'
-                ? 'Your request was accepted'
-                : n.type === 'request_declined'
-                ? 'Your request was declined'
-                : 'Notification'
-
-            return (
-              <li
-                key={n.id}
-                className={`rounded border p-3 ${n.read_at ? 'opacity-70' : 'bg-yellow-50'}`}
-              >
-                <div className="flex items-center justify-between">
-                  <strong>{title}</strong>
-                  <span className="text-xs">{new Date(n.created_at).toLocaleString()}</span>
-                </div>
-                <div className="mt-1">
-                  <Link href={link} className="underline text-sm">
-                    View offer
-                  </Link>
-                </div>
-              </li>
-            )
-          })}
+        <ul className="space-y-3">
+          {items.map((n) => (
+            <li
+              key={n.id}
+              className={`rounded border p-3 ${n.read_at ? 'opacity-70' : ''}`}
+            >
+              <div className="text-sm text-gray-600">
+                {new Date(n.created_at).toLocaleString()}
+              </div>
+              <div className="font-medium">{n.type.replace('_', ' ')}</div>
+              {n.data?.message && <div className="text-sm">{n.data.message}</div>}
+            </li>
+          ))}
         </ul>
       )}
     </section>

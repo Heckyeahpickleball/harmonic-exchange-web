@@ -7,78 +7,65 @@ import { supabase } from '@/lib/supabaseClient'
 export default function NotificationsBell() {
   const [count, setCount] = useState<number>(0)
   const [ready, setReady] = useState(false)
-  const [userId, setUserId] = useState<string | null>(null)
 
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null
 
-    ;(async () => {
-      // 1) Get the current user
-      const { data: userData } = await supabase.auth.getUser()
-      const uid = userData?.user?.id ?? null
-      setUserId(uid)
-
-      if (!uid) {
+    async function init() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) {
         setReady(true)
         return
       }
 
-      // 2) Get initial unread count
-      const { count, error } = await supabase
+      // initial count
+      const { count: c } = await supabase
         .from('notifications')
         .select('*', { count: 'exact', head: true })
-        .eq('profile_id', uid)
+        .eq('profile_id', user.id)
         .is('read_at', null)
+      setCount(c ?? 0)
 
-      if (!error) setCount(count ?? 0)
-
-      // 3) Realtime: keep badge in sync
+      // realtime updates for this user's notifications
       channel = supabase
-        .channel('notifications-bell')
+        .channel(`noti:${user.id}`)
         .on(
           'postgres_changes',
           {
-            event: 'INSERT',
+            event: '*',
             schema: 'public',
             table: 'notifications',
-            filter: `profile_id=eq.${uid}`,
+            filter: `profile_id=eq.${user.id}`,
           },
-          (payload) => {
-            const row = payload.new as { read_at: string | null }
-            if (!row.read_at) setCount((c) => c + 1)
-          }
-        )
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'notifications',
-            filter: `profile_id=eq.${uid}`,
-          },
-          (payload) => {
-            const before = payload.old as { read_at: string | null }
-            const after = payload.new as { read_at: string | null }
-            if (!before.read_at && !!after.read_at) {
-              setCount((c) => Math.max(0, c - 1))
-            }
+          async () => {
+            const { count: c2 } = await supabase
+              .from('notifications')
+              .select('*', { count: 'exact', head: true })
+              .eq('profile_id', user.id)
+              .is('read_at', null)
+            setCount(c2 ?? 0)
           }
         )
         .subscribe()
       setReady(true)
-    })()
+    }
+
+    init()
 
     return () => {
       if (channel) supabase.removeChannel(channel)
     }
   }, [])
 
-  // If not ready, or no user, still render the bell (no badge).
+  if (!ready) return <span />
+
   return (
-    <Link href="/inbox" className="relative inline-block" aria-label="Notifications" title="Notifications">
-      <span>🔔</span>
-      {userId && ready && count > 0 && (
-        <span className="absolute -right-2 -top-2 rounded-full bg-red-600 text-white text-[10px] leading-none px-1.5 py-0.5">
+    <Link href="/inbox" className="relative inline-block">
+      <span aria-label="Notifications" title="Notifications">🔔</span>
+      {count > 0 && (
+        <span className="absolute -right-2 -top-2 rounded-full bg-orange-400 px-1 text-xs font-semibold text-white">
           {count}
         </span>
       )}
