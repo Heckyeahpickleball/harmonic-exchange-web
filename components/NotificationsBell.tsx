@@ -1,7 +1,7 @@
 'use client'
 
-import Link from 'next/link'
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabaseClient'
 
 export default function NotificationsBell() {
@@ -9,64 +9,67 @@ export default function NotificationsBell() {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    let channel: ReturnType<typeof supabase.channel> | null = null
-    let mounted = true
+    let ch: ReturnType<typeof supabase.channel> | null = null
+    let cancelled = false
 
-    const boot = async () => {
-      const { data: auth } = await supabase.auth.getUser()
-      const user = auth.user
-      if (!user) {
-        if (mounted) setReady(true)
+    async function init() {
+      // Get the current user once
+      const { data: { user } } = await supabase.auth.getUser()
+      const uid = user?.id ?? null
+
+      // If not signed in, just render the bell without a badge
+      if (!uid || cancelled) {
+        setReady(true)
         return
       }
 
-      const load = async () => {
-        const { count } = await supabase
+      async function refresh() {
+        const { count: c } = await supabase
           .from('notifications')
-          .select('*', { count: 'exact', head: true })
-          .eq('profile_id', user.id)
+          .select('id', { head: true, count: 'exact' })
+          .eq('profile_id', uid)            // use the non-null uid
           .is('read_at', null)
 
-        if (mounted) {
-          setCount(count ?? 0)
+        if (!cancelled) {
+          setCount(c ?? 0)
           setReady(true)
         }
       }
 
-      await load()
+      // Initial fetch
+      await refresh()
 
-      // Subscribe to inserts/updates for my notifications
-      channel = supabase
-        .channel(`notifications-${user.id}`)
+      // Realtime updates for this user
+      ch = supabase
+        .channel('notif-bell')
         .on(
           'postgres_changes',
           {
             event: '*',
             schema: 'public',
             table: 'notifications',
-            filter: `profile_id=eq.${user.id}`,
+            filter: `profile_id=eq.${uid}`, // safe: uid is a string
           },
-          // simplest/most reliable: refetch count whenever anything changes
-          () => load()
+          refresh
         )
         .subscribe()
     }
 
-    void boot()
+    init()
 
     return () => {
-      mounted = false
-      if (channel) supabase.removeChannel(channel)
+      cancelled = true
+      if (ch) supabase.removeChannel(ch)
     }
   }, [])
 
-  if (!ready) return <span />
+  if (!ready) return null
 
   return (
-    <Link href="/notifications" className="relative inline-block">
+    <Link href="/inbox" className="relative inline-block">
       <span aria-label="Notifications" title="Notifications">🔔</span>
       {count > 0 && (
-        <span className="absolute -right-2 -top-2 rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+        <span className="absolute -right-2 -top-2 rounded-full bg-orange-500 text-white text-[10px] px-1.5 py-[1px]">
           {count}
         </span>
       )}
