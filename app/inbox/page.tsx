@@ -12,104 +12,114 @@ type Notif = {
   created_at: string
 }
 
-export default function InboxPage() {
-  const [items, setItems] = useState<Notif[]>([])
+export default function NotificationsPage() {
   const [loading, setLoading] = useState(true)
-  const [status, setStatus] = useState('')
-
-  function announceChange() {
-    // Tell the bell to refresh immediately
-    window.dispatchEvent(new Event('notifications:changed'))
-  }
+  const [items, setItems] = useState<Notif[]>([])
+  const [userId, setUserId] = useState<string | null>(null)
+  const [status, setStatus] = useState<string>('')
 
   async function load() {
     setLoading(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      setStatus('You must be signed in to view notifications.')
+      setItems([])
+      setLoading(false)
+      return
+    }
+    setUserId(user.id)
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
+      .eq('profile_id', user.id)
       .order('created_at', { ascending: false })
-      .limit(200)
+
     if (error) setStatus(`Error: ${error.message}`)
-    setItems((data ?? []) as Notif[])
+    else setItems(data ?? [])
     setLoading(false)
   }
 
-  useEffect(() => {
-    let channel: ReturnType<typeof supabase.channel> | null = null
+  useEffect(() => { load() }, [])
 
-    ;(async () => {
-      await load()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      channel = supabase.channel('notif-list')
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: 'notifications',
-          filter: `profile_id=eq.${user.id}`,
-        }, () => load())
-        .subscribe()
-    })()
+  async function markAllRead() {
+    if (!userId) return
+    setStatus('Marking all as read…')
 
-    return () => { if (channel) supabase.removeChannel(channel) }
-  }, [])
+    // 1) update in DB
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read_at: new Date().toISOString() })
+      .is('read_at', null)
+      .eq('profile_id', userId)
 
-  async function markOne(id: string) {
+    if (error) {
+      setStatus(`Error: ${error.message}`)
+      return
+    }
+
+    // 2) update UI immediately
+    setItems(prev => prev.map(n => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })))
+    setStatus('All caught up!')
+
+    // 3) *** THIS IS THE IMPORTANT LINE ***
+    ;(window as any).__hxRecalcBell?.()
+  }
+
+  async function markOneRead(id: string) {
     const { error } = await supabase
       .from('notifications')
       .update({ read_at: new Date().toISOString() })
       .eq('id', id)
-    if (error) setStatus(`Error: ${error.message}`)
-    await load()
-    announceChange()
-  }
 
-  async function markAll() {
-    setStatus('Marking all read…')
-    const { error } = await supabase.rpc('mark_all_notifications_read')
-    if (error) setStatus(`Error: ${error.message}`)
-    else setStatus('')
-    await load()
-    announceChange()
+    if (!error) {
+      setItems(prev => prev.map(n => n.id === id ? { ...n, read_at: new Date().toISOString() } : n))
+      ;(window as any).__hxRecalcBell?.()
+    }
   }
 
   return (
-    <section className="space-y-4">
+    <section className="max-w-3xl space-y-4">
       <h2 className="text-2xl font-bold">Notifications</h2>
-      <div className="flex items-center gap-2">
-        <button onClick={markAll} className="rounded border px-3 py-1 text-sm">Mark all read</button>
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={markAllRead}
+          className="rounded border px-3 py-1 text-sm"
+        >
+          Mark all read
+        </button>
         {status && <span className="text-sm">{status}</span>}
       </div>
 
       {loading ? <p>Loading…</p> : (
-        <div className="space-y-2">
+        <ul className="space-y-2">
           {items.map(n => (
-            <div key={n.id} className={`rounded border p-3 ${n.read_at ? 'opacity-60' : ''}`}>
-              <div className="flex items-center justify-between">
-                <strong className="text-sm">
+            <li key={n.id} className="rounded border p-3 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">
                   {n.type === 'request_received' && 'You received a new request'}
                   {n.type === 'request_accepted' && 'Your request was accepted'}
                   {n.type === 'request_declined' && 'Your request was declined'}
-                  {!['request_received','request_accepted','request_declined'].includes(n.type) && n.type}
-                </strong>
+                  {n.type === 'system' && 'System message'}
+                </div>
+                <div className="text-xs mt-1">
+                  <Link href={`/offers`}>View offer</Link>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
                 {!n.read_at && (
-                  <button onClick={() => markOne(n.id)} className="rounded border px-2 py-1 text-xs">
+                  <button
+                    onClick={() => markOneRead(n.id)}
+                    className="rounded border px-2 py-1 text-xs"
+                  >
                     Mark read
                   </button>
                 )}
               </div>
-              <div className="mt-1 text-xs text-gray-600">
-                {new Date(n.created_at).toLocaleString()}
-              </div>
-              {n.data?.offer_id && (
-                <div className="mt-2">
-                  <Link href={`/offers`} className="underline text-sm">View offer</Link>
-                </div>
-              )}
-            </div>
+            </li>
           ))}
-          {items.length === 0 && <p className="text-sm text-gray-600">No notifications.</p>}
-        </div>
+          {items.length === 0 && <li className="text-sm text-gray-600">No notifications.</li>}
+        </ul>
       )}
     </section>
   )

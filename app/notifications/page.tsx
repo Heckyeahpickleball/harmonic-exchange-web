@@ -1,10 +1,10 @@
-// /app/notifications/page.tsx
 'use client'
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
+import Link from 'next/link'
 
-type Note = {
+type Notif = {
   id: string
   type: string
   data: any
@@ -13,83 +13,113 @@ type Note = {
 }
 
 export default function NotificationsPage() {
-  const [uid, setUid] = useState<string | null>(null)
-  const [items, setItems] = useState<Note[]>([])
-  const [status, setStatus] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [items, setItems] = useState<Notif[]>([])
+  const [userId, setUserId] = useState<string | null>(null)
+  const [status, setStatus] = useState<string>('')
 
-  async function load(u: string) {
-    const { data } = await supabase
+  async function load() {
+    setLoading(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      setStatus('You must be signed in to view notifications.')
+      setItems([])
+      setLoading(false)
+      return
+    }
+    setUserId(user.id)
+    const { data, error } = await supabase
       .from('notifications')
       .select('*')
-      .eq('profile_id', u)
+      .eq('profile_id', user.id)
       .order('created_at', { ascending: false })
-      .limit(100)
-    setItems((data ?? []) as any)
+
+    if (error) setStatus(`Error: ${error.message}`)
+    else setItems(data ?? [])
+    setLoading(false)
   }
 
-  useEffect(() => {
-    ;(async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return window.location.replace('/sign-in')
-      setUid(user.id)
-      await load(user.id)
-    })()
-  }, [])
+  useEffect(() => { load() }, [])
 
-  async function markRead(id?: string) {
-    if (!uid) return
-    setStatus('Updating…')
-    const q = supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('profile_id', uid)
-    const { error } = id ? await q.eq('id', id) : await q.is('read_at', null)
-    if (error) setStatus(`Error: ${error.message}`)
-    else {
-      setStatus('Done.')
-      await load(uid)
+  async function markAllRead() {
+    if (!userId) return
+    setStatus('Marking all as read…')
+
+    // 1) update in DB
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read_at: new Date().toISOString() })
+      .is('read_at', null)
+      .eq('profile_id', userId)
+
+    if (error) {
+      setStatus(`Error: ${error.message}`)
+      return
+    }
+
+    // 2) update UI immediately
+    setItems(prev => prev.map(n => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })))
+    setStatus('All caught up!')
+
+    // 3) *** THIS IS THE IMPORTANT LINE ***
+    ;(window as any).__hxRecalcBell?.()
+  }
+
+  async function markOneRead(id: string) {
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read_at: new Date().toISOString() })
+      .eq('id', id)
+
+    if (!error) {
+      setItems(prev => prev.map(n => n.id === id ? { ...n, read_at: new Date().toISOString() } : n))
+      ;(window as any).__hxRecalcBell?.()
     }
   }
 
-  function label(n: Note) {
-    if (n.type === 'request_received') return 'You received a new request'
-    if (n.type === 'request_accepted') return 'Your request was accepted'
-    if (n.type === 'request_declined') return 'Your request was declined'
-    return 'Notification'
-  }
-
   return (
-    <section className="space-y-4 max-w-2xl">
+    <section className="max-w-3xl space-y-4">
       <h2 className="text-2xl font-bold">Notifications</h2>
-      <div className="flex gap-2">
-        <button onClick={() => markRead()} className="rounded border px-3 py-2 text-sm">
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={markAllRead}
+          className="rounded border px-3 py-1 text-sm"
+        >
           Mark all read
         </button>
+        {status && <span className="text-sm">{status}</span>}
       </div>
-      {status && <p className="text-sm">{status}</p>}
 
-      {items.length === 0 ? (
-        <p>No notifications yet.</p>
-      ) : (
-        <div className="space-y-2">
+      {loading ? <p>Loading…</p> : (
+        <ul className="space-y-2">
           {items.map(n => (
-            <div key={n.id} className="rounded border p-3 bg-white">
-              <div className="flex items-center justify-between">
-                <div className="text-sm">
-                  <span className="font-semibold">{label(n)}</span>
-                  <span className="ml-2 text-xs text-gray-600">{new Date(n.created_at).toLocaleString()}</span>
+            <li key={n.id} className="rounded border p-3 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">
+                  {n.type === 'request_received' && 'You received a new request'}
+                  {n.type === 'request_accepted' && 'Your request was accepted'}
+                  {n.type === 'request_declined' && 'Your request was declined'}
+                  {n.type === 'system' && 'System message'}
                 </div>
+                <div className="text-xs mt-1">
+                  <Link href={`/offers`}>View offer</Link>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
                 {!n.read_at && (
-                  <button onClick={() => markRead(n.id)} className="rounded border px-2 py-1 text-xs">
+                  <button
+                    onClick={() => markOneRead(n.id)}
+                    className="rounded border px-2 py-1 text-xs"
+                  >
                     Mark read
                   </button>
                 )}
               </div>
-              {n.data?.offer_id && (
-                <div className="text-xs mt-1">
-                  <a className="underline" href={`/offers/${n.data.offer_id}`}>View offer</a>
-                </div>
-              )}
-            </div>
+            </li>
           ))}
-        </div>
+          {items.length === 0 && <li className="text-sm text-gray-600">No notifications.</li>}
+        </ul>
       )}
     </section>
   )
