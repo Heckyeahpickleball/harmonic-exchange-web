@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
-import Link from 'next/link'
 
-type Notif = {
+type NotificationRow = {
   id: string
   type: string
   data: any
@@ -13,114 +12,152 @@ type Notif = {
 }
 
 export default function NotificationsPage() {
+  const [items, setItems] = useState<NotificationRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [items, setItems] = useState<Notif[]>([])
   const [userId, setUserId] = useState<string | null>(null)
-  const [status, setStatus] = useState<string>('')
 
-  async function load() {
-    setLoading(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      setStatus('You must be signed in to view notifications.')
-      setItems([])
-      setLoading(false)
-      return
+  useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null
+    let mounted = true
+
+    const boot = async () => {
+      const { data } = await supabase.auth.getUser()
+      const user = data.user
+      if (!user) {
+        setLoading(false)
+        return
+      }
+      setUserId(user.id)
+
+      const load = async () => {
+        const { data, error } = await supabase
+          .from('notifications')
+          .select('*')
+          .eq('profile_id', user.id)
+          .order('created_at', { ascending: false })
+
+        if (error) {
+          console.error(error)
+        } else if (mounted) {
+          setItems((data as NotificationRow[]) ?? [])
+        }
+        if (mounted) setLoading(false)
+      }
+
+      await load()
+
+      channel = supabase
+        .channel(`notifications-page-${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'notifications',
+            filter: `profile_id=eq.${user.id}`,
+          },
+          () => load()
+        )
+        .subscribe()
     }
-    setUserId(user.id)
-    const { data, error } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('profile_id', user.id)
-      .order('created_at', { ascending: false })
 
-    if (error) setStatus(`Error: ${error.message}`)
-    else setItems(data ?? [])
-    setLoading(false)
-  }
+    void boot()
 
-  useEffect(() => { load() }, [])
+    return () => {
+      mounted = false
+      if (channel) supabase.removeChannel(channel)
+    }
+  }, [])
 
-  async function markAllRead() {
+  const markAllRead = async () => {
     if (!userId) return
-    setStatus('Marking all as read…')
-
-    // 1) update in DB
+    const now = new Date().toISOString()
     const { error } = await supabase
       .from('notifications')
-      .update({ read_at: new Date().toISOString() })
-      .is('read_at', null)
+      .update({ read_at: now })
       .eq('profile_id', userId)
-
-    if (error) {
-      setStatus(`Error: ${error.message}`)
-      return
-    }
-
-    // 2) update UI immediately
-    setItems(prev => prev.map(n => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })))
-    setStatus('All caught up!')
-
-    // 3) *** THIS IS THE IMPORTANT LINE ***
-    ;(window as any).__hxRecalcBell?.()
-  }
-
-  async function markOneRead(id: string) {
-    const { error } = await supabase
-      .from('notifications')
-      .update({ read_at: new Date().toISOString() })
-      .eq('id', id)
+      .is('read_at', null)
 
     if (!error) {
-      setItems(prev => prev.map(n => n.id === id ? { ...n, read_at: new Date().toISOString() } : n))
-      ;(window as any).__hxRecalcBell?.()
+      // optimistic local update; bell will also update via Realtime
+      setItems(prev => prev.map(n => (n.read_at ? n : { ...n, read_at: now })))
+    } else {
+      alert(error.message)
+    }
+  }
+
+  const markOneRead = async (id: string) => {
+    const now = new Date().toISOString()
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read_at: now })
+      .eq('id', id)
+      .is('read_at', null)
+
+    if (!error) {
+      setItems(prev => prev.map(n => (n.id === id ? { ...n, read_at: now } : n)))
+    } else {
+      alert(error.message)
     }
   }
 
   return (
-    <section className="max-w-3xl space-y-4">
-      <h2 className="text-2xl font-bold">Notifications</h2>
+    <main>
+      <h1 className="text-xl font-semibold mb-4">Notifications</h1>
 
-      <div className="flex items-center gap-3">
-        <button
-          onClick={markAllRead}
-          className="rounded border px-3 py-1 text-sm"
-        >
-          Mark all read
-        </button>
-        {status && <span className="text-sm">{status}</span>}
+      <button
+        onClick={markAllRead}
+        className="mb-4 rounded border px-3 py-1 hover:bg-gray-50"
+      >
+        Mark all read
+      </button>
+
+      {loading && <p>Loading…</p>}
+
+      {!loading && items.length === 0 && <p>No notifications yet.</p>}
+
+      <div className="space-y-3">
+        {items.map(n => (
+          <div
+            key={n.id}
+            className="rounded border p-3 flex items-center justify-between"
+          >
+            <div className="text-sm">
+              <div className="font-medium">
+                {n.type === 'request_received' && 'You received a new request'}
+                {n.type === 'request_accepted' && 'Your request was accepted'}
+                {n.type === 'request_declined' && 'Your request was declined'}
+                {n.type !== 'request_received' &&
+                  n.type !== 'request_accepted' &&
+                  n.type !== 'request_declined' &&
+                  n.type}
+              </div>
+              <div className="text-xs text-gray-600">
+                {new Date(n.created_at).toLocaleString()}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {n.data?.offer_id && (
+                <a
+                  href={`/offers/${n.data.offer_id}`}
+                  className="text-sm underline"
+                >
+                  View offer
+                </a>
+              )}
+              {!n.read_at && (
+                <button
+                  onClick={() => markOneRead(n.id)}
+                  className="text-xs rounded border px-2 py-1 hover:bg-gray-50"
+                >
+                  Mark read
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
       </div>
-
-      {loading ? <p>Loading…</p> : (
-        <ul className="space-y-2">
-          {items.map(n => (
-            <li key={n.id} className="rounded border p-3 flex items-center justify-between">
-              <div>
-                <div className="text-sm font-medium">
-                  {n.type === 'request_received' && 'You received a new request'}
-                  {n.type === 'request_accepted' && 'Your request was accepted'}
-                  {n.type === 'request_declined' && 'Your request was declined'}
-                  {n.type === 'system' && 'System message'}
-                </div>
-                <div className="text-xs mt-1">
-                  <Link href={`/offers`}>View offer</Link>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {!n.read_at && (
-                  <button
-                    onClick={() => markOneRead(n.id)}
-                    className="rounded border px-2 py-1 text-xs"
-                  >
-                    Mark read
-                  </button>
-                )}
-              </div>
-            </li>
-          ))}
-          {items.length === 0 && <li className="text-sm text-gray-600">No notifications.</li>}
-        </ul>
-      )}
-    </section>
+    </main>
   )
 }

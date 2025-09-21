@@ -5,69 +5,68 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
 export default function NotificationsBell() {
-  const [ready, setReady] = useState(false)
   const [count, setCount] = useState<number>(0)
-  const [channel, setChannel] = useState<ReturnType<typeof supabase.channel> | null>(null)
-
-  // helper: recompute unread count
-  async function recalcCount(userId: string) {
-    const { count: c, error } = await supabase
-      .from('notifications')
-      .select('id', { count: 'exact', head: true })
-      .eq('profile_id', userId)
-      .is('read_at', null)
-
-    if (!error && typeof c === 'number') setCount(c)
-  }
+  const [ready, setReady] = useState(false)
 
   useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null
     let mounted = true
 
-    ;(async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!mounted || !user) { setReady(true); return }
+    const boot = async () => {
+      const { data: auth } = await supabase.auth.getUser()
+      const user = auth.user
+      if (!user) {
+        if (mounted) setReady(true)
+        return
+      }
 
-      // initial count
-      await recalcCount(user.id)
+      const load = async () => {
+        const { count } = await supabase
+          .from('notifications')
+          .select('*', { count: 'exact', head: true })
+          .eq('profile_id', user.id)
+          .is('read_at', null)
 
-      // subscribe to inserts & updates for this user
-      const ch = supabase
-        .channel(`notif-${user.id}`)
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: 'notifications',
-          filter: `profile_id=eq.${user.id}`
-        }, async () => {
-          await recalcCount(user.id)
-        })
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') setReady(true)
-        })
+        if (mounted) {
+          setCount(count ?? 0)
+          setReady(true)
+        }
+      }
 
-      setChannel(ch)
+      await load()
 
-      // cleanup
-      return () => { mounted = false; supabase.removeChannel(ch) }
-    })()
-  }, [])
+      // Subscribe to inserts/updates for my notifications
+      channel = supabase
+        .channel(`notifications-${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'notifications',
+            filter: `profile_id=eq.${user.id}`,
+          },
+          // simplest/most reliable: refetch count whenever anything changes
+          () => load()
+        )
+        .subscribe()
+    }
 
-  // expose a global helper the inbox page can call after "mark all read"
-  useEffect(() => {
-    // @ts-ignore
-    window.__hxRecalcBell = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) await recalcCount(user.id)
+    void boot()
+
+    return () => {
+      mounted = false
+      if (channel) supabase.removeChannel(channel)
     }
   }, [])
 
   if (!ready) return <span />
 
   return (
-    <Link href="/inbox" className="relative inline-block">
+    <Link href="/notifications" className="relative inline-block">
       <span aria-label="Notifications" title="Notifications">🔔</span>
       {count > 0 && (
-        <span className="absolute -right-2 -top-2 rounded-full bg-orange-400 px-2 py-0.5 text-xs text-white">
+        <span className="absolute -right-2 -top-2 rounded-full bg-orange-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
           {count}
         </span>
       )}
