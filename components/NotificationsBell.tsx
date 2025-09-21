@@ -1,75 +1,84 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
 export default function NotificationsBell() {
   const [count, setCount] = useState<number>(0)
   const [ready, setReady] = useState(false)
+  const [userId, setUserId] = useState<string | null>(null)
 
   useEffect(() => {
-    let ch: ReturnType<typeof supabase.channel> | null = null
-    let cancelled = false
+    let channel: ReturnType<typeof supabase.channel> | null = null
 
-    async function init() {
-      // Get the current user once
-      const { data: { user } } = await supabase.auth.getUser()
-      const uid = user?.id ?? null
+    ;(async () => {
+      // 1) Get the current user
+      const { data: userData } = await supabase.auth.getUser()
+      const uid = userData?.user?.id ?? null
+      setUserId(uid)
 
-      // If not signed in, just render the bell without a badge
-      if (!uid || cancelled) {
+      if (!uid) {
         setReady(true)
         return
       }
 
-      async function refresh() {
-        const { count: c } = await supabase
-          .from('notifications')
-          .select('id', { head: true, count: 'exact' })
-          .eq('profile_id', uid)            // use the non-null uid
-          .is('read_at', null)
+      // 2) Get initial unread count
+      const { count, error } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('profile_id', uid)
+        .is('read_at', null)
 
-        if (!cancelled) {
-          setCount(c ?? 0)
-          setReady(true)
-        }
-      }
+      if (!error) setCount(count ?? 0)
 
-      // Initial fetch
-      await refresh()
-
-      // Realtime updates for this user
-      ch = supabase
-        .channel('notif-bell')
+      // 3) Realtime: keep badge in sync
+      channel = supabase
+        .channel('notifications-bell')
         .on(
           'postgres_changes',
           {
-            event: '*',
+            event: 'INSERT',
             schema: 'public',
             table: 'notifications',
-            filter: `profile_id=eq.${uid}`, // safe: uid is a string
+            filter: `profile_id=eq.${uid}`,
           },
-          refresh
+          (payload) => {
+            const row = payload.new as { read_at: string | null }
+            if (!row.read_at) setCount((c) => c + 1)
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'notifications',
+            filter: `profile_id=eq.${uid}`,
+          },
+          (payload) => {
+            const before = payload.old as { read_at: string | null }
+            const after = payload.new as { read_at: string | null }
+            if (!before.read_at && !!after.read_at) {
+              setCount((c) => Math.max(0, c - 1))
+            }
+          }
         )
         .subscribe()
-    }
-
-    init()
+      setReady(true)
+    })()
 
     return () => {
-      cancelled = true
-      if (ch) supabase.removeChannel(ch)
+      if (channel) supabase.removeChannel(channel)
     }
   }, [])
 
-  if (!ready) return null
-
+  // If not ready, or no user, still render the bell (no badge).
   return (
-    <Link href="/inbox" className="relative inline-block">
-      <span aria-label="Notifications" title="Notifications">🔔</span>
-      {count > 0 && (
-        <span className="absolute -right-2 -top-2 rounded-full bg-orange-500 text-white text-[10px] px-1.5 py-[1px]">
+    <Link href="/inbox" className="relative inline-block" aria-label="Notifications" title="Notifications">
+      <span>🔔</span>
+      {userId && ready && count > 0 && (
+        <span className="absolute -right-2 -top-2 rounded-full bg-red-600 text-white text-[10px] leading-none px-1.5 py-0.5">
           {count}
         </span>
       )}
