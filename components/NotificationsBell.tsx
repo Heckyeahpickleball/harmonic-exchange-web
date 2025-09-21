@@ -1,74 +1,80 @@
-'use client'
+'use client';
 
-import Link from 'next/link'
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabaseClient'
+import Link from 'next/link';
+import { useEffect, useState, useCallback } from 'react';
+import { RealtimeChannel } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function NotificationsBell() {
-  const [count, setCount] = useState<number>(0)
-  const [ready, setReady] = useState(false)
+  const [count, setCount] = useState<number>(0);
+  const [ready, setReady] = useState(false);
+
+  const loadCount = useCallback(async () => {
+    const { data: userRes } = await supabase.auth.getUser();
+    const userId = userRes?.user?.id;
+    if (!userId) {
+      setCount(0);
+      setReady(true);
+      return;
+    }
+
+    const { count } = await supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('profile_id', userId)
+      .is('read_at', null);
+
+    setCount(count ?? 0);
+    setReady(true);
+  }, []);
 
   useEffect(() => {
-    let channel: ReturnType<typeof supabase.channel> | null = null
+    // initial load
+    void loadCount();
 
-    async function init() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) {
-        setReady(true)
-        return
-      }
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
 
-      // initial count
-      const { count: c } = await supabase
-        .from('notifications')
-        .select('*', { count: 'exact', head: true })
-        .eq('profile_id', user.id)
-        .is('read_at', null)
-      setCount(c ?? 0)
+    (async () => {
+      const { data: userRes } = await supabase.auth.getUser();
+      const userId = userRes?.user?.id;
+      if (!userId || cancelled) return;
 
-      // realtime updates for this user's notifications
       channel = supabase
-        .channel(`noti:${user.id}`)
+        .channel('notif_bell')
         .on(
           'postgres_changes',
           {
             event: '*',
             schema: 'public',
             table: 'notifications',
-            filter: `profile_id=eq.${user.id}`,
+            filter: `profile_id=eq.${userId}`,
           },
-          async () => {
-            const { count: c2 } = await supabase
-              .from('notifications')
-              .select('*', { count: 'exact', head: true })
-              .eq('profile_id', user.id)
-              .is('read_at', null)
-            setCount(c2 ?? 0)
-          }
-        )
-        .subscribe()
-      setReady(true)
-    }
+          () => void loadCount()
+        );
 
-    init()
+      // subscribe without returning the promise
+      void channel.subscribe();
+    })();
 
     return () => {
-      if (channel) supabase.removeChannel(channel)
-    }
-  }, [])
+      cancelled = true;
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [loadCount]);
 
-  if (!ready) return <span />
+  if (!ready) return <span />;
 
   return (
-    <Link href="/inbox" className="relative inline-block">
-      <span aria-label="Notifications" title="Notifications">🔔</span>
+    <Link href="/notifications" className="relative inline-block" aria-label="Notifications">
+      <span title="Notifications">🔔</span>
       {count > 0 && (
-        <span className="absolute -right-2 -top-2 rounded-full bg-orange-400 px-1 text-xs font-semibold text-white">
+        <span className="absolute -right-2 -top-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-semibold text-white">
           {count}
         </span>
       )}
     </Link>
-  )
+  );
 }
