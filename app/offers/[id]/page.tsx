@@ -26,29 +26,18 @@ export default function OfferDetailPage() {
 
   async function sendRequest(e: React.FormEvent) {
     e.preventDefault()
-    if (!userId) {
-      window.location.replace('/sign-in')
-      return
-    }
-    if (!note.trim()) {
-      setStatus('Please add a short note so they know what you’re requesting.')
-      return
-    }
+    if (!userId) return window.location.replace('/sign-in')
+    if (!note.trim()) return setStatus('Please add a short note.')
 
     try {
       setStatus('Sending request…')
-      const { error } = await supabase.from('requests').insert({
-        offer_id: id,
-        requester_profile_id: userId,
-        note,
-      })
+      const { error } = await supabase.rpc('create_request', { p_offer: id, p_note: note })
       if (error) throw error
-      setStatus('Request sent! Check your Inbox for updates.')
+      setStatus('Request sent! The owner was notified.')
       setNote('')
     } catch (err: any) {
       const msg = String(err?.message ?? err)
-      // Friendly guidance for RLS eligibility
-      if (/row level security|new row violates/.test(msg) || /not allowed/.test(msg)) {
+      if (/eligibility|active offer|row level security/i.test(msg)) {
         setStatus('You need at least 1 active offer before you can request. Create one under “New Offer”.')
       } else if (/duplicate key value violates unique constraint/i.test(msg)) {
         setStatus('You already have a pending request for this offer.')

@@ -1,131 +1,114 @@
-// /app/inbox/page.tsx
 'use client'
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
+import Link from 'next/link'
 
-type ReqRow = {
+type Notif = {
   id: string
-  note: string
-  status: 'pending' | 'accepted' | 'declined' | 'withdrawn' | 'fulfilled'
+  type: string
+  data: any
+  read_at: string | null
   created_at: string
-  offer_id: string
-  offers?: { id: string; title: string; owner_id?: string } | null
-  requester_profile_id: string
 }
 
 export default function InboxPage() {
-  const [tab, setTab] = useState<'received' | 'sent'>('received')
-  const [uid, setUid] = useState<string | null>(null)
-  const [received, setReceived] = useState<ReqRow[]>([])
-  const [sent, setSent] = useState<ReqRow[]>([])
+  const [items, setItems] = useState<Notif[]>([])
+  const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('')
 
+  function announceChange() {
+    // Tell the bell to refresh immediately
+    window.dispatchEvent(new Event('notifications:changed'))
+  }
+
+  async function load() {
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(200)
+    if (error) setStatus(`Error: ${error.message}`)
+    setItems((data ?? []) as Notif[])
+    setLoading(false)
+  }
+
   useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null
+
     ;(async () => {
+      await load()
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return window.location.replace('/sign-in')
-      setUid(user.id)
-      await Promise.all([loadReceived(user.id), loadSent(user.id)])
+      if (!user) return
+      channel = supabase.channel('notif-list')
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `profile_id=eq.${user.id}`,
+        }, () => load())
+        .subscribe()
     })()
+
+    return () => { if (channel) supabase.removeChannel(channel) }
   }, [])
 
-  async function loadReceived(userId: string) {
-    // requests for offers that I own
-    const { data } = await supabase
-      .from('requests')
-      .select('id, note, status, created_at, offer_id, requester_profile_id, offers!inner(id, title, owner_id)')
-      .eq('offers.owner_id', userId)
-      .order('created_at', { ascending: false })
-    setReceived((data ?? []) as any)
+  async function markOne(id: string) {
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read_at: new Date().toISOString() })
+      .eq('id', id)
+    if (error) setStatus(`Error: ${error.message}`)
+    await load()
+    announceChange()
   }
 
-  async function loadSent(userId: string) {
-    const { data } = await supabase
-      .from('requests')
-      .select('id, note, status, created_at, offer_id, requester_profile_id, offers(id, title)')
-      .eq('requester_profile_id', userId)
-      .order('created_at', { ascending: false })
-    setSent((data ?? []) as any)
-  }
-
-  async function respond(id: string, to: 'accepted' | 'declined') {
-    if (!uid) return
-    setStatus(`Updating…`)
-    const { error } = await supabase.from('requests').update({ status: to }).eq('id', id)
-    if (error) {
-      setStatus(`Error: ${error.message}`)
-    } else {
-      setStatus(`Marked as ${to}.`)
-      await Promise.all([loadReceived(uid), loadSent(uid)])
-    }
+  async function markAll() {
+    setStatus('Marking all read…')
+    const { error } = await supabase.rpc('mark_all_notifications_read')
+    if (error) setStatus(`Error: ${error.message}`)
+    else setStatus('')
+    await load()
+    announceChange()
   }
 
   return (
     <section className="space-y-4">
-      <h2 className="text-2xl font-bold">Inbox</h2>
-      <div className="flex gap-3 text-sm">
-        <button
-          className={`underline ${tab === 'received' ? 'font-semibold' : ''}`}
-          onClick={() => setTab('received')}
-        >
-          Received
-        </button>
-        <button
-          className={`underline ${tab === 'sent' ? 'font-semibold' : ''}`}
-          onClick={() => setTab('sent')}
-        >
-          Sent
-        </button>
+      <h2 className="text-2xl font-bold">Notifications</h2>
+      <div className="flex items-center gap-2">
+        <button onClick={markAll} className="rounded border px-3 py-1 text-sm">Mark all read</button>
+        {status && <span className="text-sm">{status}</span>}
       </div>
 
-      {status && <p className="text-sm">{status}</p>}
-
-      {tab === 'received' ? (
-        received.length === 0 ? (
-          <p>No requests received yet.</p>
-        ) : (
-          <div className="space-y-3">
-            {received.map(r => (
-              <div key={r.id} className="rounded border p-3 bg-white">
-                <div className="text-sm">
-                  <span className="font-semibold">{r.offers?.title}</span>
-                  <span className="ml-2 text-xs px-2 py-1 rounded bg-gray-200">{r.status}</span>
-                </div>
-                <p className="text-sm mt-1">Note: {r.note}</p>
-                <div className="mt-2 flex gap-2">
-                  <button
-                    disabled={r.status !== 'pending'}
-                    className="rounded border px-3 py-2 text-sm disabled:opacity-50"
-                    onClick={() => respond(r.id, 'accepted')}
-                  >
-                    Accept
+      {loading ? <p>Loading…</p> : (
+        <div className="space-y-2">
+          {items.map(n => (
+            <div key={n.id} className={`rounded border p-3 ${n.read_at ? 'opacity-60' : ''}`}>
+              <div className="flex items-center justify-between">
+                <strong className="text-sm">
+                  {n.type === 'request_received' && 'You received a new request'}
+                  {n.type === 'request_accepted' && 'Your request was accepted'}
+                  {n.type === 'request_declined' && 'Your request was declined'}
+                  {!['request_received','request_accepted','request_declined'].includes(n.type) && n.type}
+                </strong>
+                {!n.read_at && (
+                  <button onClick={() => markOne(n.id)} className="rounded border px-2 py-1 text-xs">
+                    Mark read
                   </button>
-                  <button
-                    disabled={r.status !== 'pending'}
-                    className="rounded border px-3 py-2 text-sm disabled:opacity-50"
-                    onClick={() => respond(r.id, 'declined')}
-                  >
-                    Decline
-                  </button>
+                )}
+              </div>
+              <div className="mt-1 text-xs text-gray-600">
+                {new Date(n.created_at).toLocaleString()}
+              </div>
+              {n.data?.offer_id && (
+                <div className="mt-2">
+                  <Link href={`/offers`} className="underline text-sm">View offer</Link>
                 </div>
-              </div>
-            ))}
-          </div>
-        )
-      ) : sent.length === 0 ? (
-        <p>You haven’t sent any requests yet.</p>
-      ) : (
-        <div className="space-y-3">
-          {sent.map(r => (
-            <div key={r.id} className="rounded border p-3 bg-white">
-              <div className="text-sm">
-                <span className="font-semibold">{r.offers?.title}</span>
-                <span className="ml-2 text-xs px-2 py-1 rounded bg-gray-200">{r.status}</span>
-              </div>
-              <p className="text-sm mt-1">Your note: {r.note}</p>
+              )}
             </div>
           ))}
+          {items.length === 0 && <p className="text-sm text-gray-600">No notifications.</p>}
         </div>
       )}
     </section>

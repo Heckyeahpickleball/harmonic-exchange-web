@@ -1,128 +1,146 @@
-// /app/sign-in/page.tsx
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
+import Link from 'next/link'
+
+type Mode = 'signin' | 'signup' | 'link' | 'phone'
 
 export default function SignInPage() {
-  const [mode, setMode] = useState<'email' | 'phone'>('email')
+  const [mode, setMode] = useState<Mode>('signin')
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [phone, setPhone] = useState('')
-  const [smsSent, setSmsSent] = useState(false)
-  const [smsCode, setSmsCode] = useState('')
   const [status, setStatus] = useState('')
+  const [alreadySignedIn, setAlreadySignedIn] = useState(false)
 
-  async function signInWithEmail(e: React.FormEvent) {
+  useEffect(() => {
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      setAlreadySignedIn(!!session)
+    })()
+  }, [])
+
+  async function handleSignIn(e: React.FormEvent) {
     e.preventDefault()
-    try {
-      setStatus('Sending magic link…')
-      // start clean just in case
-      await supabase.auth.signOut()
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          shouldCreateUser: true,
-          emailRedirectTo: `${location.origin}/auth/callback`, // IMPORTANT
-        },
-      })
-      setStatus(error ? `Error: ${error.message}` : 'Check your email for a magic link (open it in the SAME browser).')
-    } catch (err: any) {
-      setStatus(`Error: ${err.message ?? String(err)}`)
-    }
+    setStatus('Signing in…')
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    setStatus(error ? `Error: ${error.message}` : 'Signed in! Redirecting…')
+    if (!error) window.location.href = '/profile'
   }
 
-  async function sendSms(e: React.FormEvent) {
+  async function handleSignUp(e: React.FormEvent) {
     e.preventDefault()
-    try {
-      setStatus('Sending SMS code…')
-      const { error } = await supabase.auth.signInWithOtp({
-        phone,
-        options: { shouldCreateUser: true },
-      })
-      if (error) throw error
-      setSmsSent(true)
-      setStatus('Code sent! Enter it below.')
-    } catch (err: any) {
-      setStatus(`Error: ${err.message ?? String(err)}`)
-    }
+    setStatus('Creating account…')
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: `${location.origin}/auth/callback` }
+    })
+    if (error) setStatus(`Error: ${error.message}`)
+    else setStatus('Check your email to confirm your account.')
   }
 
-  async function verifySms(e: React.FormEvent) {
+  async function handleMagicLink(e: React.FormEvent) {
     e.preventDefault()
-    try {
-      setStatus('Verifying…')
-      const { data, error } = await supabase.auth.verifyOtp({
-        phone,
-        token: smsCode,
-        type: 'sms',
-      })
-      if (error) throw error
-      if (data?.session) {
-        setStatus('Signed in! Redirecting…')
-        location.replace('/profile')
-        return
-      }
-      setStatus('Could not verify code. Try again.')
-    } catch (err: any) {
-      setStatus(`Error: ${err.message ?? String(err)}`)
-    }
+    setStatus('Sending magic link…')
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: `${location.origin}/auth/callback` }
+    })
+    setStatus(error ? `Error: ${error.message}` : 'Check your email for a magic link.')
+  }
+
+  async function handlePhone(e: React.FormEvent) {
+    e.preventDefault()
+    setStatus('Sending SMS code…')
+    const { error } = await supabase.auth.signInWithOtp({ phone })
+    setStatus(error ? `Error: ${error.message}` : 'Check your SMS for the code.')
+  }
+
+  async function sendResetLink() {
+    if (!email) { setStatus('Enter your email first.'); return }
+    setStatus('Sending password reset link…')
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${location.origin}/auth/callback?type=recovery`
+    })
+    setStatus(error ? `Error: ${error.message}` : 'Check your email for a reset link.')
   }
 
   return (
-    <section className="max-w-md space-y-4">
+    <section className="max-w-md space-y-6">
       <h2 className="text-2xl font-bold">Sign In</h2>
 
-      <div className="flex gap-2 text-sm">
-        <button className={`underline ${mode === 'email' ? 'font-semibold' : ''}`} onClick={() => { setMode('email'); setStatus('') }}>Email</button>
-        <button className={`underline ${mode === 'phone' ? 'font-semibold' : ''}`} onClick={() => { setMode('phone'); setStatus('') }}>Phone</button>
-      </div>
-
-      {mode === 'email' ? (
-        <form onSubmit={signInWithEmail} className="space-y-2">
-          <input
-            type="email"
-            required
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded border p-2"
-          />
-          <button type="submit" className="rounded bg-black px-4 py-2 text-white">Send Magic Link</button>
-        </form>
-      ) : (
-        <>
-          {!smsSent ? (
-            <form onSubmit={sendSms} className="space-y-2">
-              <input
-                type="tel"
-                required
-                placeholder="+16135550123"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="w-full rounded border p-2"
-              />
-              <button type="submit" className="rounded bg-black px-4 py-2 text-white">Send SMS Code</button>
-            </form>
-          ) : (
-            <form onSubmit={verifySms} className="space-y-2">
-              <input
-                type="text"
-                inputMode="numeric"
-                pattern="\d*"
-                required
-                placeholder="Enter 6-digit code"
-                value={smsCode}
-                onChange={(e) => setSmsCode(e.target.value)}
-                className="w-full rounded border p-2 tracking-widest"
-              />
-              <button type="submit" className="rounded bg-black px-4 py-2 text-white">Verify &amp; Sign In</button>
-            </form>
-          )}
-        </>
+      {alreadySignedIn && (
+        <div className="rounded border p-3 space-x-2">
+          <span>You’re already signed in.</span>
+          <Link href="/profile" className="underline">Go to Profile</Link>
+          <button
+            className="ml-2 rounded border px-2 py-1 text-sm"
+            onClick={async () => { await supabase.auth.signOut(); location.reload() }}
+          >
+            Sign Out
+          </button>
+        </div>
       )}
 
-      {status && <p className="text-sm text-gray-700">{status}</p>}
-      <p className="text-xs text-gray-500">After login, use the Profile link in the header.</p>
+      <div className="flex gap-3 text-sm">
+        <button className={`underline ${mode==='signin'?'font-semibold':''}`} onClick={() => setMode('signin')}>Email + Password</button>
+        <button className={`underline ${mode==='signup'?'font-semibold':''}`} onClick={() => setMode('signup')}>Create account</button>
+        <button className={`underline ${mode==='link'?'font-semibold':''}`} onClick={() => setMode('link')}>Email Link</button>
+        <button className={`underline ${mode==='phone'?'font-semibold':''}`} onClick={() => setMode('phone')}>Phone</button>
+      </div>
+
+      {mode === 'signin' && (
+        <form onSubmit={handleSignIn} className="space-y-2">
+          <input
+            type="email" required placeholder="you@example.com"
+            value={email} onChange={e=>setEmail(e.target.value)}
+            className="w-full rounded border p-2" />
+          <input
+            type="password" required placeholder="Your password"
+            value={password} onChange={e=>setPassword(e.target.value)}
+            className="w-full rounded border p-2" />
+          <div className="flex items-center justify-between">
+            <button type="submit" className="rounded bg-black px-4 py-2 text-white">Sign in</button>
+            <button type="button" onClick={sendResetLink} className="text-xs underline">Forgot password?</button>
+          </div>
+        </form>
+      )}
+
+      {mode === 'signup' && (
+        <form onSubmit={handleSignUp} className="space-y-2">
+          <input type="email" required placeholder="you@example.com"
+            value={email} onChange={e=>setEmail(e.target.value)}
+            className="w-full rounded border p-2" />
+          <input type="password" required placeholder="Create a password"
+            value={password} onChange={e=>setPassword(e.target.value)}
+            className="w-full rounded border p-2" />
+          <button type="submit" className="rounded bg-black px-4 py-2 text-white">Create account</button>
+          <p className="text-xs text-gray-600">If email confirmation is enabled, you’ll get a link before you can sign in.</p>
+        </form>
+      )}
+
+      {mode === 'link' && (
+        <form onSubmit={handleMagicLink} className="space-y-2">
+          <input type="email" required placeholder="you@example.com"
+            value={email} onChange={e=>setEmail(e.target.value)}
+            className="w-full rounded border p-2" />
+          <button type="submit" className="rounded bg-black px-4 py-2 text-white">Send Magic Link</button>
+        </form>
+      )}
+
+      {mode === 'phone' && (
+        <form onSubmit={handlePhone} className="space-y-2">
+          <input type="tel" required placeholder="+16135550123"
+            value={phone} onChange={e=>setPhone(e.target.value)}
+            className="w-full rounded border p-2" />
+          <button type="submit" className="rounded bg-black px-4 py-2 text-white">Send SMS Code</button>
+        </form>
+      )}
+
+      {status && <p className="text-sm">{status}</p>}
+      <p className="text-xs text-gray-500">Sessions persist — you won’t need to log in every visit.</p>
     </section>
   )
 }
