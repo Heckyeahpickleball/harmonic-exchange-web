@@ -15,11 +15,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AuthInit />
         <header className="flex items-center justify-between px-6 py-4">
           <h1 className="font-semibold">Harmonic Exchange</h1>
-          <nav className="flex gap-4 text-sm">
+          <nav className="flex flex-wrap gap-4 text-sm">
             <Link href="/">Home</Link>
             <Link href="/offers">Browse</Link>
             <Link href="/offers/new">New Offer</Link>
             <Link href="/offers/mine">My Offers</Link>
+            <Link href="/inbox">Inbox</Link>
             <Link href="/sign-in">Sign In</Link>
             <Link href="/profile">Profile</Link>
           </nav>
