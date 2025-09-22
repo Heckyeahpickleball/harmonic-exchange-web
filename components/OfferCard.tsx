@@ -73,3 +73,8 @@ export default function OfferCard({
           className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
         >
           View & Request
+        </Link>
+      </div>
+    </div>
+  )
+}
