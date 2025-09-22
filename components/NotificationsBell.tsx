@@ -1,80 +1,80 @@
-'use client';
+'use client'
 
-import Link from 'next/link';
-import { useEffect, useState, useCallback } from 'react';
-import { RealtimeChannel } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabaseClient';
+import Link from 'next/link'
+import { useEffect, useState } from 'react'
+import type { Session } from '@supabase/supabase-js'
+import { supabase } from '@/lib/supabaseClient'
 
 export default function NotificationsBell() {
-  const [count, setCount] = useState<number>(0);
-  const [ready, setReady] = useState(false);
+  const [session, setSession] = useState<Session | null>(null)
+  const [count, setCount] = useState<number>(0)
+  const [ready, setReady] = useState(false)
 
-  const loadCount = useCallback(async () => {
-    const { data: userRes } = await supabase.auth.getUser();
-    const userId = userRes?.user?.id;
-    if (!userId) {
-      setCount(0);
-      setReady(true);
-      return;
-    }
-
-    const { count } = await supabase
-      .from('notifications')
-      .select('id', { count: 'exact', head: true })
-      .eq('profile_id', userId)
-      .is('read_at', null);
-
-    setCount(count ?? 0);
-    setReady(true);
-  }, []);
-
+  // initial session + first count
   useEffect(() => {
-    // initial load
-    void loadCount();
+    let mounted = true
 
-    let channel: RealtimeChannel | null = null;
-    let cancelled = false;
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!mounted) return
+      setSession(data.session ?? null)
+      setReady(true)
+      const uid = data.session?.user?.id
+      if (uid) await refreshCount(uid)
+    })
 
-    (async () => {
-      const { data: userRes } = await supabase.auth.getUser();
-      const userId = userRes?.user?.id;
-      if (!userId || cancelled) return;
-
-      channel = supabase
-        .channel('notif_bell')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'notifications',
-            filter: `profile_id=eq.${userId}`,
-          },
-          () => void loadCount()
-        );
-
-      // subscribe without returning the promise
-      void channel.subscribe();
-    })();
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
+      setSession(sess)
+      if (sess?.user) refreshCount(sess.user.id)
+      else setCount(0)
+    })
 
     return () => {
-      cancelled = true;
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
-    };
-  }, [loadCount]);
+      mounted = false
+      sub.subscription.unsubscribe()
+    }
+  }, [])
 
-  if (!ready) return <span />;
+  async function refreshCount(userId: string) {
+    const { count } = await supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('profile_id', userId)
+      .is('read_at', null)
+    setCount(count ?? 0)
+  }
+
+  // realtime + polling fallback
+  useEffect(() => {
+    const uid = session?.user?.id
+    if (!uid) return
+
+    const channel = supabase
+      .channel('notifications-bell')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notifications', filter: `profile_id=eq.${uid}` },
+        () => refreshCount(uid)
+      )
+      .subscribe()
+
+    const timer = setInterval(() => refreshCount(uid), 20000)
+
+    return () => {
+      supabase.removeChannel(channel)
+      clearInterval(timer)
+    }
+  }, [session?.user?.id])
+
+  if (!ready) return <span />
 
   return (
-    <Link href="/notifications" className="relative inline-block" aria-label="Notifications">
-      <span title="Notifications">🔔</span>
+    <Link href="/notifications" className="relative inline-block" aria-label="Notifications" title="Notifications">
+      <span>🔔</span>
       {count > 0 && (
-        <span className="absolute -right-2 -top-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-semibold text-white">
-          {count}
+        <span className="absolute -right-2 -top-2 rounded-full bg-orange-400 text-white text-[10px] leading-none px-1.5 py-0.5">
+          {Math.min(count, 9)}
         </span>
       )}
     </Link>
-  );
+  )
 }
