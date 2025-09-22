@@ -62,7 +62,7 @@ export default function TagMultiSelect({
 
   return (
     <div>
-      <div className="flex flex-wrap gap-2 mb-2">
+      <div className="mb-2 flex flex-wrap gap-2">
         {value.map(t => (
           <span
             key={t.id}

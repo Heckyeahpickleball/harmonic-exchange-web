@@ -3,23 +3,12 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
-import OfferCard from '@/components/OfferCard'
+import OfferCard, { type OfferRow } from '@/components/OfferCard'
 import TagMultiSelect from '@/components/TagMultiSelect'
 import { fetchAllTags, type Tag } from '@/lib/tags'
 
-type OfferRow = {
-  id: string
-  title: string
-  offer_type: string
-  is_online: boolean
-  city: string | null
-  country: string | null
-  // denormalized
-  tags?: string[]
-}
-
 const TYPES = ['all types', 'product', 'service', 'time', 'knowledge', 'other'] as const
-type TypeFilter = typeof TYPES[number]
+type TypeFilter = (typeof TYPES)[number]
 
 export default function BrowseOffersPage() {
   const [q, setQ] = useState('')
@@ -40,9 +29,6 @@ export default function BrowseOffersPage() {
   async function load() {
     setLoading(true)
     try {
-      const baseCols =
-        'id,title,offer_type,is_online,city,country,offer_tags(tag_id,tags(name))'
-      // When filtering by tags, we use inner join to restrict rows; otherwise left join to include all
       const join = tagIds.length ? 'offer_tags!inner' : 'offer_tags'
       let query = supabase
         .from('offers')
@@ -59,24 +45,31 @@ export default function BrowseOffersPage() {
       const { data, error } = await query
       if (error) throw error
 
-      // Deduplicate (inner join can return multiple rows per offer)
+      // Deduplicate when inner-joining tags
       const map = new Map<string, OfferRow>()
-      for (const row of data as any[]) {
-        const ex = map.get(row.id) ?? {
+      for (const row of (data as any[]) ?? []) {
+        const existing = map.get(row.id) ?? {
           id: row.id,
           title: row.title,
           offer_type: row.offer_type,
           is_online: row.is_online,
           city: row.city,
           country: row.country,
-          tags: [] as string[],
+          tags: [] as { id: number; name: string }[],
         }
-        const tagList: string[] =
-          (row.offer_tags ?? []).map((ot: any) => ot?.tags?.name).filter(Boolean)
-        ex.tags = Array.from(new Set([...(ex.tags ?? []), ...tagList]))
-        map.set(row.id, ex)
+        const rowTags: { id: number; name: string }[] = (row.offer_tags ?? [])
+          .map((ot: any) => ({ id: ot?.tag_id, name: ot?.tags?.name }))
+          .filter((t: any) => t.id && t.name)
+
+        // merge and unique by id
+        const merged = [...(existing.tags ?? []), ...rowTags].reduce(
+          (acc, t) => (acc.some(x => x.id === t.id) ? acc : acc.concat(t)),
+          [] as { id: number; name: string }[]
+        )
+        existing.tags = merged
+        map.set(row.id, existing)
       }
-      setOffers([...map.values()])
+      setOffers(Array.from(map.values()))
     } catch (e) {
       console.error(e)
     } finally {
@@ -84,13 +77,11 @@ export default function BrowseOffersPage() {
     }
   }
 
+  // initial + on filter change
   useEffect(() => {
-    // load on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // Reload when filters change (debounce text a bit)
   useEffect(() => {
     const t = setTimeout(load, 200)
     return () => clearTimeout(t)
@@ -115,7 +106,9 @@ export default function BrowseOffersPage() {
           className="rounded border p-2"
         >
           {TYPES.map(t => (
-            <option key={t} value={t}>{t}</option>
+            <option key={t} value={t}>
+              {t}
+            </option>
           ))}
         </select>
 
@@ -128,16 +121,20 @@ export default function BrowseOffersPage() {
         />
 
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={onlineOnly} onChange={e => setOnlineOnly(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={onlineOnly}
+            onChange={e => setOnlineOnly(e.target.checked)}
+          />
           Online only
         </label>
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-1">Filter by Tags</label>
+        <label className="mb-1 block text-sm font-medium">Filter by Tags</label>
         <TagMultiSelect
           allTags={allTags}
-          value={selectedTags.filter(t => t.id > 0)} // filter-only uses existing tags
+          value={selectedTags.filter(t => t.id > 0)}
           onChange={setSelectedTags}
           allowCreate={false}
           placeholder="Type to search tags, press Enter to add…"
