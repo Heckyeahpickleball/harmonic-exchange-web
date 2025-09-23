@@ -1,12 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true,
-
-  // Put Turbopack config at the TOP LEVEL, not under `experimental`
-  turbopack: {
-    // Point to this project so the right package-lock is used
-    root: __dirname,
+  experimental: {
+    // silence the “multiple lockfiles” warning locally
+    turbopack: {
+      root: __dirname,
+    },
   },
+  // (optional) tighten headers or images domains later
 };
 
 export default nextConfig;

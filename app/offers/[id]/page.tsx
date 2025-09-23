@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
+type SimpleTag = { id: number; name: string };
+
 type OfferRow = {
   id: string;
   owner_id: string;
@@ -15,10 +17,15 @@ type OfferRow = {
   country: string | null;
   images: string[] | null;
   status: 'active' | 'paused' | 'archived' | 'blocked';
-  created_at: string; // ✅ include this so TS is happy
+  created_at: string;
+  tags?: SimpleTag[];
 };
 
-export default function OfferDetailPage({ params }: { params: { id: string } }) {
+export default function OfferDetailPage({
+  params,
+}: {
+  params: { id: string };
+}) {
   const id = params.id;
 
   const [offer, setOffer] = useState<OfferRow | null>(null);
@@ -31,19 +38,52 @@ export default function OfferDetailPage({ params }: { params: { id: string } }) 
     let cancelled = false;
 
     (async () => {
+      setLoading(true);
+
       const { data, error } = await supabase
         .from('offers')
         .select(
-          'id, owner_id, title, description, offer_type, is_online, city, country, images, status, created_at'
+          // pull the offer and (optionally) nested tags
+          'id, owner_id, title, description, offer_type, is_online, city, country, images, status, created_at, offer_tags ( tags ( id, name ) )'
         )
         .eq('id', id)
         .single();
 
-      if (!cancelled) {
-        if (error) setMsg(error.message);
-        setOffer((data ?? null) as OfferRow | null);
-        setLoading(false);
+      if (cancelled) return;
+
+      if (error) {
+        setMsg(error.message);
+        setOffer(null);
+      } else if (data) {
+        // tolerant mapping of nested tags without importing any global Tag type
+        const raw = data as any;
+        const tags: SimpleTag[] =
+          (raw.offer_tags ?? [])
+            .map((x: any) => x?.tags)
+            .filter((t: any) => t && typeof t.id === 'number' && typeof t.name === 'string')
+            .map((t: any) => ({ id: t.id as number, name: t.name as string })) ?? [];
+
+        const mapped: OfferRow = {
+          id: raw.id,
+          owner_id: raw.owner_id,
+          title: raw.title,
+          description: raw.description ?? null,
+          offer_type: raw.offer_type,
+          is_online: !!raw.is_online,
+          city: raw.city ?? null,
+          country: raw.country ?? null,
+          images: Array.isArray(raw.images) ? (raw.images as string[]) : [],
+          status: raw.status,
+          created_at: raw.created_at,
+          tags,
+        };
+
+        setOffer(mapped);
+      } else {
+        setOffer(null);
       }
+
+      setLoading(false);
     })();
 
     return () => {
@@ -59,7 +99,7 @@ export default function OfferDetailPage({ params }: { params: { id: string } }) 
     setMsg('');
 
     const { data: userRes } = await supabase.auth.getUser();
-    if (!userRes.user) {
+    if (!userRes?.user) {
       setMsg('Please sign in first.');
       setSending(false);
       return;
@@ -102,15 +142,48 @@ export default function OfferDetailPage({ params }: { params: { id: string } }) 
     );
   }
 
-  return (
-    <section className="max-w-3xl space-y-3">
-      <h2 className="text-2xl font-bold">{offer.title}</h2>
-      <p className="text-sm text-gray-600">
-        {offer.offer_type} • {offer.is_online ? 'Online' : [offer.city, offer.country].filter(Boolean).join(', ')}
-      </p>
-      {offer.description && <p>{offer.description}</p>}
+  const images: string[] = offer.images ?? [];
+  const hero = images[0] ?? null;
+  const location = offer.is_online ? 'Online' : [offer.city, offer.country].filter(Boolean).join(', ');
 
-      <form onSubmit={submitRequest} className="mt-4 space-y-2">
+  return (
+    <section className="max-w-3xl">
+      <Link href="/offers" className="text-sm underline">
+        &larr; Back to Browse
+      </Link>
+
+      <h1 className="mt-2 text-2xl font-bold">{offer.title}</h1>
+      <div className="text-sm text-gray-600">
+        {offer.offer_type} • {location || '—'}
+      </div>
+
+      {hero && (
+        <div className="mt-4 overflow-hidden rounded border">
+          <img src={hero} alt={offer.title} className="h-72 w-full object-cover" />
+        </div>
+      )}
+
+      {images.length > 1 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {images.slice(1).map((u) => (
+            <img key={u} src={u} alt="thumbnail" className="h-16 w-16 rounded object-cover border" />
+          ))}
+        </div>
+      )}
+
+      {offer.tags && offer.tags.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1">
+          {offer.tags.map((t) => (
+            <span key={t.id} className="rounded bg-gray-100 px-2 py-[2px] text-[11px]">
+              {t.name}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {offer.description && <p className="mt-4 whitespace-pre-wrap">{offer.description}</p>}
+
+      <form onSubmit={submitRequest} className="mt-6">
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
@@ -118,18 +191,12 @@ export default function OfferDetailPage({ params }: { params: { id: string } }) 
           placeholder="Tell the owner what you need…"
           className="w-full rounded border p-2 min-h-[90px]"
         />
-        <button disabled={sending} className="rounded bg-black px-4 py-2 text-white">
-          {sending ? 'Sending…' : 'Request this Offer'}
+        <button disabled={sending} className="mt-3 rounded bg-black px-4 py-2 text-white disabled:opacity-60">
+          {sending ? 'Sending…' : 'Send request'}
         </button>
       </form>
 
-      {msg && <p className="text-sm">{msg}</p>}
-
-      <div className="pt-2">
-        <Link href="/offers" className="underline text-sm">
-          ← Back to Browse
-        </Link>
-      </div>
+      {msg && <p className="mt-2 text-sm">{msg}</p>}
     </section>
   );
 }
