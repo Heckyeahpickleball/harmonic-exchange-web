@@ -1,12 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    // silence the “multiple lockfiles” warning locally
-    turbopack: {
-      root: __dirname,
-    },
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'czgcbiysnpdeewqdyvdp.supabase.co',
+        pathname: '/storage/v1/object/public/**',
+      },
+    ],
   },
-  // (optional) tighten headers or images domains later
+  experimental: { turbo: { rules: {} } },
 };
-
 export default nextConfig;
