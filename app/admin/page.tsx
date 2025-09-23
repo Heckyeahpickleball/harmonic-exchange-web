@@ -1,30 +1,28 @@
+/* HX v0.5 — 2025-09-21 — Admin panel with write-through audit log
+   File: app/admin/page.tsx
+*/
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
 type Profile = {
   id: string
   display_name: string
-  role: string
-  status: string
-  area_city: string | null
-  area_country: string | null
+  role: 'user' | 'moderator' | 'admin'
+  status: 'active' | 'suspended'
   created_at: string
 }
 
-type Offer = {
+type OfferRow = {
   id: string
-  owner_id: string
   title: string
-  status: string
-  city: string | null
-  country: string | null
-  is_online: boolean
+  owner_id: string
+  status: 'active' | 'paused' | 'archived' | 'blocked'
   created_at: string
 }
 
-type Audit = {
+type AdminAction = {
   id: string
   admin_profile_id: string
   action: string
@@ -32,182 +30,216 @@ type Audit = {
   target_id: string
   reason: string | null
   created_at: string
+  admin_name?: string
+  target_label?: string
 }
 
 type Tab = 'users' | 'offers' | 'audit'
 
 export default function AdminPage() {
+  const [me, setMe] = useState<Profile | null>(null)
   const [tab, setTab] = useState<Tab>('users')
-  const [meIsAdmin, setMeIsAdmin] = useState<boolean>(false)
-  const [loading, setLoading] = useState(true)
-  const [status, setStatus] = useState('')
-
   const [users, setUsers] = useState<Profile[]>([])
-  const [offers, setOffers] = useState<Offer[]>([])
-  const [audits, setAudits] = useState<Audit[]>([])
+  const [offers, setOffers] = useState<OfferRow[]>([])
+  const [audit, setAudit] = useState<AdminAction[]>([])
+  const [loading, setLoading] = useState(false)
+  const [msg, setMsg] = useState('')
 
+  // Load current user + gate
   useEffect(() => {
-    (async () => {
-      setLoading(true)
-
-      // Require login
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        window.location.replace('/sign-in')
-        return
-      }
-
-      // Check admin
-      const { data: isAdmin, error: adminErr } = await supabase.rpc('is_admin')
-      if (adminErr || !isAdmin) {
-        setMeIsAdmin(false)
-        setLoading(false)
-        setStatus('You are not authorized to view this page.')
-        return
-      }
-      setMeIsAdmin(true)
-
-      // Load data
-      await Promise.all([loadUsers(), loadOffers(), loadAudit()])
-      setLoading(false)
+    ;(async () => {
+      const { data: auth } = await supabase.auth.getUser()
+      const uid = auth.user?.id
+      if (!uid) { setMe(null); return }
+      const { data } = await supabase
+        .from('profiles')
+        .select('id,display_name,role,status,created_at')
+        .eq('id', uid)
+        .single()
+      setMe(data as Profile)
     })()
   }, [])
 
-  async function loadUsers() {
-    const { data } = await supabase
-      .from('profiles')
-      .select('id,display_name,role,status,area_city,area_country,created_at')
-      .order('created_at', { ascending: false })
-      .limit(100)
-    setUsers((data ?? []) as Profile[])
-  }
+  const isAdmin = me?.role === 'admin' || me?.role === 'moderator'
 
-  async function loadOffers() {
-    const { data } = await supabase
-      .from('offers')
-      .select('id,owner_id,title,status,city,country,is_online,created_at')
-      .order('created_at', { ascending: false })
-      .limit(100)
-    setOffers((data ?? []) as Offer[])
-  }
+  useEffect(() => {
+    if (!isAdmin) return
+    ;(async () => {
+      setLoading(true)
+      setMsg('')
+      try {
+        if (tab === 'users') {
+          const { data } = await supabase
+            .from('profiles')
+            .select('id,display_name,role,status,created_at')
+            .order('created_at', { ascending: false })
+            .limit(200)
+          setUsers((data || []) as Profile[])
+        } else if (tab === 'offers') {
+          const { data } = await supabase
+            .from('offers')
+            .select('id,title,owner_id,status,created_at')
+            .order('created_at', { ascending: false })
+            .limit(200)
+          setOffers((data || []) as OfferRow[])
+        } else if (tab === 'audit') {
+          // Pull recent 200 actions
+          const { data: rows } = await supabase
+            .from('admin_actions')
+            .select('id,admin_profile_id,action,target_type,target_id,reason,created_at')
+            .order('created_at', { ascending: false })
+            .limit(200)
 
-  async function loadAudit() {
-    const { data } = await supabase
-      .from('admin_actions')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(100)
-    setAudits((data ?? []) as Audit[])
-  }
+          const acts = (rows || []) as AdminAction[]
 
-  // ---------- actions ----------
-  async function suspendUser(id: string) {
-    setStatus('Suspending…')
-    const { error } = await supabase.rpc('admin_user_set_status', {
-      p_profile_id: id,
-      p_status: 'suspended',
-      p_reason: 'Manual action',
-    })
-    if (error) setStatus(`Error: ${error.message}`)
-    else {
-      await loadUsers()
-      await loadAudit()
-      setStatus('User suspended.')
+          // Resolve admin names
+          const adminIds = Array.from(new Set(acts.map(a => a.admin_profile_id)))
+          let adminMap = new Map<string, string>()
+          if (adminIds.length) {
+            const { data: admins } = await supabase
+              .from('profiles')
+              .select('id,display_name')
+              .in('id', adminIds)
+            for (const a of (admins || []) as Profile[]) adminMap.set(a.id, a.display_name)
+          }
+
+          // Resolve target labels (profiles/offers)
+          const profileTargets = acts.filter(a => a.target_type === 'profile').map(a => a.target_id)
+          const offerTargets = acts.filter(a => a.target_type === 'offer').map(a => a.target_id)
+
+          const [profileRows, offerRows] = await Promise.all([
+            profileTargets.length
+              ? supabase.from('profiles').select('id,display_name').in('id', profileTargets)
+              : Promise.resolve({ data: [] as any[] }),
+            offerTargets.length
+              ? supabase.from('offers').select('id,title').in('id', offerTargets)
+              : Promise.resolve({ data: [] as any[] })
+          ])
+
+          const profMap = new Map<string, string>()
+          for (const p of ((profileRows as any).data || []) as any[]) profMap.set(p.id, p.display_name)
+          const offerMap = new Map<string, string>()
+          for (const o of ((offerRows as any).data || []) as any[]) offerMap.set(o.id, o.title)
+
+          setAudit(
+            acts.map(a => ({
+              ...a,
+              admin_name: adminMap.get(a.admin_profile_id) || a.admin_profile_id,
+              target_label:
+                a.target_type === 'profile'
+                  ? (profMap.get(a.target_id) || a.target_id)
+                  : (offerMap.get(a.target_id) || a.target_id),
+            }))
+          )
+        }
+      } catch (e: any) {
+        console.error(e)
+        setMsg(e?.message ?? 'Failed to load admin data.')
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [isAdmin, tab])
+
+  const usersVisible = useMemo(() => users, [users])
+  const offersVisible = useMemo(() => offers, [offers])
+
+  // ===== Actions =====
+  async function setUserStatus(id: string, next: 'active' | 'suspended') {
+    setMsg('')
+    const reason = prompt(`Reason for setting status to ${next}? (optional)`) || null
+    try {
+      await supabase.rpc('admin_user_set_status', { p_profile_id: id, p_status: next, p_reason: reason })
+      setUsers(prev => prev.map(u => (u.id === id ? { ...u, status: next } : u)))
+    } catch (e: any) {
+      console.error(e); setMsg(e?.message ?? 'Failed to set status')
     }
   }
 
-  async function unsuspendUser(id: string) {
-    setStatus('Unsuspending…')
-    const { error } = await supabase.rpc('admin_user_set_status', {
-      p_profile_id: id,
-      p_status: 'active',
-      p_reason: 'Manual action',
-    })
-    if (error) setStatus(`Error: ${error.message}`)
-    else {
-      await loadUsers()
-      await loadAudit()
-      setStatus('User active.')
+  async function setUserRole(id: string, next: 'user' | 'moderator' | 'admin') {
+    setMsg('')
+    const reason = prompt(`Reason for changing role to ${next}? (optional)`) || null
+    try {
+      await supabase.rpc('admin_user_set_role', { p_profile_id: id, p_role: next, p_reason: reason })
+      setUsers(prev => prev.map(u => (u.id === id ? { ...u, role: next } : u)))
+    } catch (e: any) {
+      console.error(e); setMsg(e?.message ?? 'Failed to change role')
     }
   }
 
-  async function blockOffer(id: string) {
-    setStatus('Blocking offer…')
-    const { error } = await supabase.rpc('admin_offer_set_status', {
-      p_offer_id: id,
-      p_status: 'blocked',
-      p_reason: 'Manual action',
-    })
-    if (error) setStatus(`Error: ${error.message}`)
-    else {
-      await loadOffers()
-      await loadAudit()
-      setStatus('Offer blocked.')
+  async function setOfferStatus(id: string, next: OfferRow['status']) {
+    setMsg('')
+    const reason = prompt(`Reason for setting offer status to ${next}? (optional)`) || null
+    try {
+      await supabase.rpc('admin_offer_set_status', { p_offer_id: id, p_status: next, p_reason: reason })
+      setOffers(prev => prev.map(o => (o.id === id ? { ...o, status: next } : o)))
+    } catch (e: any) {
+      console.error(e); setMsg(e?.message ?? 'Failed to set offer status')
     }
   }
 
-  async function unblockOffer(id: string) {
-    setStatus('Unblocking offer…')
-    const { error } = await supabase.rpc('admin_offer_set_status', {
-      p_offer_id: id,
-      p_status: 'active',
-      p_reason: 'Manual action',
-    })
-    if (error) setStatus(`Error: ${error.message}`)
-    else {
-      await loadOffers()
-      await loadAudit()
-      setStatus('Offer active.')
-    }
-  }
-
-  if (loading) return <p>Loading…</p>
-  if (!meIsAdmin) return <p className="text-sm text-red-700">{status || 'Not authorized.'}</p>
+  if (!me) return <section className="max-w-5xl"><p>Loading…</p></section>
+  if (!isAdmin) return <section className="max-w-5xl"><h2 className="text-2xl font-bold">Admin</h2><p>You don’t have access.</p></section>
 
   return (
-    <section className="space-y-4">
-      <h2 className="text-2xl font-bold">Admin</h2>
-
-      <div className="flex gap-3 text-sm">
-        <button className={`underline ${tab==='users'?'font-semibold':''}`} onClick={() => setTab('users')}>Users</button>
-        <button className={`underline ${tab==='offers'?'font-semibold':''}`} onClick={() => setTab('offers')}>Offers</button>
-        <button className={`underline ${tab==='audit'?'font-semibold':''}`} onClick={() => setTab('audit')}>Audit</button>
+    <section className="max-w-5xl space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold">Admin</h2>
+        <div className="flex gap-2">
+          {(['users','offers','audit'] as Tab[]).map(t => (
+            <button key={t}
+              onClick={() => setTab(t)}
+              className={`rounded border px-3 py-1 text-sm ${tab===t?'bg-gray-900 text-white':'hover:bg-gray-50'}`}>
+              {t[0].toUpperCase() + t.slice(1)}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {status && <p className="text-sm">{status}</p>}
+      {msg && <p className="text-sm text-amber-700">{msg}</p>}
+      {loading && <p className="text-sm text-gray-600">Loading…</p>}
 
       {tab === 'users' && (
         <div className="overflow-auto rounded border">
-          <table className="w-full text-sm">
+          <table className="min-w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <th className="p-2 text-left">Name</th>
-                <th className="p-2 text-left">Role</th>
-                <th className="p-2 text-left">Status</th>
-                <th className="p-2 text-left">Location</th>
-                <th className="p-2 text-left">Joined</th>
-                <th className="p-2">Actions</th>
+                <th className="px-3 py-2 text-left">Name</th>
+                <th className="px-3 py-2 text-left">Role</th>
+                <th className="px-3 py-2 text-left">Status</th>
+                <th className="px-3 py-2 text-left">Joined</th>
+                <th className="px-3 py-2 text-left">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {users.map(u => (
+              {usersVisible.map(u => (
                 <tr key={u.id} className="border-t">
-                  <td className="p-2">{u.display_name}</td>
-                  <td className="p-2">{u.role}</td>
-                  <td className="p-2">{u.status}</td>
-                  <td className="p-2">{[u.area_city, u.area_country].filter(Boolean).join(', ')}</td>
-                  <td className="p-2">{new Date(u.created_at).toLocaleDateString()}</td>
-                  <td className="p-2 text-center">
-                    {u.status !== 'suspended' ? (
-                      <button onClick={() => suspendUser(u.id)} className="rounded border px-2 py-1">Suspend</button>
-                    ) : (
-                      <button onClick={() => unsuspendUser(u.id)} className="rounded border px-2 py-1">Unsuspend</button>
-                    )}
+                  <td className="px-3 py-2">{u.display_name}</td>
+                  <td className="px-3 py-2">{u.role}</td>
+                  <td className="px-3 py-2">{u.status}</td>
+                  <td className="px-3 py-2">{new Date(u.created_at).toLocaleDateString()}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-2">
+                      {u.status === 'active' ? (
+                        <button onClick={() => setUserStatus(u.id, 'suspended')} className="rounded border px-2 py-1 hover:bg-gray-50">Suspend</button>
+                      ) : (
+                        <button onClick={() => setUserStatus(u.id, 'active')} className="rounded border px-2 py-1 hover:bg-gray-50">Unsuspend</button>
+                      )}
+                      {u.role !== 'user' && (
+                        <button onClick={() => setUserRole(u.id, 'user')} className="rounded border px-2 py-1 hover:bg-gray-50">Demote to user</button>
+                      )}
+                      {u.role !== 'moderator' && (
+                        <button onClick={() => setUserRole(u.id, 'moderator')} className="rounded border px-2 py-1 hover:bg-gray-50">Promote to mod</button>
+                      )}
+                      {u.role !== 'admin' && (
+                        <button onClick={() => setUserRole(u.id, 'admin')} className="rounded border px-2 py-1 hover:bg-gray-50">Promote to admin</button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
-              {users.length === 0 && (
-                <tr><td className="p-3 text-center text-gray-500" colSpan={6}>No users</td></tr>
+              {usersVisible.length === 0 && (
+                <tr><td className="px-3 py-4 text-gray-600" colSpan={5}>No users.</td></tr>
               )}
             </tbody>
           </table>
@@ -216,38 +248,45 @@ export default function AdminPage() {
 
       {tab === 'offers' && (
         <div className="overflow-auto rounded border">
-          <table className="w-full text-sm">
+          <table className="min-w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <th className="p-2 text-left">Title</th>
-                <th className="p-2 text-left">Status</th>
-                <th className="p-2 text-left">Location</th>
-                <th className="p-2 text-left">Owner ID</th>
-                <th className="p-2 text-left">Created</th>
-                <th className="p-2">Actions</th>
+                <th className="px-3 py-2 text-left">Title</th>
+                <th className="px-3 py-2 text-left">Owner</th>
+                <th className="px-3 py-2 text-left">Status</th>
+                <th className="px-3 py-2 text-left">Created</th>
+                <th className="px-3 py-2 text-left">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {offers.map(o => (
+              {offersVisible.map(o => (
                 <tr key={o.id} className="border-t">
-                  <td className="p-2">{o.title}</td>
-                  <td className="p-2">{o.status}</td>
-                  <td className="p-2">
-                    {o.is_online ? 'Online' : [o.city, o.country].filter(Boolean).join(', ')}
-                  </td>
-                  <td className="p-2">{o.owner_id.slice(0, 8)}…</td>
-                  <td className="p-2">{new Date(o.created_at).toLocaleDateString()}</td>
-                  <td className="p-2 text-center">
-                    {o.status !== 'blocked' ? (
-                      <button onClick={() => blockOffer(o.id)} className="rounded border px-2 py-1">Block</button>
-                    ) : (
-                      <button onClick={() => unblockOffer(o.id)} className="rounded border px-2 py-1">Unblock</button>
-                    )}
+                  <td className="px-3 py-2">{o.title}</td>
+                  <td className="px-3 py-2">{o.owner_id}</td>
+                  <td className="px-3 py-2">{o.status}</td>
+                  <td className="px-3 py-2">{new Date(o.created_at).toLocaleDateString()}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-2">
+                      {o.status !== 'blocked' ? (
+                        <button onClick={() => setOfferStatus(o.id, 'blocked')} className="rounded border px-2 py-1 hover:bg-gray-50">Block</button>
+                      ) : (
+                        <button onClick={() => setOfferStatus(o.id, 'active')} className="rounded border px-2 py-1 hover:bg-gray-50">Unblock</button>
+                      )}
+                      {o.status !== 'paused' && (
+                        <button onClick={() => setOfferStatus(o.id, 'paused')} className="rounded border px-2 py-1 hover:bg-gray-50">Pause</button>
+                      )}
+                      {o.status !== 'archived' && (
+                        <button onClick={() => setOfferStatus(o.id, 'archived')} className="rounded border px-2 py-1 hover:bg-gray-50">Archive</button>
+                      )}
+                      {o.status !== 'active' && (
+                        <button onClick={() => setOfferStatus(o.id, 'active')} className="rounded border px-2 py-1 hover:bg-gray-50">Set Active</button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
-              {offers.length === 0 && (
-                <tr><td className="p-3 text-center text-gray-500" colSpan={6}>No offers</td></tr>
+              {offersVisible.length === 0 && (
+                <tr><td className="px-3 py-4 text-gray-600" colSpan={5}>No offers.</td></tr>
               )}
             </tbody>
           </table>
@@ -255,33 +294,20 @@ export default function AdminPage() {
       )}
 
       {tab === 'audit' && (
-        <div className="overflow-auto rounded border">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="p-2 text-left">When</th>
-                <th className="p-2 text-left">Admin</th>
-                <th className="p-2 text-left">Action</th>
-                <th className="p-2 text-left">Target</th>
-                <th className="p-2 text-left">Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {audits.map(a => (
-                <tr key={a.id} className="border-t">
-                  <td className="p-2">{new Date(a.created_at).toLocaleString()}</td>
-                  <td className="p-2">{a.admin_profile_id.slice(0,8)}…</td>
-                  <td className="p-2">{a.action}</td>
-                  <td className="p-2">{a.target_type}:{' '}{a.target_id.slice(0,8)}…</td>
-                  <td className="p-2">{a.reason ?? ''}</td>
-                </tr>
-              ))}
-              {audits.length === 0 && (
-                <tr><td className="p-3 text-center text-gray-500" colSpan={5}>No audit entries</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <ul className="space-y-3">
+          {audit.map(a => (
+            <li key={a.id} className="rounded border p-3 text-sm">
+              <div className="text-xs text-gray-500">{new Date(a.created_at).toLocaleString()}</div>
+              <div className="mt-1">
+                <span className="font-medium">{a.admin_name || a.admin_profile_id}</span>{' '}
+                performed <span className="font-mono">{a.action}</span> on{' '}
+                <span className="font-mono">{a.target_type}</span> “{a.target_label || a.target_id}”
+                {a.reason ? <> — <span className="italic text-gray-700">“{a.reason}”</span></> : null}
+              </div>
+            </li>
+          ))}
+          {audit.length === 0 && <p className="text-sm text-gray-600">No admin actions yet.</p>}
+        </ul>
       )}
     </section>
   )

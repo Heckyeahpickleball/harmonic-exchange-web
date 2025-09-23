@@ -1,4 +1,6 @@
-// app/offers/mine/page.tsx
+/* HX v0.6 — 2025-09-21 — My Offers selects images for thumbnails
+   File: app/offers/mine/page.tsx
+*/
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
@@ -32,15 +34,12 @@ export default function MyOffersPage() {
       setLoading(true)
       try {
         const { data: { user } } = await supabase.auth.getUser()
-        if (!user) {
-          setOffers([])
-          return
-        }
+        if (!user) { setOffers([]); return }
 
         const { data, error } = await supabase
           .from('offers')
           .select(`
-            id, title, offer_type, is_online, city, country, status,
+            id, title, offer_type, is_online, city, country, images, status,
             offer_tags(tag_id, tags:tags(id,name))
           `)
           .eq('owner_id', user.id)
@@ -48,7 +47,6 @@ export default function MyOffersPage() {
 
         if (error) throw error
 
-        // Fold tags and shape rows
         const map = new Map<string, MyOffer>()
         for (const row of (data as any[]) ?? []) {
           const base: MyOffer = map.get(row.id) ?? {
@@ -59,6 +57,7 @@ export default function MyOffersPage() {
             city: row.city,
             country: row.country,
             status: row.status as Status,
+            images: row.images ?? [],
             tags: [] as { id: number; name: string }[],
           }
           const rowTags = (row.offer_tags ?? [])
@@ -81,78 +80,32 @@ export default function MyOffersPage() {
   async function setStatus(id: string, next: Status) {
     setMsg('')
     try {
-      // optimistic UI
       setOffers(prev => prev.map(o => (o.id === id ? { ...o, status: next } : o)))
-
-      const { error } = await supabase
-        .from('offers')
-        .update({ status: next })
-        .eq('id', id)
-        .select('id')
-        .single()
-
-      if (error) {
-        // revert on error
-        setOffers(prev => prev.map(o => (o.id === id ? { ...o, status: (o.status as Status) } : o)))
-        throw error
-      }
+      const { error } = await supabase.from('offers').update({ status: next }).eq('id', id).select('id').single()
+      if (error) throw error
     } catch (e: any) {
-      console.error(e)
-      setMsg(e?.message ?? 'Could not update status.')
+      console.error(e); setMsg(e?.message ?? 'Could not update status.')
     }
   }
 
   function ActionButtons({ o }: { o: MyOffer }) {
-    if (o.status === 'blocked') {
-      return <div className="text-xs text-red-600">Blocked by admin</div>
-    }
+    if (o.status === 'blocked') return <div className="text-xs text-red-600">Blocked by admin</div>
     return (
       <div className="flex flex-wrap gap-2">
         {o.status === 'active' && (
           <>
-            <button
-              onClick={() => setStatus(o.id, 'paused')}
-              className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
-            >
-              Pause
-            </button>
-            <button
-              onClick={() => {
-                if (confirm('Archive this offer? It will be hidden from Browse. You can resume later.')) {
-                  setStatus(o.id, 'archived')
-                }
-              }}
-              className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
-            >
-              Archive
-            </button>
+            <button onClick={() => setStatus(o.id, 'paused')} className="rounded border px-2 py-1 text-sm hover:bg-gray-50">Pause</button>
+            <button onClick={() => { if (confirm('Archive this offer?')) setStatus(o.id, 'archived') }} className="rounded border px-2 py-1 text-sm hover:bg-gray-50">Archive</button>
           </>
         )}
         {o.status === 'paused' && (
           <>
-            <button
-              onClick={() => setStatus(o.id, 'active')}
-              className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
-            >
-              Resume
-            </button>
-            <button
-              onClick={() => {
-                if (confirm('Archive this offer?')) setStatus(o.id, 'archived')
-              }}
-              className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
-            >
-              Archive
-            </button>
+            <button onClick={() => setStatus(o.id, 'active')} className="rounded border px-2 py-1 text-sm hover:bg-gray-50">Resume</button>
+            <button onClick={() => { if (confirm('Archive this offer?')) setStatus(o.id, 'archived') }} className="rounded border px-2 py-1 text-sm hover:bg-gray-50">Archive</button>
           </>
         )}
         {o.status === 'archived' && (
-          <button
-            onClick={() => setStatus(o.id, 'active')}
-            className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
-          >
-            Unarchive (Resume)
-          </button>
+          <button onClick={() => setStatus(o.id, 'active')} className="rounded border px-2 py-1 text-sm hover:bg-gray-50">Unarchive (Resume)</button>
         )}
       </div>
     )
@@ -165,14 +118,9 @@ export default function MyOffersPage() {
         <a href="/offers/new" className="rounded border px-3 py-1 text-sm hover:bg-gray-50">New Offer</a>
       </div>
 
-      {/* Status filters */}
       <div className="flex flex-wrap gap-2">
         {STATUS_FILTERS.map(s => (
-          <button
-            key={s.id}
-            onClick={() => setFilter(s)}
-            className={`rounded px-3 py-1 text-sm border ${filter.id === s.id ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'}`}
-          >
+          <button key={s.id} onClick={() => setFilter(s)} className={`rounded px-3 py-1 text-sm border ${filter.id === s.id ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'}`}>
             {s.label}
           </button>
         ))}
@@ -186,12 +134,7 @@ export default function MyOffersPage() {
           <div key={o.id} className="space-y-2">
             <OfferCard offer={o} />
             <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-600">
-                Status:{' '}
-                <strong className={o.status === 'active' ? 'text-green-700' : 'text-gray-800'}>
-                  {o.status}
-                </strong>
-              </span>
+              <span className="text-xs text-gray-600">Status: <strong className={o.status === 'active' ? 'text-green-700' : 'text-gray-800'}>{o.status}</strong></span>
               <ActionButtons o={o} />
             </div>
           </div>
