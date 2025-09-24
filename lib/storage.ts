@@ -1,11 +1,10 @@
-/* HX v0.8 — 2025-09-23 — storage helpers for offer images
+/* HX v0.8.1 — 2025-09-23 — storage helpers for offer images
    File: lib/storage.ts
 
    Notes:
-   - Preserves existing public API:
-       - export const OFFER_BUCKET
-       - export async function uploadOfferImages(userId, files): Promise<string[]>
-   - Adds delete helpers + validation (type/size).
+   - Keeps existing public API.
+   - Adds robust URL→path parsing that works with both
+     `/storage/v1/object/public/...` and `/object/public/...`.
 */
 
 import { supabase } from '@/lib/supabaseClient';
@@ -16,19 +15,14 @@ export const OFFER_BUCKET = 'offer-images';
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const MAX_BYTES = 5 * 1024 * 1024;
 
-/** Map MIME → preferred extension (fallback to jpg) */
+/** Map MIME → preferred extension (fallback to jpg). */
 function extFromMime(mime: string | undefined): string {
   switch (mime) {
-    case 'image/jpeg':
-      return 'jpg';
-    case 'image/png':
-      return 'png';
-    case 'image/webp':
-      return 'webp';
-    case 'image/gif':
-      return 'gif';
-    default:
-      return 'jpg';
+    case 'image/jpeg': return 'jpg';
+    case 'image/png':  return 'png';
+    case 'image/webp': return 'webp';
+    case 'image/gif':  return 'gif';
+    default:           return 'jpg';
   }
 }
 
@@ -40,20 +34,19 @@ export function publicUrlFromPath(path: string): string {
 
 /**
  * Extract the storage object path from a Supabase public URL.
- * Handles optional querystrings (e.g., signed URLs) as well.
- * Example:
- *  https://xyz.supabase.co/storage/v1/object/public/offer-images/USER/uuid.jpg
- *   → USER/uuid.jpg
+ * Works with:
+ *  - https://.../storage/v1/object/public/offer-images/USER/uuid.jpg
+ *  - https://.../object/public/offer-images/USER/uuid.jpg
+ * Handles optional querystrings (e.g., signed URLs).
+ * Returns: "USER/uuid.jpg" or null if not parsable.
  */
 export function objectPathFromPublicUrl(url: string): string | null {
-  const m = url.match(/\/storage\/v1\/object\/public\/offer-images\/(.+?)(?:\?|$)/);
+  const m = url.match(/\/(?:storage\/v1\/)?object\/public\/offer-images\/(.+?)(?:\?|$)/);
   return m?.[1] ?? null;
 }
 
 /** Back-compat alias (in case other code references the old name). */
-export function storagePathFromPublicUrl(url: string): string | null {
-  return objectPathFromPublicUrl(url);
-}
+export const storagePathFromPublicUrl = objectPathFromPublicUrl;
 
 /** Upload selected image Files to `${userId}/${uuid}.{ext}` and return public URLs. */
 export async function uploadOfferImages(userId: string, files: File[]): Promise<string[]> {
@@ -64,7 +57,7 @@ export async function uploadOfferImages(userId: string, files: File[]): Promise<
   const errors: string[] = [];
 
   for (const file of files) {
-    // Basic validation (keeps UX friendly, avoids weird uploads)
+    // Validation
     if (file.size > MAX_BYTES) {
       errors.push(`${file.name}: too large (max ${Math.round(MAX_BYTES / (1024 * 1024))}MB)`);
       continue;
@@ -77,11 +70,13 @@ export async function uploadOfferImages(userId: string, files: File[]): Promise<
     const ext = extFromMime(file.type || undefined);
     const key = `${userId}/${crypto.randomUUID()}.${ext}`;
 
-    const { error } = await supabase.storage.from(OFFER_BUCKET).upload(key, file, {
-      cacheControl: '3600',
-      upsert: false,
-      contentType: file.type || `image/${ext}`,
-    });
+    const { error } = await supabase.storage
+      .from(OFFER_BUCKET)
+      .upload(key, file, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: file.type || `image/${ext}`,
+      });
 
     if (error) {
       errors.push(`${file.name}: ${error.message}`);
@@ -107,11 +102,9 @@ export async function removeOfferImageByUrl(url: string): Promise<void> {
   if (error) throw error;
 }
 
-/** Optional: batch delete helper. */
+/** Batch delete helper (array of public URLs). */
 export async function removeOfferImagesByUrls(urls: string[]): Promise<void> {
-  const paths = urls
-    .map(objectPathFromPublicUrl)
-    .filter((p): p is string => Boolean(p));
+  const paths = urls.map(objectPathFromPublicUrl).filter((p): p is string => Boolean(p));
   if (paths.length === 0) return;
   const { error } = await supabase.storage.from(OFFER_BUCKET).remove(paths);
   if (error) throw error;

@@ -2,24 +2,16 @@
 
 import { useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { OFFER_BUCKET } from '@/lib/storage';
+import { uploadOfferImages, removeOfferImageByUrl } from '@/lib/storage';
 
 type Props = {
   value: string[];
   onChange: (urls: string[]) => void;
-  max?: number; // default 4
+  max?: number;              // default 4
+  deleteOnRemove?: boolean;  // default true
 };
 
-function toStoragePath(publicUrl: string) {
-  // public URL looks like:
-  // https://<proj>.supabase.co/storage/v1/object/public/<bucket>/<path>
-  const marker = `/storage/v1/object/public/${OFFER_BUCKET}/`;
-  const i = publicUrl.indexOf(marker);
-  if (i === -1) return null;
-  return publicUrl.slice(i + marker.length);
-}
-
-export default function UploadImages({ value, onChange, max = 4 }: Props) {
+export default function UploadImages({ value, onChange, max = 4, deleteOnRemove = true }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,8 +31,7 @@ export default function UploadImages({ value, onChange, max = 4 }: Props) {
       const remaining = Math.max(0, max - (value?.length ?? 0));
       const chosen = files.slice(0, remaining);
 
-      // Upload using existing helper
-      const { uploadOfferImages } = await import('@/lib/storage');
+      // Upload using storage helper
       const urls = await uploadOfferImages(userId, chosen);
       onChange([...(value || []), ...urls]);
     } catch (err: any) {
@@ -53,17 +44,18 @@ export default function UploadImages({ value, onChange, max = 4 }: Props) {
 
   async function removeUrl(u: string) {
     setError(null);
-    onChange((value || []).filter((v) => v !== u)); // optimistic
 
-    const path = toStoragePath(u);
-    if (!path) return; // not a public bucket URL
+    // Optimistic UI update
+    const prev = value || [];
+    onChange(prev.filter((v) => v !== u));
+
+    if (!deleteOnRemove) return;
 
     try {
-      const { error } = await supabase.storage.from(OFFER_BUCKET).remove([path]);
-      if (error) throw error;
+      await removeOfferImageByUrl(u);
     } catch (err: any) {
       // Revert if delete fails
-      onChange([...(value || []), u]);
+      onChange(prev);
       setError(err?.message || 'Could not delete image from storage.');
     }
   }
@@ -99,6 +91,7 @@ export default function UploadImages({ value, onChange, max = 4 }: Props) {
                 onClick={() => removeUrl(u)}
                 className="absolute right-1 top-1 rounded bg-black/70 px-1 text-xs text-white"
                 aria-label="Remove image"
+                disabled={busy}
               >
                 ✕
               </button>
