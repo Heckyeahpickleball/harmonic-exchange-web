@@ -1,15 +1,23 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import Image from 'next/image';
-import { uploadOfferImages } from '@/lib/storage';
 import { supabase } from '@/lib/supabaseClient';
+import { OFFER_BUCKET } from '@/lib/storage';
 
 type Props = {
   value: string[];
   onChange: (urls: string[]) => void;
   max?: number; // default 4
 };
+
+function toStoragePath(publicUrl: string) {
+  // public URL looks like:
+  // https://<proj>.supabase.co/storage/v1/object/public/<bucket>/<path>
+  const marker = `/storage/v1/object/public/${OFFER_BUCKET}/`;
+  const i = publicUrl.indexOf(marker);
+  if (i === -1) return null;
+  return publicUrl.slice(i + marker.length);
+}
 
 export default function UploadImages({ value, onChange, max = 4 }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -23,8 +31,7 @@ export default function UploadImages({ value, onChange, max = 4 }: Props) {
 
     try {
       setBusy(true);
-      const { data: u, error: authErr } = await supabase.auth.getUser();
-      if (authErr) throw authErr;
+      const { data: u } = await supabase.auth.getUser();
       const userId = u.user?.id;
       if (!userId) throw new Error('Please sign in.');
 
@@ -32,11 +39,8 @@ export default function UploadImages({ value, onChange, max = 4 }: Props) {
       const remaining = Math.max(0, max - (value?.length ?? 0));
       const chosen = files.slice(0, remaining);
 
-      if (chosen.length === 0) {
-        setError(`You can upload up to ${max} images.`);
-        return;
-      }
-
+      // Upload using existing helper
+      const { uploadOfferImages } = await import('@/lib/storage');
       const urls = await uploadOfferImages(userId, chosen);
       onChange([...(value || []), ...urls]);
     } catch (err: any) {
@@ -47,8 +51,21 @@ export default function UploadImages({ value, onChange, max = 4 }: Props) {
     }
   }
 
-  function removeUrl(u: string) {
-    onChange((value || []).filter((v) => v !== u));
+  async function removeUrl(u: string) {
+    setError(null);
+    onChange((value || []).filter((v) => v !== u)); // optimistic
+
+    const path = toStoragePath(u);
+    if (!path) return; // not a public bucket URL
+
+    try {
+      const { error } = await supabase.storage.from(OFFER_BUCKET).remove([path]);
+      if (error) throw error;
+    } catch (err: any) {
+      // Revert if delete fails
+      onChange([...(value || []), u]);
+      setError(err?.message || 'Could not delete image from storage.');
+    }
   }
 
   return (
@@ -69,21 +86,19 @@ export default function UploadImages({ value, onChange, max = 4 }: Props) {
         <div className="flex flex-wrap gap-3">
           {value.map((u) => (
             <div key={u} className="relative">
-              {/* Use next/image but bypass remote domain config via `unoptimized` */}
-              <Image
+              <img
                 src={u}
                 alt="Offer image"
                 width={120}
                 height={90}
-                unoptimized
-                className="rounded border object-cover"
+                className="h-[90px] w-[120px] rounded border object-cover"
+                loading="lazy"
               />
               <button
                 type="button"
                 onClick={() => removeUrl(u)}
                 className="absolute right-1 top-1 rounded bg-black/70 px-1 text-xs text-white"
                 aria-label="Remove image"
-                title="Remove"
               >
                 ✕
               </button>

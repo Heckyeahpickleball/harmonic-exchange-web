@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import OfferCard, { type OfferRow } from '@/components/OfferCard';
+import TagMultiSelect from '@/components/TagMultiSelect';
 
 /** Keep offer_type strongly typed so filters are easy */
 type OfferType = 'product' | 'service' | 'time' | 'knowledge' | 'other';
@@ -21,6 +22,8 @@ type DbOfferRow = {
   offer_tags: { tags: { id: number; name: string } | null }[] | null;
 };
 
+type Tag = { id: number; name: string };
+
 export default function BrowseOffersPage() {
   const [rows, setRows] = useState<OfferRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,6 +34,12 @@ export default function BrowseOffersPage() {
   const [city, setCity] = useState('');
   const [onlineOnly, setOnlineOnly] = useState(false);
 
+  // tag filter
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+  const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
+  const [loadingTags, setLoadingTags] = useState(true);
+
+  // Load offers
   useEffect(() => {
     let cancelled = false;
 
@@ -66,12 +75,33 @@ export default function BrowseOffersPage() {
         city: r.city,
         country: r.country,
         images: r.images ?? null,
-        tags: (r.offer_tags ?? [])
-          .flatMap((ot) => (ot?.tags ? [ot.tags] : [])),
+        tags: (r.offer_tags ?? []).flatMap((ot) => (ot?.tags ? [ot.tags] : [])),
       }));
 
       setRows(mapped);
       setLoading(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load all tags for the picker
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      setLoadingTags(true);
+      const { data, error } = await supabase
+        .from('tags')
+        .select('id, name')
+        .order('name', { ascending: true });
+
+      if (!cancelled) {
+        if (!error && data) setAllTags(data as Tag[]);
+        setLoadingTags(false);
+      }
     })();
 
     return () => {
@@ -85,9 +115,18 @@ export default function BrowseOffersPage() {
       if (onlineOnly && !o.is_online) return false;
       if (city && (o.city || '').toLowerCase() !== city.toLowerCase()) return false;
       if (q && !o.title.toLowerCase().includes(q.toLowerCase())) return false;
+
+      // Tag AND filter: every selected tag must exist on the offer
+      if (selectedTags.length > 0) {
+        const tagIds = new Set((o.tags ?? []).map((t) => t.id));
+        for (const t of selectedTags) {
+          if (!tagIds.has(t.id)) return false;
+        }
+      }
+
       return true;
     });
-  }, [rows, type, onlineOnly, city, q]);
+  }, [rows, type, onlineOnly, city, q, selectedTags]);
 
   return (
     <section className="max-w-5xl">
@@ -129,6 +168,19 @@ export default function BrowseOffersPage() {
           />
           Online only
         </label>
+      </div>
+
+      {/* Tag filter */}
+      <div className="mb-4">
+        <TagMultiSelect
+          allTags={allTags}
+          value={selectedTags}
+          onChange={setSelectedTags}
+          placeholder={loadingTags ? 'Loading tags…' : 'Type to search tags, press Enter to add…'}
+        />
+        <p className="mt-1 text-xs text-gray-500">
+          Filter results: offers must contain all selected tags.
+        </p>
       </div>
 
       {loading ? (
