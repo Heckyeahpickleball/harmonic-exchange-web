@@ -3,6 +3,7 @@
 */
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import OfferCard, { type OfferRow } from '@/components/OfferCard'
@@ -92,6 +93,12 @@ export default function MyOffersPage() {
     if (o.status === 'blocked') return <div className="text-xs text-red-600">Blocked by admin</div>
     return (
       <div className="flex flex-wrap gap-2">
+        <Link
+          href={`/offers/${o.id}/edit`}
+          className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
+        >
+          Edit
+        </Link>
         {o.status === 'active' && (
           <>
             <button onClick={() => setStatus(o.id, 'paused')} className="rounded border px-2 py-1 text-sm hover:bg-gray-50">Pause</button>

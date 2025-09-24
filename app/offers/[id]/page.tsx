@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 type SimpleTag = { id: number; name: string };
@@ -21,12 +22,8 @@ type OfferRow = {
   tags?: SimpleTag[];
 };
 
-export default function OfferDetailPage({
-  params,
-}: {
-  params: { id: string };
-}) {
-  const id = params.id;
+export default function OfferDetailPage() {
+  const { id } = useParams<{ id: string }>();
 
   const [offer, setOffer] = useState<OfferRow | null>(null);
   const [note, setNote] = useState('');
@@ -43,7 +40,6 @@ export default function OfferDetailPage({
       const { data, error } = await supabase
         .from('offers')
         .select(
-          // pull the offer and (optionally) nested tags
           'id, owner_id, title, description, offer_type, is_online, city, country, images, status, created_at, offer_tags ( tags ( id, name ) )'
         )
         .eq('id', id)
@@ -55,7 +51,6 @@ export default function OfferDetailPage({
         setMsg(error.message);
         setOffer(null);
       } else if (data) {
-        // tolerant mapping of nested tags without importing any global Tag type
         const raw = data as any;
         const tags: SimpleTag[] =
           (raw.offer_tags ?? [])
