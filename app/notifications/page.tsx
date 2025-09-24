@@ -1,200 +1,163 @@
-'use client';
+'use client'
 
-import { useEffect, useState, useCallback } from 'react';
-import Link from 'next/link';
-import { supabase } from '@/lib/supabaseClient';
+import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import { supabase } from '@/lib/supabaseClient'
 
-type NotificationType =
-  | 'request_received'
-  | 'request_accepted'
-  | 'request_declined'
-  | 'request_fulfilled'
-  | 'system';
-
-type NotifData = {
-  offer_id?: string;
-  request_id?: string;
-  status?: 'pending' | 'accepted' | 'declined' | 'fulfilled';
-  request_status?: 'pending' | 'accepted' | 'declined' | 'fulfilled';
-  message?: string;
-  [k: string]: unknown;
-};
-
-type NotificationRow = {
-  id: string;
-  profile_id: string;
-  type: NotificationType;
-  data: NotifData;
-  read_at: string | null;
-  created_at: string; // ISO string
-};
+type Row = {
+  id: string
+  profile_id: string
+  type: 'request_received' | 'request_accepted' | 'request_declined' | 'system' | string
+  data: any
+  read_at: string | null
+  created_at: string
+}
 
 export default function NotificationsPage() {
-  const [items, setItems] = useState<NotificationRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    const { data: auth } = await supabase.auth.getUser();
-    const userId = auth?.user?.id;
-    if (!userId) {
-      setItems([]);
-      setLoading(false);
-      return;
-    }
-    const { data, error } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('profile_id', userId)
-      .order('created_at', { ascending: false });
-
-    if (!error && data) setItems(data as NotificationRow[]);
-    setLoading(false);
-  }, []);
+  const [rows, setRows] = useState<Row[]>([])
+  const [loading, setLoading] = useState(true)
+  const [msg, setMsg] = useState('')
 
   useEffect(() => {
-    // initial fetch
-    void load();
+    let mounted = true
+    ;(async () => {
+      setLoading(true)
+      try {
+        const { data: sess } = await supabase.auth.getSession()
+        const uid = sess.session?.user?.id
+        if (!uid) { setRows([]); setLoading(false); return }
 
-    // realtime subscription for this user’s notifications
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-    (async () => {
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth?.user?.id;
-      if (!userId) return;
+        await load(uid)
 
-      channel = supabase
-        .channel('notif_changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'notifications',
-            filter: `profile_id=eq.${userId}`,
-          },
-          () => {
-            // refresh list/count on any insert/update/delete
-            void load();
-          }
-        );
+        // realtime refresh
+        const channel = supabase
+          .channel('notifications-page')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'notifications', filter: `profile_id=eq.${uid}` },
+            () => load(uid)
+          )
+          .subscribe()
 
-      // subscribe (don’t block React)
-      void channel.subscribe();
-    })();
+        if (!mounted) supabase.removeChannel(channel)
+      } catch (e: any) {
+        setMsg(e?.message ?? 'Failed to load notifications.')
+      } finally {
+        setLoading(false)
+      }
+    })()
+    return () => { mounted = false }
+  }, [])
 
-    return () => {
-      if (channel) supabase.removeChannel(channel);
-    };
-  }, [load]);
+  async function load(uid: string) {
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('id, profile_id, type, data, read_at, created_at')
+      .eq('profile_id', uid)
+      .order('created_at', { ascending: false })
+      .limit(200)
+    if (error) throw error
+    setRows((data ?? []) as Row[])
+  }
 
-  const markAllRead = useCallback(async () => {
-    setBusy(true);
-    const { data: auth } = await supabase.auth.getUser();
-    const userId = auth?.user?.id;
-    if (!userId) {
-      setBusy(false);
-      return;
-    }
+  const unread = useMemo(() => rows.filter(r => !r.read_at), [rows])
+  const read = useMemo(() => rows.filter(r => !!r.read_at), [rows])
 
-    // mark unread as read
+  async function markAllRead() {
+    setMsg('')
+    const { data: sess } = await supabase.auth.getSession()
+    const uid = sess.session?.user?.id
+    if (!uid) return
+    const now = new Date().toISOString()
     const { error } = await supabase
       .from('notifications')
-      .update({ read_at: new Date().toISOString() })
+      .update({ read_at: now })
+      .eq('profile_id', uid)
       .is('read_at', null)
-      .eq('profile_id', userId);
+    if (error) { setMsg(error.message); return }
+    setRows(old => old.map(r => (r.read_at ? r : { ...r, read_at: now })))
+  }
 
-    if (!error) {
-      // optimistic UI
-      setItems((prev) => prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })));
-    }
-    setBusy(false);
-  }, []);
+  async function markOneRead(id: string) {
+    const now = new Date().toISOString()
+    setRows(old => old.map(r => (r.id === id ? { ...r, read_at: now } : r)))
+    const { error } = await supabase.from('notifications').update({ read_at: now }).eq('id', id)
+    if (error) setMsg(error.message)
+  }
 
-  function describe(n: NotificationRow): string {
+  function renderText(n: Row) {
+    const offerId = n.data?.offer_id as string | undefined
+    const reqId = n.data?.request_id as string | undefined
+    const message = n.data?.message as string | undefined
+
     switch (n.type) {
       case 'request_received':
-        return 'You received a new request.';
+        return (
+          <>
+            You received a request{offerId && <> for&nbsp;
+              <Link href={`/offers/${offerId}`} className="underline">this offer</Link></>}
+            .
+          </>
+        )
       case 'request_accepted':
-        return 'Your request was accepted.';
+        return (
+          <>
+            Your request was <strong>accepted</strong>
+            {offerId && <> for&nbsp;<Link href={`/offers/${offerId}`} className="underline">this offer</Link></>}.
+          </>
+        )
       case 'request_declined':
-        return 'Your request was declined.';
-      case 'request_fulfilled':
-        return 'Request marked as fulfilled.';
-      case 'system':
-      default: {
-        // Try to infer from payload for legacy "system" rows
-        const status = n.data?.status ?? n.data?.request_status;
-        if (status === 'fulfilled') return 'Request marked as fulfilled.';
-        if (status === 'accepted') return 'Your request was accepted.';
-        if (status === 'declined') return 'Your request was declined.';
-        return n.data?.message ?? 'System notification.';
-      }
+        return (
+          <>
+            Your request was <strong>declined</strong>
+            {offerId && <> for&nbsp;<Link href={`/offers/${offerId}`} className="underline">this offer</Link></>}.
+          </>
+        )
+      default:
+        return message ? message : 'System notification'
     }
   }
 
-  const unreadCount = items.filter((n) => !n.read_at).length;
-
   return (
     <section className="max-w-3xl">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Notifications</h2>
-        <button
-          onClick={markAllRead}
-          disabled={busy || unreadCount === 0}
-          className="rounded border px-3 py-1 text-sm disabled:opacity-50"
-          title={unreadCount ? `Mark ${unreadCount} as read` : 'All caught up'}
-        >
-          {busy ? 'Marking…' : 'Mark all read'}
-        </button>
+        {unread.length > 0 && (
+          <button onClick={markAllRead} className="rounded border px-3 py-1 text-sm hover:bg-gray-50">
+            Mark all read
+          </button>
+        )}
       </div>
 
-      {loading ? (
-        <p>Loading…</p>
-      ) : items.length === 0 ? (
-        <p>No notifications yet.</p>
-      ) : (
-        <ul className="space-y-3">
-          {items.map((n) => {
-            const d: NotifData = n.data ?? {};
-            const offerId = typeof d.offer_id === 'string' ? d.offer_id : undefined;
-            const requestId = typeof d.request_id === 'string' ? d.request_id : undefined;
+      {msg && <p className="mt-2 text-sm text-amber-700">{msg}</p>}
+      {loading && <p className="mt-2 text-sm text-gray-600">Loading…</p>}
 
-            return (
-              <li
-                key={n.id}
-                className={`rounded border p-3 ${!n.read_at ? 'bg-yellow-50' : ''}`}
-              >
-                <div className="text-xs text-gray-500">
-                  {new Date(n.created_at).toLocaleString()}
-                </div>
-
-                <div className="mt-1 text-sm">{describe(n)}</div>
-
-                <div className="mt-2 flex gap-2">
-                  {offerId && (
-                    <Link
-                      href={`/offers/${offerId}`}
-                      className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
-                    >
-                      View offer
-                    </Link>
-                  )}
-                  {(requestId || n.type.startsWith('request_')) && (
-                    <Link
-                      href="/inbox"
-                      className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
-                    >
-                      View request
-                    </Link>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+      {/* Unread first */}
+      {unread.length > 0 && (
+        <div className="mt-4 space-y-2">
+          {unread.map(n => (
+            <div key={n.id} className="rounded border p-3 bg-amber-50">
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-sm">{renderText(n)}</div>
+                <button onClick={() => markOneRead(n.id)} className="text-xs underline">Mark read</button>
+              </div>
+              <div className="mt-1 text-[11px] text-gray-500">{new Date(n.created_at).toLocaleString()}</div>
+            </div>
+          ))}
+        </div>
       )}
+
+      {/* Read */}
+      <div className="mt-6 space-y-2">
+        {read.map(n => (
+          <div key={n.id} className="rounded border p-3">
+            <div className="text-sm">{renderText(n)}</div>
+            <div className="mt-1 text-[11px] text-gray-500">{new Date(n.created_at).toLocaleString()}</div>
+          </div>
+        ))}
+      </div>
+
+      {!loading && rows.length === 0 && <p className="mt-4 text-sm text-gray-600">No notifications yet.</p>}
     </section>
-  );
+  )
 }

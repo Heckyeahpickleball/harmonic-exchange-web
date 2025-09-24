@@ -71,7 +71,7 @@ export default function NotificationsBell() {
     <Link href="/notifications" className="relative inline-block" aria-label="Notifications" title="Notifications">
       <span>🔔</span>
       {count > 0 && (
-        <span className="absolute -right-2 -top-2 rounded-full bg-orange-400 text-white text-[10px] leading-none px-1.5 py-0.5">
+        <span className="absolute -right-2 -top-2 rounded-full bg-orange-500 text-white text-[10px] leading-none px-1.5 py-0.5">
           {Math.min(count, 9)}
         </span>
       )}
