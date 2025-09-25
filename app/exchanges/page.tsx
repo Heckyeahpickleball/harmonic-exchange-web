@@ -269,9 +269,21 @@ function MessageThread({
   );
 }
 
-export default function ExchangesPage() {
+// Safe SearchParams hook: only returns params after mount, avoids SSR/CSR mismatch
+function useSafeSearchParams() {
   const searchParams = useSearchParams();
-  const deepThread = searchParams.get('thread') || undefined;
+  const [params, setParams] = useState<{ thread?: string }>({});
+  useEffect(() => {
+    setParams({
+      thread: searchParams.get('thread') || undefined,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+  return params;
+}
+
+export default function ExchangesPage() {
+  const { thread } = useSafeSearchParams();
 
   const [tab, setTab] = useState<Tab>('received');
   const [items, setItems] = useState<ReqRow[]>([]);
@@ -445,7 +457,7 @@ export default function ExchangesPage() {
                     req={r}
                     me={me}
                     tab={tab}
-                    autoOpen={searchParams.get('thread') === r.id}
+                    autoOpen={thread === r.id}
                   />
                 </div>
 
@@ -508,7 +520,7 @@ export default function ExchangesPage() {
                     req={r}
                     me={me}
                     tab={tab}
-                    autoOpen={searchParams.get('thread') === r.id}
+                    autoOpen={thread === r.id}
                   />
                 </div>
 
