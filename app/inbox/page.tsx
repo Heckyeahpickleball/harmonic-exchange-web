@@ -6,6 +6,10 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
+// Make this page fully dynamic (prevents prerender issues on Vercel)
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 type Status = 'pending' | 'accepted' | 'declined' | 'withdrawn' | 'fulfilled';
 
 type ReqRow = {
@@ -58,7 +62,6 @@ function MessageThread({
 
   // ---------- helpers ----------
   async function countUnreadForThread() {
-    // only notifications that represent *incoming* chat for me
     const { count, error } = await supabase
       .from('notifications')
       .select('id', { count: 'exact', head: true })
@@ -71,7 +74,6 @@ function MessageThread({
   }
 
   async function markThreadRead() {
-    // mark all incoming chat for this thread as read
     await supabase
       .from('notifications')
       .update({ read_at: new Date().toISOString() })
@@ -88,7 +90,6 @@ function MessageThread({
     setLoading(true);
     setErr(null);
     try {
-      // Pull my copy of the thread (RLS: profile_id = me). Include my own 'message' copies and incoming 'message_received'
       const { data, error } = await supabase
         .from('notifications')
         .select('id, created_at, type, data')
@@ -107,7 +108,6 @@ function MessageThread({
       }));
       setMsgs(mapped);
 
-      // when thread view opens, mark unread as read
       await markThreadRead();
     } catch (e: any) {
       console.error(e);
@@ -118,24 +118,20 @@ function MessageThread({
   }
 
   // ---------- effects ----------
-  // fetch unread badge on mount/req change/me change
   useEffect(() => {
     countUnreadForThread().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [req.id, me]);
 
-  // auto-open if unread exists (common pattern in messaging UIs)
   useEffect(() => {
     if (unread > 0) setOpen(true);
   }, [unread]);
 
-  // load messages when opened
   useEffect(() => {
     loadThread();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, req.id, me]);
 
-  // realtime incoming messages for this thread
   useEffect(() => {
     if (!me) return;
 
@@ -151,7 +147,6 @@ function MessageThread({
         },
         (payload) => {
           const n = payload.new as any;
-          // only messages for this request
           if (
             (n.type === 'message' || n.type === 'message_received') &&
             n?.data?.request_id === req.id
@@ -164,7 +159,6 @@ function MessageThread({
             };
             if (open) {
               setMsgs((m) => [...m, msg]);
-              // if it's an incoming one, mark read immediately
               if (n.type === 'message_received') {
                 supabase
                   .from('notifications')
@@ -173,7 +167,6 @@ function MessageThread({
                   .then(() => {});
               }
             } else {
-              // if panel isn't open and it's an incoming message, bump unread badge
               if (n.type === 'message_received') setUnread((u) => u + 1);
             }
           }
@@ -194,7 +187,6 @@ function MessageThread({
     setErr(null);
     setDraft('');
 
-    // optimistic append
     const optimistic: ChatMsg = {
       id: `tmp-${Math.random().toString(36).slice(2)}`,
       created_at: new Date().toISOString(),
@@ -213,21 +205,16 @@ function MessageThread({
 
       const now = new Date().toISOString();
 
-      // insert two rows:
-      // - my local copy as 'message' (so I see it immediately in history)
-      // - the other party gets 'message_received' (this drives their unread/bell)
       const { error } = await supabase.from('notifications').insert([
         { profile_id: me, type: 'message', data: payload, read_at: now },
         { profile_id: otherId, type: 'message_received', data: payload },
       ]);
       if (error) throw error;
 
-      // reload to replace optimistic with real rows
       await loadThread();
     } catch (e: any) {
       console.error(e);
       setErr(e?.message ?? 'Failed to send message.');
-      // revert optimistic append
       setMsgs((m) => m.filter((x) => x.id !== optimistic.id));
       setDraft(text);
     }
@@ -299,7 +286,7 @@ function MessageThread({
 export default function InboxPage() {
   const searchParams = useSearchParams();
 
-  // Read query params AFTER mount to avoid SSR/CSR mismatch (Vercel hydration issue)
+  // Read query params AFTER mount to avoid SSR/CSR mismatch
   const [deepThread, setDeepThread] = useState<string | undefined>(undefined);
   const [tab, setTab] = useState<Tab>('received');
   useEffect(() => {
@@ -331,7 +318,6 @@ export default function InboxPage() {
 
     try {
       if (tab === 'received') {
-        // requests where I am the owner of the target offer
         const { data, error } = await supabase
           .from('requests')
           .select(`
@@ -345,7 +331,6 @@ export default function InboxPage() {
         if (error) throw error;
         setItems((data || []) as unknown as ReqRow[]);
       } else {
-        // requests I sent
         const { data, error } = await supabase
           .from('requests')
           .select(`
@@ -395,7 +380,6 @@ export default function InboxPage() {
   // --- actions (received/sent) ---
   async function setStatus(req: ReqRow, next: Status) {
     setMsg('');
-    // optimistic
     setItems((prev) =>
       prev.map((r) =>
         r.id === req.id ? { ...r, status: next, updated_at: new Date().toISOString() } : r
@@ -411,7 +395,6 @@ export default function InboxPage() {
         .single();
       if (error) throw error;
 
-      // notify the other party
       if (tab === 'received') {
         const requesterId = req.requester_profile_id;
         if (next === 'accepted')
@@ -421,7 +404,6 @@ export default function InboxPage() {
         if (next === 'fulfilled')
           await notify(requesterId, 'request_fulfilled', { request_id: req.id, offer_id: req.offer_id });
       } else if (tab === 'sent') {
-        // if the sender withdraws, ping owner
         const ownerId = req.offers?.owner_id;
         if (next === 'withdrawn' && ownerId)
           await notify(ownerId, 'system', {
@@ -433,7 +415,6 @@ export default function InboxPage() {
     } catch (e: any) {
       console.error(e);
       setMsg(e?.message ?? 'Update failed.');
-      // revert
       setItems((prev) => prev.map((r) => (r.id === req.id ? { ...r, status: req.status } : r)));
     }
   }
@@ -476,7 +457,7 @@ export default function InboxPage() {
                     {new Date(r.created_at).toLocaleString()}
                   </div>
                   <div className="mt-1">
-                    <strong>{r.requester?.display_name ?? 'Someone'}</strong> requested:{' '}
+                    <strong>{r.requester?.display_name ?? 'Someone'}</strong> requested{' '}
                     <Link href={`/offers/${r.offer_id}`} className="underline">
                       {r.offers?.title ?? 'this offer'}
                     </Link>
@@ -486,7 +467,6 @@ export default function InboxPage() {
                     Status: <span className="font-semibold">{r.status}</span>
                   </div>
 
-                  {/* thread */}
                   <MessageThread
                     req={r}
                     me={me}
@@ -551,7 +531,6 @@ export default function InboxPage() {
                     Status: <span className="font-semibold">{r.status}</span>
                   </div>
 
-                  {/* thread */}
                   <MessageThread
                     req={r}
                     me={me}
