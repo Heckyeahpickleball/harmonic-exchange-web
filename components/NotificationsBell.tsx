@@ -1,3 +1,4 @@
+// File: components/NotificationsBell.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -16,7 +17,8 @@ type NotifType =
 type Notif = {
   id: string;
   type: NotifType;
-  data: any; // may contain { offer_id, offer_title, request_id, message, ... }
+  // data may contain: { offer_id, offer_title, request_id, requester_name, message_id, message, sender_name }
+  data: any;
   created_at: string;
   read_at: string | null;
   profile_id: string;
@@ -28,33 +30,29 @@ export default function NotificationsBell() {
   const [rows, setRows] = useState<Notif[]>([]);
   const unread = useMemo(() => rows.filter(r => !r.read_at).length, [rows]);
 
-  // simple title cache so we don't refetch the same offer title
-  const titleCache = useRef<Map<string, string>>(new Map());
+  // caches to avoid repeated fetches
+  const titleCache = useRef<Map<string, string>>(new Map()); // offer_id -> title
+  const requesterCache = useRef<Map<string, string>>(new Map()); // request_id -> requester display name
+  const messageCache = useRef<Map<string, { body: string; request_id: string }>>(new Map()); // message_id -> info
 
-  // ------------- helpers ----------------
+  // ---------- enrichment helpers ----------
 
-  // Enrich any notifications missing data.offer_title (but with data.offer_id)
+  // Add missing offer titles (when we only have offer_id)
   async function enrichOfferTitles(notifs: Notif[]) {
-    const missingIds = Array.from(
+    const missing = Array.from(
       new Set(
         notifs
-          .map(n => n?.data?.offer_title ? null : n?.data?.offer_id)
+          .map(n => (n?.data?.offer_title ? null : n?.data?.offer_id))
           .filter((v): v is string => !!v && !titleCache.current.has(v))
       )
     );
+    if (!missing.length) return;
 
-    if (missingIds.length === 0) return;
-
-    const { data } = await supabase
-      .from('offers')
-      .select('id,title')
-      .in('id', missingIds);
-
+    const { data } = await supabase.from('offers').select('id,title').in('id', missing);
     for (const row of (data || []) as { id: string; title: string }[]) {
       titleCache.current.set(row.id, row.title);
     }
 
-    // patch local rows with titles (if any)
     setRows(prev =>
       prev.map(n => {
         const oid = n?.data?.offer_id as string | undefined;
@@ -62,22 +60,91 @@ export default function NotificationsBell() {
         const t = titleCache.current.get(oid);
         if (!t) return n;
         return { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } };
-    }));
+      })
+    );
+  }
+
+  // Add requester display name for request_received (when we only have request_id)
+  async function enrichRequesterNames(notifs: Notif[]) {
+    const ids = Array.from(
+      new Set(
+        notifs
+          .map(n => (n.type === 'request_received' && !n?.data?.requester_name ? n?.data?.request_id : null))
+          .filter((v): v is string => !!v && !requesterCache.current.has(v))
+      )
+    );
+    if (!ids.length) return;
+
+    const { data } = await supabase
+      .from('requests')
+      .select('id, requester:profiles(id, display_name)')
+      .in('id', ids);
+
+    for (const r of (data || []) as any[]) {
+      requesterCache.current.set(r.id, r.requester?.display_name || 'Someone');
+    }
+
+    setRows(prev =>
+      prev.map(n => {
+        const rid = n?.data?.request_id as string | undefined;
+        if (!rid) return n;
+        const name = requesterCache.current.get(rid);
+        if (!name) return n;
+        return { ...n, data: { ...n.data, requester_name: n.data?.requester_name ?? name } };
+      })
+    );
+  }
+
+  // Add message preview for message_received (when we only have message_id)
+  async function enrichMessagePreviews(notifs: Notif[]) {
+    const ids = Array.from(
+      new Set(
+        notifs
+          .map(n => (n.type === 'message_received' && !n?.data?.message ? n?.data?.message_id : null))
+          .filter((v): v is string => !!v && !messageCache.current.has(v))
+      )
+    );
+    if (!ids.length) return;
+
+    // Keep it simple (avoid FK assumptions): pull body + request_id only
+    const { data } = await supabase
+      .from('request_messages')
+      .select('id, body, request_id')
+      .in('id', ids);
+
+    for (const m of (data || []) as any[]) {
+      messageCache.current.set(m.id, { body: m.body as string, request_id: m.request_id as string });
+    }
+
+    setRows(prev =>
+      prev.map(n => {
+        const mid = n?.data?.message_id as string | undefined;
+        if (!mid) return n;
+        const info = messageCache.current.get(mid);
+        if (!info) return n;
+        return { ...n, data: { ...n.data, message: n.data?.message ?? info.body } };
+      })
+    );
   }
 
   function label(n: Notif): { text: string; href?: string } {
-    const t = n.data?.offer_title;
+    const t = n.data?.offer_title as string | undefined;
+    const reqName = n.data?.requester_name as string | undefined;
+    const body = n.data?.message as string | undefined;
+
     switch (n.type) {
       case 'request_received':
-        return { text: `New request${t ? ` for “${t}”` : ''}`, href: '/inbox' };
+        return { text: `New request${t ? ` for “${t}”` : ''}${reqName ? ` from ${reqName}` : ''}`, href: '/inbox' };
       case 'request_accepted':
         return { text: `Your request was accepted${t ? ` — “${t}”` : ''}`, href: '/inbox' };
       case 'request_declined':
         return { text: `Your request was declined${t ? ` — “${t}”` : ''}`, href: '/inbox' };
       case 'request_fulfilled':
         return { text: `Request marked fulfilled${t ? ` — “${t}”` : ''}`, href: '/inbox' };
-      case 'message_received':
-        return { text: `New message${t ? ` on “${t}”` : ''}`, href: '/inbox' };
+      case 'message_received': {
+        const snip = body ? `: ${body.slice(0, 80)}` : '';
+        return { text: `New message${t ? ` on “${t}”` : ''}${snip}`, href: '/inbox' };
+      }
       default:
         return { text: n.data?.message || 'Update', href: '/inbox' };
     }
@@ -86,29 +153,23 @@ export default function NotificationsBell() {
   async function markAllRead() {
     if (!uid) return;
     const ids = rows.filter(r => !r.read_at).map(r => r.id);
-    if (ids.length === 0) return;
-
-    // Optimistic UI
+    if (!ids.length) return;
     const nowISO = new Date().toISOString();
     setRows(prev => prev.map(r => (ids.includes(r.id) ? { ...r, read_at: nowISO } : r)));
-
-    await supabase
-      .from('notifications')
-      .update({ read_at: nowISO })
-      .in('id', ids);
+    await supabase.from('notifications').update({ read_at: nowISO }).in('id', ids);
   }
 
   async function markOneRead(id: string) {
-    const target = rows.find(r => r.id === id);
-    if (!target || target.read_at) return; // already read
+    const found = rows.find(r => r.id === id);
+    if (!found || found.read_at) return;
     const nowISO = new Date().toISOString();
     setRows(prev => prev.map(r => (r.id === id ? { ...r, read_at: nowISO } : r)));
     await supabase.from('notifications').update({ read_at: nowISO }).eq('id', id);
   }
 
-  // ------------- effects ----------------
+  // ---------- effects ----------
 
-  // Load current user + initial batch + realtime
+  // Load user, pull initial notifications, enrich, wire realtime
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -125,9 +186,13 @@ export default function NotificationsBell() {
 
       const initial = (list || []) as Notif[];
       setRows(initial);
-      enrichOfferTitles(initial).catch(() => { /* non-fatal */ });
 
-      // realtime inserts (new notifications)
+      // fire-and-forget enrichment
+      enrichOfferTitles(initial).catch(() => {});
+      enrichRequesterNames(initial).catch(() => {});
+      enrichMessagePreviews(initial).catch(() => {});
+
+      // realtime: inserts
       const chIns = supabase
         .channel('realtime:notifications:ins')
         .on(
@@ -136,15 +201,17 @@ export default function NotificationsBell() {
           async (payload) => {
             const n = payload.new as Notif;
             setRows(prev => [n, ...prev].slice(0, 50));
-            // try to enrich title for this one
-            if (!n?.data?.offer_title && n?.data?.offer_id) {
-              await enrichOfferTitles([n]);
-            }
+            // opportunistic enrichment for this single item
+            await Promise.allSettled([
+              enrichOfferTitles([n]),
+              enrichRequesterNames([n]),
+              enrichMessagePreviews([n]),
+            ]);
           }
         )
         .subscribe();
 
-      // realtime updates (e.g., read_at from another tab)
+      // realtime: updates (e.g., read_at from another tab)
       const chUpd = supabase
         .channel('realtime:notifications:upd')
         .on(
@@ -164,14 +231,13 @@ export default function NotificationsBell() {
     })();
   }, []);
 
-  // When opening the panel, immediately mark all as read
+  // When opening panel → mark all as read
   async function toggleOpen() {
     setOpen(v => !v);
-    // If currently closed (open === false), we're opening → mark read
     if (!open) await markAllRead();
   }
 
-  // ------------- render ----------------
+  // ---------- UI ----------
 
   return (
     <div className="relative">
