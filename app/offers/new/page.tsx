@@ -20,7 +20,7 @@ export default function NewOfferPage() {
   const [images, setImages] = useState<string[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
 
-  // tag source for TagMultiSelect
+  // tag source
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [loadingTags, setLoadingTags] = useState(true);
 
@@ -29,7 +29,7 @@ export default function NewOfferPage() {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
-  // load available tags for the picker
+  // load tags
   useEffect(() => {
     let cancel = false;
     (async () => {
@@ -43,9 +43,7 @@ export default function NewOfferPage() {
         setLoadingTags(false);
       }
     })();
-    return () => {
-      cancel = true;
-    };
+    return () => { cancel = true; };
   }, []);
 
   async function onSubmit(e: React.FormEvent) {
@@ -60,7 +58,7 @@ export default function NewOfferPage() {
       const userId = userRes.user?.id;
       if (!userId) throw new Error('You must be signed in.');
 
-      // create the offer
+      // create offer
       const { data: inserted, error: insErr } = await supabase
         .from('offers')
         .insert({
@@ -69,34 +67,33 @@ export default function NewOfferPage() {
           description,
           offer_type: offerType,
           is_online: isOnline,
-          city: isOnline ? null : city || null,
-          country: isOnline ? null : country || null,
-          images, // TEXT[] column
+          city: isOnline ? null : (city || null),
+          country: isOnline ? null : (country || null),
+          images,                 // <- IMAGE URLS SAVED HERE
           status: 'active',
         })
         .select('id')
         .single();
 
       if (insErr) throw insErr;
-      const offerId = (inserted as { id: string }).id;
+      const offerId = inserted!.id as string;
 
-      // attach tags (if any)
+      // attach tags
       if (tags.length > 0) {
         const rows = tags.map((t) => ({ offer_id: offerId, tag_id: t.id }));
-        const { error: tagErr } = await supabase.from('offer_tags').upsert(rows, {
-          ignoreDuplicates: true,
-        });
+        const { error: tagErr } = await supabase.from('offer_tags').upsert(rows, { ignoreDuplicates: true });
         if (tagErr) throw tagErr;
       }
 
       setMsg('Offer created!');
-      // reset lightweight fields (keep images/tags so the user sees what they uploaded)
+      // reset light fields
       setTitle('');
       setDescription('');
       setIsOnline(false);
       setCity('');
       setCountry('');
       setTags([]);
+      setImages([]);
     } catch (e: any) {
       setErr(e?.message ?? 'Something went wrong creating the offer.');
     } finally {
@@ -185,9 +182,8 @@ export default function NewOfferPage() {
           <p className="mt-1 text-xs text-gray-500">Tip: add a few relevant tags.</p>
         </div>
 
-        <div>
-          <UploadImages value={images} onChange={setImages} />
-        </div>
+        {/* ✅ IMAGE UPLOADER */}
+        <UploadImages value={images} onChange={setImages} />
 
         <button
           type="submit"
