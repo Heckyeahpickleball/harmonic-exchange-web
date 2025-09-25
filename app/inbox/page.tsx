@@ -1,3 +1,4 @@
+// File: app/inbox/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
@@ -42,21 +43,49 @@ function MessageThread({
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [draft, setDraft] = useState('');
   const [err, setErr] = useState<string | null>(null);
+  const [unread, setUnread] = useState<number>(0);
 
   const otherId =
     tab === 'received' ? req.requester_profile_id : (req.offers?.owner_id ?? null);
+
+  // ---------- helpers ----------
+  async function countUnreadForThread() {
+    // only notifications that represent *incoming* chat for me
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('profile_id', me)
+      .eq('type', 'message_received')
+      .is('read_at', null)
+      .contains('data', { request_id: req.id });
+
+    if (!error) setUnread(count ?? 0);
+  }
+
+  async function markThreadRead() {
+    // mark all incoming chat for this thread as read
+    await supabase
+      .from('notifications')
+      .update({ read_at: new Date().toISOString() })
+      .eq('profile_id', me)
+      .eq('type', 'message_received')
+      .is('read_at', null)
+      .contains('data', { request_id: req.id });
+
+    setUnread(0);
+  }
 
   async function loadThread() {
     if (!open) return;
     setLoading(true);
     setErr(null);
     try {
-      // Pull only my copy of the thread (RLS allows only profile_id = me)
+      // Pull my copy of the thread (RLS: profile_id = me). Include my own 'message' copies and incoming 'message_received'
       const { data, error } = await supabase
         .from('notifications')
-        .select('id, created_at, data')
+        .select('id, created_at, type, data')
         .eq('profile_id', me)
-        .eq('type', 'message')
+        .or('type.eq.message,type.eq.message_received')
         .contains('data', { request_id: req.id })
         .order('created_at', { ascending: true });
 
@@ -69,6 +98,9 @@ function MessageThread({
         sender_id: row.data?.sender_id ?? '',
       }));
       setMsgs(mapped);
+
+      // when thread view opens, mark unread as read
+      await markThreadRead();
     } catch (e: any) {
       console.error(e);
       setErr(e?.message ?? 'Failed to load messages.');
@@ -77,11 +109,76 @@ function MessageThread({
     }
   }
 
+  // ---------- effects ----------
+  // fetch unread badge on mount/req change/me change
+  useEffect(() => {
+    countUnreadForThread().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [req.id, me]);
+
+  // auto-open if unread exists (common pattern in messaging UIs)
+  useEffect(() => {
+    if (unread > 0) setOpen(true);
+  }, [unread]);
+
+  // load messages when opened
   useEffect(() => {
     loadThread();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, req.id, me]);
 
+  // realtime incoming messages for this thread
+  useEffect(() => {
+    if (!me) return;
+
+    const channel = supabase
+      .channel(`realtime:thread:${req.id}:${me}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `profile_id=eq.${me}`,
+        },
+        (payload) => {
+          const n = payload.new as any;
+          // only messages for this request
+          if (
+            (n.type === 'message' || n.type === 'message_received') &&
+            n?.data?.request_id === req.id
+          ) {
+            const msg: ChatMsg = {
+              id: n.id,
+              created_at: n.created_at,
+              text: n.data?.text ?? '',
+              sender_id: n.data?.sender_id ?? '',
+            };
+            if (open) {
+              setMsgs((m) => [...m, msg]);
+              // if it's an incoming one, mark read immediately
+              if (n.type === 'message_received') {
+                supabase
+                  .from('notifications')
+                  .update({ read_at: new Date().toISOString() })
+                  .eq('id', n.id)
+                  .then(() => {});
+              }
+            } else {
+              // if panel isn't open and it's an incoming message, bump unread badge
+              if (n.type === 'message_received') setUnread((u) => u + 1);
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [me, req.id, open]);
+
+  // ---------- send ----------
   async function send() {
     const text = draft.trim();
     if (!text || !otherId) return;
@@ -105,12 +202,18 @@ function MessageThread({
         sender_id: me,
         text,
       };
-      // Insert a copy for me (so my own message appears), and one for the other party
+
+      const now = new Date().toISOString();
+
+      // insert two rows:
+      // - my local copy as 'message' (so I see it immediately in history)
+      // - the other party gets 'message_received' (this drives their unread/bell)
       const { error } = await supabase.from('notifications').insert([
-        { profile_id: me, type: 'message', data: payload },
-        { profile_id: otherId, type: 'message', data: payload },
+        { profile_id: me, type: 'message', data: payload, read_at: now },
+        { profile_id: otherId, type: 'message_received', data: payload },
       ]);
       if (error) throw error;
+
       // reload to replace optimistic with real rows
       await loadThread();
     } catch (e: any) {
@@ -127,9 +230,14 @@ function MessageThread({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
+        className="rounded border px-3 py-1 text-sm hover:bg-gray-50 relative"
       >
         {open ? 'Hide messages' : 'Message'}
+        {unread > 0 && !open && (
+          <span className="absolute -right-2 -top-2 rounded-full bg-amber-500 px-1 text-[11px] font-bold text-white min-w-[18px] text-center">
+            {unread}
+          </span>
+        )}
       </button>
 
       {open && (
@@ -358,6 +466,8 @@ export default function InboxPage() {
                   <div className="mt-2 text-xs">
                     Status: <span className="font-semibold">{r.status}</span>
                   </div>
+
+                  {/* thread */}
                   <MessageThread req={r} me={me} tab={tab} />
                 </div>
 
@@ -416,6 +526,8 @@ export default function InboxPage() {
                   <div className="mt-2 text-xs">
                     Status: <span className="font-semibold">{r.status}</span>
                   </div>
+
+                  {/* thread */}
                   <MessageThread req={r} me={me} tab={tab} />
                 </div>
 
