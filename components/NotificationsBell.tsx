@@ -11,14 +11,13 @@ type NotifType =
   | 'request_declined'
   | 'request_fulfilled'
   | 'message_received'
-  | 'message'
   | 'system'
   | string;
 
 type Notif = {
   id: string;
   type: NotifType;
-  // data may contain: { offer_id, offer_title, request_id, requester_name, message_id, message, text, sender_name, kind }
+  // data may contain: { offer_id, offer_title, request_id, requester_name, message_id, message, sender_name, kind }
   data: any;
   created_at: string;
   read_at: string | null;
@@ -26,19 +25,19 @@ type Notif = {
 };
 
 export default function NotificationsBell() {
-  const [mounted, setMounted] = useState(false); // fix hydration mismatch
   const [open, setOpen] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [rows, setRows] = useState<Notif[]>([]);
   const unread = useMemo(() => rows.filter(r => !r.read_at).length, [rows]);
 
-  // caches
-  const titleCache = useRef(new Map<string, string>());
-  const requesterCache = useRef(new Map<string, string>());
-  const messageCache = useRef(new Map<string, { body: string; request_id: string }>());
-  useEffect(() => setMounted(true), []);
+  // caches to avoid repeated fetches
+  const titleCache = useRef<Map<string, string>>(new Map()); // offer_id -> title
+  const requesterCache = useRef<Map<string, string>>(new Map()); // request_id -> requester display name
+  const messageCache = useRef<Map<string, { body: string; request_id: string }>>(new Map()); // message_id -> info
 
   // ---------- enrichment helpers ----------
+
+  // Add missing offer titles (when we only have offer_id)
   async function enrichOfferTitles(notifs: Notif[]) {
     const missing = Array.from(
       new Set(
@@ -48,20 +47,24 @@ export default function NotificationsBell() {
       )
     );
     if (!missing.length) return;
+
     const { data } = await supabase.from('offers').select('id,title').in('id', missing);
     for (const row of (data || []) as { id: string; title: string }[]) {
       titleCache.current.set(row.id, row.title);
     }
+
     setRows(prev =>
       prev.map(n => {
         const oid = n?.data?.offer_id as string | undefined;
         if (!oid) return n;
         const t = titleCache.current.get(oid);
-        return t ? { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } } : n;
+        if (!t) return n;
+        return { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } };
       })
     );
   }
 
+  // Add requester display name for request_received (when we only have request_id)
   async function enrichRequesterNames(notifs: Notif[]) {
     const ids = Array.from(
       new Set(
@@ -71,23 +74,28 @@ export default function NotificationsBell() {
       )
     );
     if (!ids.length) return;
+
     const { data } = await supabase
       .from('requests')
       .select('id, requester:profiles(id, display_name)')
       .in('id', ids);
+
     for (const r of (data || []) as any[]) {
       requesterCache.current.set(r.id, r.requester?.display_name || 'Someone');
     }
+
     setRows(prev =>
       prev.map(n => {
         const rid = n?.data?.request_id as string | undefined;
         if (!rid) return n;
         const name = requesterCache.current.get(rid);
-        return name ? { ...n, data: { ...n.data, requester_name: n.data?.requester_name ?? name } } : n;
+        if (!name) return n;
+        return { ...n, data: { ...n.data, requester_name: n.data?.requester_name ?? name } };
       })
     );
   }
 
+  // Add message preview for message_received (when we only have message_id)
   async function enrichMessagePreviews(notifs: Notif[]) {
     const ids = Array.from(
       new Set(
@@ -97,16 +105,24 @@ export default function NotificationsBell() {
       )
     );
     if (!ids.length) return;
-    const { data } = await supabase.from('request_messages').select('id, body, request_id').in('id', ids);
+
+    // Keep it simple (avoid FK assumptions): pull body + request_id only
+    const { data } = await supabase
+      .from('request_messages') // if you don't have this table, previews will be skipped gracefully
+      .select('id, body, request_id')
+      .in('id', ids);
+
     for (const m of (data || []) as any[]) {
       messageCache.current.set(m.id, { body: m.body as string, request_id: m.request_id as string });
     }
+
     setRows(prev =>
       prev.map(n => {
         const mid = n?.data?.message_id as string | undefined;
         if (!mid) return n;
         const info = messageCache.current.get(mid);
-        return info ? { ...n, data: { ...n.data, message: n.data?.message ?? info.body } } : n;
+        if (!info) return n;
+        return { ...n, data: { ...n.data, message: n.data?.message ?? info.body } };
       })
     );
   }
@@ -114,7 +130,7 @@ export default function NotificationsBell() {
   function label(n: Notif): { text: string; href?: string } {
     const t = n.data?.offer_title as string | undefined;
     const reqName = n.data?.requester_name as string | undefined;
-    const body = (n.data?.message as string | undefined) ?? (n.data?.text as string | undefined);
+    const body = n.data?.message as string | undefined;
     const reqId = n.data?.request_id as string | undefined;
 
     switch (n.type) {
@@ -126,16 +142,17 @@ export default function NotificationsBell() {
         return { text: `Your request was declined${t ? ` — “${t}”` : ''}`, href: '/inbox' };
       case 'request_fulfilled':
         return { text: `Request marked fulfilled${t ? ` — “${t}”` : ''}`, href: '/inbox' };
-      case 'message':
       case 'message_received': {
         const snip = body ? `: ${body.slice(0, 80)}` : '';
-        return { text: `New message${t ? ` on “${t}”` : ''}${snip}`, href: reqId ? `/inbox?tab=messages&thread=${reqId}` : '/inbox?tab=messages' };
+        const href = reqId ? `/messages?thread=${encodeURIComponent(reqId)}` : '/messages';
+        return { text: `New message${t ? ` on “${t}”` : ''}${snip}`, href };
       }
       case 'system': {
         const kind = n.data?.kind as string | undefined;
-        if (kind === 'withdrawn') return { text: `A request was withdrawn${t ? ` — “${t}”` : ''}`, href: '/inbox' };
-        if (kind === 'request_updated') return { text: `Request updated${t ? ` — “${t}”` : ''}`, href: '/inbox' };
-        return { text: n.data?.message || 'Update', href: '/inbox' };
+        if (kind === 'withdrawn') {
+          return { text: `A request was withdrawn${t ? ` — “${t}”` : ''}`, href: '/inbox' };
+        }
+        return { text: n.data?.message || 'System update', href: '/inbox' };
       }
       default:
         return { text: n.data?.message || 'Update', href: '/inbox' };
@@ -160,6 +177,8 @@ export default function NotificationsBell() {
   }
 
   // ---------- effects ----------
+
+  // Load user, pull initial notifications, enrich, wire realtime
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -177,11 +196,12 @@ export default function NotificationsBell() {
       const initial = (list || []) as Notif[];
       setRows(initial);
 
-      // enrich silently
+      // fire-and-forget enrichment
       enrichOfferTitles(initial).catch(() => {});
       enrichRequesterNames(initial).catch(() => {});
       enrichMessagePreviews(initial).catch(() => {});
 
+      // realtime: inserts
       const chIns = supabase
         .channel('realtime:notifications:ins')
         .on(
@@ -199,6 +219,7 @@ export default function NotificationsBell() {
         )
         .subscribe();
 
+      // realtime: updates (e.g., read_at from another tab)
       const chUpd = supabase
         .channel('realtime:notifications:upd')
         .on(
@@ -218,13 +239,13 @@ export default function NotificationsBell() {
     })();
   }, []);
 
+  // When opening panel → mark all as read
   async function toggleOpen() {
-    const next = !open;
-    setOpen(next);
-    if (next) await markAllRead();
+    setOpen(v => !v);
+    if (!open) await markAllRead();
   }
 
-  if (!mounted) return null;
+  // ---------- UI ----------
 
   return (
     <div className="relative">
@@ -257,14 +278,21 @@ export default function NotificationsBell() {
               const { text, href } = label(n);
               const ts = new Date(n.created_at).toLocaleString();
               return (
-                <li key={n.id} className={`border-b px-3 py-2 text-sm ${!n.read_at ? 'bg-amber-50' : ''}`}>
+                <li
+                  key={n.id}
+                  className={`border-b px-3 py-2 text-sm ${!n.read_at ? 'bg-amber-50' : ''}`}
+                >
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="text-[11px] text-gray-500">{ts}</div>
                       <div>{text}</div>
                     </div>
                     {href && (
-                      <Link href={href} className="whitespace-nowrap text-xs underline" onClick={() => markOneRead(n.id)}>
+                      <Link
+                        href={href}
+                        className="whitespace-nowrap text-xs underline"
+                        onClick={() => markOneRead(n.id)}
+                      >
                         View
                       </Link>
                     )}

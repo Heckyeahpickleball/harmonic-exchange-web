@@ -51,6 +51,11 @@ function MessageThread({
   const otherId =
     tab === 'received' ? req.requester_profile_id : (req.offers?.owner_id ?? null);
 
+  // If autoOpen becomes true later (e.g., after reading ?thread=), open the thread.
+  useEffect(() => {
+    if (autoOpen) setOpen(true);
+  }, [autoOpen]);
+
   // ---------- helpers ----------
   async function countUnreadForThread() {
     // only notifications that represent *incoming* chat for me
@@ -293,9 +298,17 @@ function MessageThread({
 
 export default function InboxPage() {
   const searchParams = useSearchParams();
-  const deepThread = searchParams.get('thread') || undefined;
 
+  // Read query params AFTER mount to avoid SSR/CSR mismatch (Vercel hydration issue)
+  const [deepThread, setDeepThread] = useState<string | undefined>(undefined);
   const [tab, setTab] = useState<Tab>('received');
+  useEffect(() => {
+    const t = searchParams.get('tab') as Tab | null;
+    const th = searchParams.get('thread') || undefined;
+    if (t && (t === 'received' || t === 'sent')) setTab(t);
+    setDeepThread(th);
+  }, [searchParams]);
+
   const [items, setItems] = useState<ReqRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
