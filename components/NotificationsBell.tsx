@@ -1,80 +1,55 @@
-'use client'
+'use client';
 
-import Link from 'next/link'
-import { useEffect, useState } from 'react'
-import type { Session } from '@supabase/supabase-js'
-import { supabase } from '@/lib/supabaseClient'
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function NotificationsBell() {
-  const [session, setSession] = useState<Session | null>(null)
-  const [count, setCount] = useState<number>(0)
-  const [ready, setReady] = useState(false)
+  const [uid, setUid] = useState<string | null>(null);
+  const [unread, setUnread] = useState<number>(0);
 
-  // initial session + first count
+  // Initial load
   useEffect(() => {
-    let mounted = true
+    (async () => {
+      const { data: auth } = await supabase.auth.getUser();
+      const u = auth.user?.id ?? null;
+      setUid(u);
+      if (!u) return;
 
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!mounted) return
-      setSession(data.session ?? null)
-      setReady(true)
-      const uid = data.session?.user?.id
-      if (uid) await refreshCount(uid)
-    })
+      const { count } = await supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('profile_id', u)
+        .is('read_at', null);
+      setUnread(count ?? 0);
+    })();
+  }, []);
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
-      setSession(sess)
-      if (sess?.user) refreshCount(sess.user.id)
-      else setCount(0)
-    })
-
-    return () => {
-      mounted = false
-      sub.subscription.unsubscribe()
-    }
-  }, [])
-
-  async function refreshCount(userId: string) {
-    const { count } = await supabase
-      .from('notifications')
-      .select('*', { count: 'exact', head: true })
-      .eq('profile_id', userId)
-      .is('read_at', null)
-    setCount(count ?? 0)
-  }
-
-  // realtime + polling fallback
+  // Realtime
   useEffect(() => {
-    const uid = session?.user?.id
-    if (!uid) return
-
+    if (!uid) return;
     const channel = supabase
-      .channel('notifications-bell')
+      .channel('notif-bell')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'notifications', filter: `profile_id=eq.${uid}` },
-        () => refreshCount(uid)
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `profile_id=eq.${uid}` },
+        () => setUnread((n) => n + 1)
       )
-      .subscribe()
+      .subscribe();
 
-    const timer = setInterval(() => refreshCount(uid), 20000)
+    return () => { supabase.removeChannel(channel); };
+  }, [uid]);
 
-    return () => {
-      supabase.removeChannel(channel)
-      clearInterval(timer)
-    }
-  }, [session?.user?.id])
-
-  if (!ready) return <span />
+  if (!uid) return null;
 
   return (
-    <Link href="/notifications" className="relative inline-block" aria-label="Notifications" title="Notifications">
-      <span>🔔</span>
-      {count > 0 && (
-        <span className="absolute -right-2 -top-2 rounded-full bg-orange-500 text-white text-[10px] leading-none px-1.5 py-0.5">
-          {Math.min(count, 9)}
+    <Link href="/notifications" className="relative inline-flex items-center">
+      <span aria-hidden>🔔</span>
+      {unread > 0 && (
+        <span className="absolute -right-2 -top-2 rounded-full bg-red-600 px-1.5 text-[10px] font-semibold text-white">
+          {unread}
         </span>
       )}
     </Link>
-  )
+  );
 }

@@ -100,20 +100,36 @@ export default function OfferDetailPage() {
       return;
     }
 
-    const { error } = await supabase
-      .from('requests')
-      .insert({
-        offer_id: offer.id,
-        requester_profile_id: userRes.user.id,
-        note,
-      })
-      .select('id')
-      .single();
+    try {
+      // Create the request
+      const { data: req, error } = await supabase
+        .from('requests')
+        .insert({
+          offer_id: offer.id,
+          requester_profile_id: userRes.user.id,
+          note,
+        })
+        .select('id')
+        .single();
 
-    if (error) setMsg(error.message);
-    else setMsg('Request sent!');
+      if (error) throw error;
 
-    setSending(false);
+      // Notify the offer owner
+      if (req?.id) {
+        await supabase.from('notifications').insert({
+          profile_id: offer.owner_id,
+          type: 'request_received',
+          data: { request_id: req.id, offer_id: offer.id, note },
+        });
+      }
+
+      setMsg('Request sent!');
+      setNote('');
+    } catch (err: any) {
+      setMsg(err?.message ?? 'Could not send request.');
+    } finally {
+      setSending(false);
+    }
   }
 
   if (loading) {

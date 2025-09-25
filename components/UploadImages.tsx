@@ -2,16 +2,23 @@
 
 import { useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { uploadOfferImages, removeOfferImageByUrl } from '@/lib/storage';
+import { OFFER_BUCKET, uploadOfferImages } from '@/lib/storage';
 
 type Props = {
   value: string[];
   onChange: (urls: string[]) => void;
-  max?: number;              // default 4
-  deleteOnRemove?: boolean;  // default true
+  max?: number; // default 4
 };
 
-export default function UploadImages({ value, onChange, max = 4, deleteOnRemove = true }: Props) {
+/** Convert a public URL into a storage object path */
+function toStoragePath(publicUrl: string) {
+  const marker = `/storage/v1/object/public/${OFFER_BUCKET}/`;
+  const i = publicUrl.indexOf(marker);
+  if (i === -1) return null;
+  return publicUrl.slice(i + marker.length);
+}
+
+export default function UploadImages({ value, onChange, max = 4 }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +38,6 @@ export default function UploadImages({ value, onChange, max = 4, deleteOnRemove 
       const remaining = Math.max(0, max - (value?.length ?? 0));
       const chosen = files.slice(0, remaining);
 
-      // Upload using storage helper
       const urls = await uploadOfferImages(userId, chosen);
       onChange([...(value || []), ...urls]);
     } catch (err: any) {
@@ -44,25 +50,25 @@ export default function UploadImages({ value, onChange, max = 4, deleteOnRemove 
 
   async function removeUrl(u: string) {
     setError(null);
+    // optimistic remove
+    onChange((value || []).filter((v) => v !== u));
 
-    // Optimistic UI update
-    const prev = value || [];
-    onChange(prev.filter((v) => v !== u));
-
-    if (!deleteOnRemove) return;
+    const path = toStoragePath(u);
+    if (!path) return;
 
     try {
-      await removeOfferImageByUrl(u);
+      const { error } = await supabase.storage.from(OFFER_BUCKET).remove([path]);
+      if (error) throw error;
     } catch (err: any) {
-      // Revert if delete fails
-      onChange(prev);
+      // revert on failure
+      onChange([...(value || []), u]);
       setError(err?.message || 'Could not delete image from storage.');
     }
   }
 
   return (
     <div className="space-y-2">
-      <label className="block text-sm font-medium">Images</label>
+      {/* no label here on purpose — parent page should render the label */}
 
       <input
         ref={inputRef}
@@ -91,7 +97,6 @@ export default function UploadImages({ value, onChange, max = 4, deleteOnRemove 
                 onClick={() => removeUrl(u)}
                 className="absolute right-1 top-1 rounded bg-black/70 px-1 text-xs text-white"
                 aria-label="Remove image"
-                disabled={busy}
               >
                 ✕
               </button>
