@@ -26,22 +26,19 @@ type Notif = {
 };
 
 export default function NotificationsBell() {
-  const [mounted, setMounted] = useState(false); // prevent hydration mismatch
+  const [mounted, setMounted] = useState(false); // fix hydration mismatch
   const [open, setOpen] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [rows, setRows] = useState<Notif[]>([]);
   const unread = useMemo(() => rows.filter(r => !r.read_at).length, [rows]);
 
-  // caches to avoid repeated fetches
-  const titleCache = useRef<Map<string, string>>(new Map()); // offer_id -> title
-  const requesterCache = useRef<Map<string, string>>(new Map()); // request_id -> requester display name
-  const messageCache = useRef<Map<string, { body: string; request_id: string }>>(new Map()); // message_id -> info
-
+  // caches
+  const titleCache = useRef(new Map<string, string>());
+  const requesterCache = useRef(new Map<string, string>());
+  const messageCache = useRef(new Map<string, { body: string; request_id: string }>());
   useEffect(() => setMounted(true), []);
 
   // ---------- enrichment helpers ----------
-
-  // Add missing offer titles (when we only have offer_id)
   async function enrichOfferTitles(notifs: Notif[]) {
     const missing = Array.from(
       new Set(
@@ -51,24 +48,20 @@ export default function NotificationsBell() {
       )
     );
     if (!missing.length) return;
-
     const { data } = await supabase.from('offers').select('id,title').in('id', missing);
     for (const row of (data || []) as { id: string; title: string }[]) {
       titleCache.current.set(row.id, row.title);
     }
-
     setRows(prev =>
       prev.map(n => {
         const oid = n?.data?.offer_id as string | undefined;
         if (!oid) return n;
         const t = titleCache.current.get(oid);
-        if (!t) return n;
-        return { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } };
+        return t ? { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } } : n;
       })
     );
   }
 
-  // Add requester display name for request_received (when we only have request_id)
   async function enrichRequesterNames(notifs: Notif[]) {
     const ids = Array.from(
       new Set(
@@ -78,28 +71,23 @@ export default function NotificationsBell() {
       )
     );
     if (!ids.length) return;
-
     const { data } = await supabase
       .from('requests')
       .select('id, requester:profiles(id, display_name)')
       .in('id', ids);
-
     for (const r of (data || []) as any[]) {
       requesterCache.current.set(r.id, r.requester?.display_name || 'Someone');
     }
-
     setRows(prev =>
       prev.map(n => {
         const rid = n?.data?.request_id as string | undefined;
         if (!rid) return n;
         const name = requesterCache.current.get(rid);
-        if (!name) return n;
-        return { ...n, data: { ...n.data, requester_name: n.data?.requester_name ?? name } };
+        return name ? { ...n, data: { ...n.data, requester_name: n.data?.requester_name ?? name } } : n;
       })
     );
   }
 
-  // Add message preview for message_received (when we only have message_id)
   async function enrichMessagePreviews(notifs: Notif[]) {
     const ids = Array.from(
       new Set(
@@ -109,23 +97,16 @@ export default function NotificationsBell() {
       )
     );
     if (!ids.length) return;
-
-    const { data } = await supabase
-      .from('request_messages')
-      .select('id, body, request_id')
-      .in('id', ids);
-
+    const { data } = await supabase.from('request_messages').select('id, body, request_id').in('id', ids);
     for (const m of (data || []) as any[]) {
       messageCache.current.set(m.id, { body: m.body as string, request_id: m.request_id as string });
     }
-
     setRows(prev =>
       prev.map(n => {
         const mid = n?.data?.message_id as string | undefined;
         if (!mid) return n;
         const info = messageCache.current.get(mid);
-        if (!info) return n;
-        return { ...n, data: { ...n.data, message: n.data?.message ?? info.body } };
+        return info ? { ...n, data: { ...n.data, message: n.data?.message ?? info.body } } : n;
       })
     );
   }
@@ -148,7 +129,7 @@ export default function NotificationsBell() {
       case 'message':
       case 'message_received': {
         const snip = body ? `: ${body.slice(0, 80)}` : '';
-        return { text: `New message${t ? ` on “${t}”` : ''}${snip}`, href: reqId ? `/inbox?thread=${reqId}` : '/inbox' };
+        return { text: `New message${t ? ` on “${t}”` : ''}${snip}`, href: reqId ? `/inbox?tab=messages&thread=${reqId}` : '/inbox?tab=messages' };
       }
       case 'system': {
         const kind = n.data?.kind as string | undefined;
@@ -179,8 +160,6 @@ export default function NotificationsBell() {
   }
 
   // ---------- effects ----------
-
-  // Load user, pull initial notifications, enrich, wire realtime
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -198,12 +177,11 @@ export default function NotificationsBell() {
       const initial = (list || []) as Notif[];
       setRows(initial);
 
-      // fire-and-forget enrichment
+      // enrich silently
       enrichOfferTitles(initial).catch(() => {});
       enrichRequesterNames(initial).catch(() => {});
       enrichMessagePreviews(initial).catch(() => {});
 
-      // realtime: inserts
       const chIns = supabase
         .channel('realtime:notifications:ins')
         .on(
@@ -212,7 +190,6 @@ export default function NotificationsBell() {
           async (payload) => {
             const n = payload.new as Notif;
             setRows(prev => [n, ...prev].slice(0, 50));
-            // opportunistic enrichment for this single item
             await Promise.allSettled([
               enrichOfferTitles([n]),
               enrichRequesterNames([n]),
@@ -222,7 +199,6 @@ export default function NotificationsBell() {
         )
         .subscribe();
 
-      // realtime: updates (e.g., read_at from another tab)
       const chUpd = supabase
         .channel('realtime:notifications:upd')
         .on(
@@ -242,14 +218,11 @@ export default function NotificationsBell() {
     })();
   }, []);
 
-  // When opening panel → mark all as read
   async function toggleOpen() {
     const next = !open;
     setOpen(next);
     if (next) await markAllRead();
   }
-
-  // ---------- UI ----------
 
   if (!mounted) return null;
 
@@ -284,21 +257,14 @@ export default function NotificationsBell() {
               const { text, href } = label(n);
               const ts = new Date(n.created_at).toLocaleString();
               return (
-                <li
-                  key={n.id}
-                  className={`border-b px-3 py-2 text-sm ${!n.read_at ? 'bg-amber-50' : ''}`}
-                >
+                <li key={n.id} className={`border-b px-3 py-2 text-sm ${!n.read_at ? 'bg-amber-50' : ''}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="text-[11px] text-gray-500">{ts}</div>
                       <div>{text}</div>
                     </div>
                     {href && (
-                      <Link
-                        href={href}
-                        className="whitespace-nowrap text-xs underline"
-                        onClick={() => markOneRead(n.id)}
-                      >
+                      <Link href={href} className="whitespace-nowrap text-xs underline" onClick={() => markOneRead(n.id)}>
                         View
                       </Link>
                     )}
