@@ -1,141 +1,129 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
-type NType = 'request_received' | 'request_accepted' | 'request_declined' | 'request_fulfilled' | 'system';
-
 type Notif = {
   id: string;
-  profile_id: string;
-  type: NType;
+  type: 'request_received' | 'request_accepted' | 'request_declined' | 'request_fulfilled' | 'message_received' | 'system' | string;
   data: any;
-  read_at: string | null;
   created_at: string;
+  read_at: string | null;
+  profile_id: string;
 };
 
 export default function NotificationsBell() {
-  const [userId, setUserId] = useState<string | null>(null);
-  const [unread, setUnread] = useState<number>(0);
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<Notif[]>([]);
-  const closeRef = useRef<HTMLDivElement | null>(null);
+  const [uid, setUid] = useState<string | null>(null);
+  const [rows, setRows] = useState<Notif[]>([]);
+  const unread = useMemo(() => rows.filter(r => !r.read_at).length, [rows]);
 
-  // load auth + initial counts/list
+  // Load current user + initial list
   useEffect(() => {
     (async () => {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id ?? null;
-      setUserId(uid);
-      if (!uid) return;
-      await Promise.all([refreshCount(uid), refreshList(uid)]);
+      const { data } = await supabase.auth.getUser();
+      const u = data?.user?.id ?? null;
+      setUid(u);
+      if (!u) return;
+
+      const { data: list } = await supabase
+        .from('notifications')
+        .select('id,type,data,created_at,read_at,profile_id')
+        .eq('profile_id', u)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      setRows((list || []) as Notif[]);
+
+      // realtime: new notifications
+      const channel = supabase
+        .channel('realtime:notifications')
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'notifications', filter: `profile_id=eq.${u}` },
+          (payload) => {
+            setRows(prev => [payload.new as Notif, ...prev].slice(0, 50));
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     })();
   }, []);
 
-  // realtime push
-  useEffect(() => {
-    if (!userId) return;
-    const channel = supabase
-      .channel('notifications')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `profile_id=eq.${userId}` },
-        async () => {
-          // new item for me → bump count & reload
-          await Promise.all([refreshCount(userId), refreshList(userId)]);
-        }
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [userId]);
-
-  // outside click to close
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (!open) return;
-      if (closeRef.current && !closeRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [open]);
-
-  async function refreshCount(uid: string) {
-    const { count } = await supabase
-      .from('notifications')
-      .select('id', { count: 'exact', head: true })
-      .eq('profile_id', uid)
-      .is('read_at', null);
-    setUnread(count ?? 0);
-  }
-
-  async function refreshList(uid: string) {
-    const { data } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('profile_id', uid)
-      .order('created_at', { ascending: false })
-      .limit(12);
-    setItems((data || []) as Notif[]);
-  }
-
   async function markAllRead() {
-    if (!userId) return;
-    await supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('profile_id', userId).is('read_at', null);
-    await Promise.all([refreshCount(userId), refreshList(userId)]);
+    if (!uid || unread === 0) return;
+    const ids = rows.filter(r => !r.read_at).map(r => r.id);
+    setRows(prev => prev.map(r => (ids.includes(r.id) ? { ...r, read_at: new Date().toISOString() } : r)));
+    await supabase.from('notifications').update({ read_at: new Date().toISOString() }).in('id', ids);
   }
 
-  function label(n: Notif) {
-    const o = n.data?.offer_id ? <Link href={`/offers/${n.data.offer_id}`} className="underline">offer</Link> : 'offer';
+  function label(n: Notif): { text: string; href?: string } {
+    const offerTitle = n.data?.offer_title;
     switch (n.type) {
       case 'request_received':
-        return <>New request on {o}</>;
+        return { text: `New request${offerTitle ? ` for “${offerTitle}”` : ''}`, href: '/inbox' };
       case 'request_accepted':
-        return <>Your request was <strong>accepted</strong></>;
+        return { text: `Your request was accepted${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/inbox' };
       case 'request_declined':
-        return <>Your request was <strong>declined</strong></>;
+        return { text: `Your request was declined${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/inbox' };
       case 'request_fulfilled':
-        return <>Request marked <strong>fulfilled</strong></>;
+        return { text: `Request marked fulfilled${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/inbox' };
+      case 'message_received':
+        return { text: `New message${offerTitle ? ` on “${offerTitle}”` : ''}`, href: '/inbox' };
       default:
-        return <>Update</>;
+        return { text: n.data?.message || 'Update', href: '/inbox' };
     }
   }
 
-  if (!userId) return null;
-
   return (
-    <div className="relative" ref={closeRef}>
+    <div className="relative">
       <button
-        onClick={() => setOpen(v => !v)}
-        className="relative rounded border px-3 py-1 text-sm hover:bg-gray-50"
-        aria-label="Notifications"
+        className="relative rounded border px-2 py-1 text-sm"
+        onClick={async () => {
+          setOpen(v => !v);
+          if (!open) await markAllRead();
+        }}
+        title="Notifications"
       >
         🔔
-        {!!unread && (
-          <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1 text-[10px] leading-none text-white">
+        {unread > 0 && (
+          <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-amber-500 px-1 text-[11px] font-bold text-white">
             {unread}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 z-20 mt-2 w-80 rounded border bg-white shadow">
+        <div className="absolute right-0 z-50 mt-2 w-[320px] max-w-[90vw] rounded border bg-white shadow">
           <div className="flex items-center justify-between border-b px-3 py-2">
-            <div className="text-sm font-medium">Notifications</div>
-            <button onClick={markAllRead} className="text-xs underline">
-              Mark all read
-            </button>
+            <strong className="text-sm">Notifications</strong>
+            <button onClick={markAllRead} className="text-xs underline">Mark all read</button>
           </div>
-          <ul className="max-h-80 overflow-auto p-2">
-            {items.map((n) => (
-              <li key={n.id} className={`rounded px-2 py-2 text-sm ${n.read_at ? '' : 'bg-amber-50'}`}>
-                <div>{label(n)}</div>
-                <div className="mt-1 text-[11px] text-gray-500">{new Date(n.created_at).toLocaleString()}</div>
-              </li>
-            ))}
-            {items.length === 0 && <li className="p-3 text-sm text-gray-600">No notifications.</li>}
+
+          <ul className="max-h-[50vh] overflow-auto">
+            {rows.length === 0 && (
+              <li className="px-3 py-3 text-sm text-gray-600">No notifications.</li>
+            )}
+            {rows.map((n) => {
+              const { text, href } = label(n);
+              const ts = new Date(n.created_at).toLocaleString();
+              return (
+                <li key={n.id} className={`border-b px-3 py-2 text-sm ${!n.read_at ? 'bg-amber-50' : ''}`}>
+                  <div className="text-[11px] text-gray-500">{ts}</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div>{text}</div>
+                    {href && (
+                      <Link href={href} className="whitespace-nowrap text-xs underline">
+                        View
+                      </Link>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
