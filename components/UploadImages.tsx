@@ -68,7 +68,7 @@ export default function UploadImages({ value, onChange, max = 4 }: Props) {
 
   return (
     <div className="space-y-2">
-      {/* no label here on purpose — parent page should render the label */}
+      <label className="block text-sm font-medium">Image upload</label>
 
       <input
         ref={inputRef}

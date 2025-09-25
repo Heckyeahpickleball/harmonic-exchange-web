@@ -182,7 +182,7 @@ export default function NewOfferPage() {
           <p className="mt-1 text-xs text-gray-500">Tip: add a few relevant tags.</p>
         </div>
 
-        {/* ✅ IMAGE UPLOADER */}
+        {/* ✅ IMAGE UPLOADER (label is rendered inside the component) */}
         <UploadImages value={images} onChange={setImages} />
 
         <button
