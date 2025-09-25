@@ -1,13 +1,10 @@
+// File: app/inbox/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { Suspense, useEffect, useMemo, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-
-// Make this page fully dynamic (prevents prerender issues on Vercel)
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
 type Status = 'pending' | 'accepted' | 'declined' | 'withdrawn' | 'fulfilled';
 
@@ -54,12 +51,10 @@ function MessageThread({
   const otherId =
     tab === 'received' ? req.requester_profile_id : (req.offers?.owner_id ?? null);
 
-  // If autoOpen becomes true later (e.g., after reading ?thread=), open the thread.
   useEffect(() => {
     if (autoOpen) setOpen(true);
   }, [autoOpen]);
 
-  // ---------- helpers ----------
   async function countUnreadForThread() {
     const { count, error } = await supabase
       .from('notifications')
@@ -116,10 +111,8 @@ function MessageThread({
     }
   }
 
-  // ---------- effects ----------
   useEffect(() => {
     countUnreadForThread().catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [req.id, me]);
 
   useEffect(() => {
@@ -138,18 +131,10 @@ function MessageThread({
       .channel(`realtime:thread:${req.id}:${me}`)
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-          filter: `profile_id=eq.${me}`,
-        },
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `profile_id=eq.${me}` },
         (payload) => {
           const n = payload.new as any;
-          if (
-            (n.type === 'message' || n.type === 'message_received') &&
-            n?.data?.request_id === req.id
-          ) {
+          if ((n.type === 'message' || n.type === 'message_received') && n?.data?.request_id === req.id) {
             const msg: ChatMsg = {
               id: n.id,
               created_at: n.created_at,
@@ -159,11 +144,7 @@ function MessageThread({
             if (open) {
               setMsgs((m) => [...m, msg]);
               if (n.type === 'message_received') {
-                supabase
-                  .from('notifications')
-                  .update({ read_at: new Date().toISOString() })
-                  .eq('id', n.id)
-                  .then(() => {});
+                supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id);
               }
             } else {
               if (n.type === 'message_received') setUnread((u) => u + 1);
@@ -178,7 +159,6 @@ function MessageThread({
     };
   }, [me, req.id, open]);
 
-  // ---------- send ----------
   async function send() {
     const text = draft.trim();
     if (!text || !otherId) return;
@@ -195,13 +175,7 @@ function MessageThread({
     setMsgs((m) => [...m, optimistic]);
 
     try {
-      const payload = {
-        request_id: req.id,
-        offer_id: req.offer_id,
-        sender_id: me,
-        text,
-      };
-
+      const payload = { request_id: req.id, offer_id: req.offer_id, sender_id: me, text };
       const now = new Date().toISOString();
 
       const { error } = await supabase.from('notifications').insert([
@@ -238,9 +212,7 @@ function MessageThread({
         <div className="mt-2 rounded border p-3">
           {loading && <p className="text-sm text-gray-600">Loading messages…</p>}
           {err && <p className="text-sm text-red-600">{err}</p>}
-          {msgs.length === 0 && !loading && (
-            <p className="text-sm text-gray-600">No messages yet.</p>
-          )}
+          {msgs.length === 0 && !loading && <p className="text-sm text-gray-600">No messages yet.</p>}
 
           <ul className="space-y-2">
             {msgs.map((m) => {
@@ -248,13 +220,9 @@ function MessageThread({
               return (
                 <li
                   key={m.id}
-                  className={`max-w-[85%] rounded px-3 py-2 text-sm ${
-                    mine ? 'ml-auto bg-black text-white' : 'bg-gray-100'
-                  }`}
+                  className={`max-w-[85%] rounded px-3 py-2 text-sm ${mine ? 'ml-auto bg-black text-white' : 'bg-gray-100'}`}
                 >
-                  <div className="opacity-70 text-[11px]">
-                    {new Date(m.created_at).toLocaleString()}
-                  </div>
+                  <div className="opacity-70 text-[11px]">{new Date(m.created_at).toLocaleString()}</div>
                   <div className="mt-1 whitespace-pre-wrap">{m.text}</div>
                 </li>
               );
@@ -282,40 +250,24 @@ function MessageThread({
   );
 }
 
-// Helper to access search params in a way compatible with Next.js App Router (to avoid SSR/CSR mismatch)
-function useSafeSearchParams() {
-  const searchParams = useSearchParams();
-  const [params, setParams] = useState<{ tab?: string; thread?: string }>({});
-
-  useEffect(() => {
-    // Only access searchParams after mount (on client)
-    setParams({
-      tab: searchParams.get('tab') || undefined,
-      thread: searchParams.get('thread') || undefined,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
-
-  return params;
-}
-
-export default function InboxPage() {
-  const { tab: tabParam, thread: threadParam } = useSafeSearchParams();
-
-  // Read query params AFTER mount to avoid SSR/CSR mismatch
+function InboxContent() {
+  const searchParams = useSearchParams(); // allowed in client component
   const [deepThread, setDeepThread] = useState<string | undefined>(undefined);
   const [tab, setTab] = useState<Tab>('received');
+
   useEffect(() => {
-    if (tabParam && (tabParam === 'received' || tabParam === 'sent')) setTab(tabParam);
-    setDeepThread(threadParam);
-  }, [tabParam, threadParam]);
+    // read after mount to avoid SSR/CSR mismatch
+    const t = searchParams.get('tab') as Tab | null;
+    const th = searchParams.get('thread') || undefined;
+    if (t && (t === 'received' || t === 'sent')) setTab(t);
+    setDeepThread(th);
+  }, [searchParams]);
 
   const [items, setItems] = useState<ReqRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
   const [me, setMe] = useState<string | null>(null);
 
-  // --- helpers ---
   const load = useCallback(async () => {
     setLoading(true);
     setMsg('');
@@ -341,7 +293,6 @@ export default function InboxPage() {
           `)
           .eq('offers.owner_id', uid)
           .order('created_at', { ascending: false });
-
         if (error) throw error;
         setItems((data || []) as unknown as ReqRow[]);
       } else {
@@ -354,7 +305,6 @@ export default function InboxPage() {
           `)
           .eq('requester_profile_id', uid)
           .order('created_at', { ascending: false });
-
         if (error) throw error;
         setItems((data || []) as unknown as ReqRow[]);
       }
@@ -374,57 +324,36 @@ export default function InboxPage() {
   const received = useMemo(() => (tab === 'received' ? items : []), [tab, items]);
   const sent = useMemo(() => (tab === 'sent' ? items : []), [tab, items]);
 
-  // --- notification helper (MVP: client inserts) ---
   async function notify(
     profileId: string,
     type: 'request_received' | 'request_accepted' | 'request_declined' | 'request_fulfilled' | 'system',
     data: Record<string, any>
   ) {
     try {
-      await supabase.from('notifications').insert({
-        profile_id: profileId,
-        type,
-        data,
-      });
+      await supabase.from('notifications').insert({ profile_id: profileId, type, data });
     } catch (e) {
       console.warn('notify failed', e);
     }
   }
 
-  // --- actions (received/sent) ---
   async function setStatus(req: ReqRow, next: Status) {
     setMsg('');
-    setItems((prev) =>
-      prev.map((r) =>
-        r.id === req.id ? { ...r, status: next, updated_at: new Date().toISOString() } : r
-      )
-    );
+    setItems((prev) => prev.map((r) => (r.id === req.id ? { ...r, status: next, updated_at: new Date().toISOString() } : r)));
 
     try {
-      const { error } = await supabase
-        .from('requests')
-        .update({ status: next })
-        .eq('id', req.id)
-        .select('id')
-        .single();
+      const { error } = await supabase.from('requests').update({ status: next }).eq('id', req.id).select('id').single();
       if (error) throw error;
 
       if (tab === 'received') {
         const requesterId = req.requester_profile_id;
-        if (next === 'accepted')
-          await notify(requesterId, 'request_accepted', { request_id: req.id, offer_id: req.offer_id });
-        if (next === 'declined')
-          await notify(requesterId, 'request_declined', { request_id: req.id, offer_id: req.offer_id });
-        if (next === 'fulfilled')
-          await notify(requesterId, 'request_fulfilled', { request_id: req.id, offer_id: req.offer_id });
+        if (next === 'accepted') await notify(requesterId, 'request_accepted', { request_id: req.id, offer_id: req.offer_id });
+        if (next === 'declined') await notify(requesterId, 'request_declined', { request_id: req.id, offer_id: req.offer_id });
+        if (next === 'fulfilled') await notify(requesterId, 'request_fulfilled', { request_id: req.id, offer_id: req.offer_id });
       } else if (tab === 'sent') {
         const ownerId = req.offers?.owner_id;
-        if (next === 'withdrawn' && ownerId)
-          await notify(ownerId, 'system', {
-            kind: 'withdrawn',
-            request_id: req.id,
-            offer_id: req.offer_id,
-          });
+        if (next === 'withdrawn' && ownerId) {
+          await notify(ownerId, 'system', { kind: 'withdrawn', request_id: req.id, offer_id: req.offer_id });
+        }
       }
     } catch (e: any) {
       console.error(e);
@@ -440,17 +369,13 @@ export default function InboxPage() {
         <div className="flex gap-2">
           <button
             onClick={() => setTab('received')}
-            className={`rounded border px-3 py-1 text-sm ${
-              tab === 'received' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'
-            }`}
+            className={`rounded border px-3 py-1 text-sm ${tab === 'received' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'}`}
           >
             Received
           </button>
           <button
             onClick={() => setTab('sent')}
-            className={`rounded border px-3 py-1 text-sm ${
-              tab === 'sent' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'
-            }`}
+            className={`rounded border px-3 py-1 text-sm ${tab === 'sent' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'}`}
           >
             Sent
           </button>
@@ -460,80 +385,49 @@ export default function InboxPage() {
       {msg && <p className="text-sm text-amber-700">{msg}</p>}
       {loading && <p className="text-sm text-gray-600">Loading…</p>}
 
-      {/* RECEIVED */}
       {tab === 'received' && me && (
         <ul className="space-y-3">
           {received.map((r) => (
             <li key={r.id} className="rounded border p-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm text-gray-600">
-                    {new Date(r.created_at).toLocaleString()}
-                  </div>
+                  <div className="text-sm text-gray-600">{new Date(r.created_at).toLocaleString()}</div>
                   <div className="mt-1">
-                    <strong>{r.requester?.display_name ?? 'Someone'}</strong> requested{' '}
+                    <strong>{r.requester?.display_name ?? 'Someone'}</strong> requested:{' '}
                     <Link href={`/offers/${r.offer_id}`} className="underline">
                       {r.offers?.title ?? 'this offer'}
                     </Link>
                   </div>
                   <div className="mt-2 whitespace-pre-wrap text-sm">{r.note}</div>
-                  <div className="mt-2 text-xs">
-                    Status: <span className="font-semibold">{r.status}</span>
-                  </div>
-
-                  <MessageThread
-                    req={r}
-                    me={me}
-                    tab={tab}
-                    autoOpen={deepThread === r.id}
-                  />
+                  <div className="mt-2 text-xs">Status: <span className="font-semibold">{r.status}</span></div>
+                  <MessageThread req={r} me={me} tab={tab} autoOpen={deepThread === r.id} />
                 </div>
 
                 <div className="flex flex-col gap-2">
                   {r.status === 'pending' && (
                     <>
-                      <button
-                        onClick={() => setStatus(r, 'accepted')}
-                        className="rounded bg-black px-3 py-1 text-sm text-white"
-                      >
-                        Accept
-                      </button>
-                      <button
-                        onClick={() => setStatus(r, 'declined')}
-                        className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
-                      >
-                        Decline
-                      </button>
+                      <button onClick={() => setStatus(r, 'accepted')} className="rounded bg-black px-3 py-1 text-sm text-white">Accept</button>
+                      <button onClick={() => setStatus(r, 'declined')} className="rounded border px-3 py-1 text-sm hover:bg-gray-50">Decline</button>
                     </>
                   )}
                   {r.status === 'accepted' && (
-                    <button
-                      onClick={() => setStatus(r, 'fulfilled')}
-                      className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
-                    >
-                      Mark Fulfilled
-                    </button>
+                    <button onClick={() => setStatus(r, 'fulfilled')} className="rounded border px-3 py-1 text-sm hover:bg-gray-50">Mark Fulfilled</button>
                   )}
                 </div>
               </div>
             </li>
           ))}
-          {!loading && received.length === 0 && (
-            <p className="text-sm text-gray-600">No requests yet.</p>
-          )}
+          {!loading && received.length === 0 && <p className="text-sm text-gray-600">No requests yet.</p>}
         </ul>
       )}
 
-      {/* SENT */}
       {tab === 'sent' && me && (
         <ul className="space-y-3">
           {sent.map((r) => (
             <li key={r.id} className="rounded border p-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm text-gray-600">
-                    {new Date(r.created_at).toLocaleString()}
-                  </div>
+                  <div className="text-sm text-gray-600">{new Date(r.created_at).toLocaleString()}</div>
                   <div className="mt-1">
                     You requested{' '}
                     <Link href={`/offers/${r.offer_id}`} className="underline">
@@ -541,36 +435,30 @@ export default function InboxPage() {
                     </Link>
                   </div>
                   <div className="mt-2 whitespace-pre-wrap text-sm">{r.note}</div>
-                  <div className="mt-2 text-xs">
-                    Status: <span className="font-semibold">{r.status}</span>
-                  </div>
-
-                  <MessageThread
-                    req={r}
-                    me={me}
-                    tab={tab}
-                    autoOpen={deepThread === r.id}
-                  />
+                  <div className="mt-2 text-xs">Status: <span className="font-semibold">{r.status}</span></div>
+                  <MessageThread req={r} me={me} tab={tab} autoOpen={deepThread === r.id} />
                 </div>
 
                 <div className="flex flex-col gap-2">
                   {r.status === 'pending' && (
-                    <button
-                      onClick={() => setStatus(r, 'withdrawn')}
-                      className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
-                    >
-                      Withdraw
-                    </button>
+                    <button onClick={() => setStatus(r, 'withdrawn')} className="rounded border px-3 py-1 text-sm hover:bg-gray-50">Withdraw</button>
                   )}
                 </div>
               </div>
             </li>
           ))}
-          {!loading && sent.length === 0 && (
-            <p className="text-sm text-gray-600">No sent requests.</p>
-          )}
+          {!loading && sent.length === 0 && <p className="text-sm text-gray-600">No sent requests.</p>}
         </ul>
       )}
     </section>
+  );
+}
+
+// Suspense wrapper satisfies Next 15's requirement when a page uses useSearchParams().
+export default function InboxPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-gray-600">Loading…</div>}>
+      <InboxContent />
+    </Suspense>
   );
 }
