@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 type Status = 'pending' | 'accepted' | 'declined' | 'withdrawn' | 'fulfilled';
@@ -33,12 +34,14 @@ function MessageThread({
   req,
   me,
   tab,
+  autoOpen,
 }: {
   req: ReqRow;
   me: string;
   tab: Tab;
+  autoOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<boolean>(!!autoOpen);
   const [loading, setLoading] = useState(false);
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [draft, setDraft] = useState('');
@@ -94,7 +97,7 @@ function MessageThread({
       const mapped: ChatMsg[] = (data || []).map((row: any) => ({
         id: row.id,
         created_at: row.created_at,
-        text: row.data?.text ?? '',
+        text: (row.data?.text ?? row.data?.message) ?? '',
         sender_id: row.data?.sender_id ?? '',
       }));
       setMsgs(mapped);
@@ -151,7 +154,7 @@ function MessageThread({
             const msg: ChatMsg = {
               id: n.id,
               created_at: n.created_at,
-              text: n.data?.text ?? '',
+              text: (n.data?.text ?? n.data?.message) ?? '',
               sender_id: n.data?.sender_id ?? '',
             };
             if (open) {
@@ -289,6 +292,9 @@ function MessageThread({
 }
 
 export default function InboxPage() {
+  const searchParams = useSearchParams();
+  const deepThread = searchParams.get('thread') || undefined;
+
   const [tab, setTab] = useState<Tab>('received');
   const [items, setItems] = useState<ReqRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -468,7 +474,12 @@ export default function InboxPage() {
                   </div>
 
                   {/* thread */}
-                  <MessageThread req={r} me={me} tab={tab} />
+                  <MessageThread
+                    req={r}
+                    me={me}
+                    tab={tab}
+                    autoOpen={deepThread === r.id}
+                  />
                 </div>
 
                 <div className="flex flex-col gap-2">
@@ -528,7 +539,12 @@ export default function InboxPage() {
                   </div>
 
                   {/* thread */}
-                  <MessageThread req={r} me={me} tab={tab} />
+                  <MessageThread
+                    req={r}
+                    me={me}
+                    tab={tab}
+                    autoOpen={deepThread === r.id}
+                  />
                 </div>
 
                 <div className="flex flex-col gap-2">

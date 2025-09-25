@@ -11,13 +11,14 @@ type NotifType =
   | 'request_declined'
   | 'request_fulfilled'
   | 'message_received'
+  | 'message'
   | 'system'
   | string;
 
 type Notif = {
   id: string;
   type: NotifType;
-  // data may contain: { offer_id, offer_title, request_id, requester_name, message_id, message, sender_name }
+  // data may contain: { offer_id, offer_title, request_id, requester_name, message_id, message, text, sender_name, kind }
   data: any;
   created_at: string;
   read_at: string | null;
@@ -25,6 +26,7 @@ type Notif = {
 };
 
 export default function NotificationsBell() {
+  const [mounted, setMounted] = useState(false); // prevent hydration mismatch
   const [open, setOpen] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [rows, setRows] = useState<Notif[]>([]);
@@ -34,6 +36,8 @@ export default function NotificationsBell() {
   const titleCache = useRef<Map<string, string>>(new Map()); // offer_id -> title
   const requesterCache = useRef<Map<string, string>>(new Map()); // request_id -> requester display name
   const messageCache = useRef<Map<string, { body: string; request_id: string }>>(new Map()); // message_id -> info
+
+  useEffect(() => setMounted(true), []);
 
   // ---------- enrichment helpers ----------
 
@@ -106,7 +110,6 @@ export default function NotificationsBell() {
     );
     if (!ids.length) return;
 
-    // Keep it simple (avoid FK assumptions): pull body + request_id only
     const { data } = await supabase
       .from('request_messages')
       .select('id, body, request_id')
@@ -130,7 +133,8 @@ export default function NotificationsBell() {
   function label(n: Notif): { text: string; href?: string } {
     const t = n.data?.offer_title as string | undefined;
     const reqName = n.data?.requester_name as string | undefined;
-    const body = n.data?.message as string | undefined;
+    const body = (n.data?.message as string | undefined) ?? (n.data?.text as string | undefined);
+    const reqId = n.data?.request_id as string | undefined;
 
     switch (n.type) {
       case 'request_received':
@@ -141,9 +145,16 @@ export default function NotificationsBell() {
         return { text: `Your request was declined${t ? ` — “${t}”` : ''}`, href: '/inbox' };
       case 'request_fulfilled':
         return { text: `Request marked fulfilled${t ? ` — “${t}”` : ''}`, href: '/inbox' };
+      case 'message':
       case 'message_received': {
         const snip = body ? `: ${body.slice(0, 80)}` : '';
-        return { text: `New message${t ? ` on “${t}”` : ''}${snip}`, href: '/inbox' };
+        return { text: `New message${t ? ` on “${t}”` : ''}${snip}`, href: reqId ? `/inbox?thread=${reqId}` : '/inbox' };
+      }
+      case 'system': {
+        const kind = n.data?.kind as string | undefined;
+        if (kind === 'withdrawn') return { text: `A request was withdrawn${t ? ` — “${t}”` : ''}`, href: '/inbox' };
+        if (kind === 'request_updated') return { text: `Request updated${t ? ` — “${t}”` : ''}`, href: '/inbox' };
+        return { text: n.data?.message || 'Update', href: '/inbox' };
       }
       default:
         return { text: n.data?.message || 'Update', href: '/inbox' };
@@ -233,11 +244,14 @@ export default function NotificationsBell() {
 
   // When opening panel → mark all as read
   async function toggleOpen() {
-    setOpen(v => !v);
-    if (!open) await markAllRead();
+    const next = !open;
+    setOpen(next);
+    if (next) await markAllRead();
   }
 
   // ---------- UI ----------
+
+  if (!mounted) return null;
 
   return (
     <div className="relative">
