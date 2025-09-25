@@ -5,10 +5,6 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
-// Make this page fully dynamic (prevents prerender issues on Vercel)
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 type Status = 'pending' | 'accepted' | 'declined' | 'withdrawn' | 'fulfilled';
 
 type ReqRow = {
@@ -54,12 +50,6 @@ function MessageThread({
   const otherId =
     tab === 'received' ? req.requester_profile_id : (req.offers?.owner_id ?? null);
 
-  // If autoOpen becomes true later (e.g., after reading ?thread=), open the thread.
-  useEffect(() => {
-    if (autoOpen) setOpen(true);
-  }, [autoOpen]);
-
-  // ---------- helpers ----------
   async function countUnreadForThread() {
     const { count, error } = await supabase
       .from('notifications')
@@ -116,10 +106,8 @@ function MessageThread({
     }
   }
 
-  // ---------- effects ----------
   useEffect(() => {
     countUnreadForThread().catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [req.id, me]);
 
   useEffect(() => {
@@ -178,7 +166,6 @@ function MessageThread({
     };
   }, [me, req.id, open]);
 
-  // ---------- send ----------
   async function send() {
     const text = draft.trim();
     if (!text || !otherId) return;
@@ -282,40 +269,16 @@ function MessageThread({
   );
 }
 
-// Helper to access search params in a way compatible with Next.js App Router (to avoid SSR/CSR mismatch)
-function useSafeSearchParams() {
+export default function ExchangesPage() {
   const searchParams = useSearchParams();
-  const [params, setParams] = useState<{ tab?: string; thread?: string }>({});
+  const deepThread = searchParams.get('thread') || undefined;
 
-  useEffect(() => {
-    // Only access searchParams after mount (on client)
-    setParams({
-      tab: searchParams.get('tab') || undefined,
-      thread: searchParams.get('thread') || undefined,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
-
-  return params;
-}
-
-export default function InboxPage() {
-  const { tab: tabParam, thread: threadParam } = useSafeSearchParams();
-
-  // Read query params AFTER mount to avoid SSR/CSR mismatch
-  const [deepThread, setDeepThread] = useState<string | undefined>(undefined);
   const [tab, setTab] = useState<Tab>('received');
-  useEffect(() => {
-    if (tabParam && (tabParam === 'received' || tabParam === 'sent')) setTab(tabParam);
-    setDeepThread(threadParam);
-  }, [tabParam, threadParam]);
-
   const [items, setItems] = useState<ReqRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
   const [me, setMe] = useState<string | null>(null);
 
-  // --- helpers ---
   const load = useCallback(async () => {
     setLoading(true);
     setMsg('');
@@ -360,7 +323,7 @@ export default function InboxPage() {
       }
     } catch (e: any) {
       console.error(e);
-      setMsg(e?.message ?? 'Failed to load inbox.');
+      setMsg(e?.message ?? 'Failed to load exchanges.');
       setItems([]);
     } finally {
       setLoading(false);
@@ -374,7 +337,6 @@ export default function InboxPage() {
   const received = useMemo(() => (tab === 'received' ? items : []), [tab, items]);
   const sent = useMemo(() => (tab === 'sent' ? items : []), [tab, items]);
 
-  // --- notification helper (MVP: client inserts) ---
   async function notify(
     profileId: string,
     type: 'request_received' | 'request_accepted' | 'request_declined' | 'request_fulfilled' | 'system',
@@ -391,7 +353,6 @@ export default function InboxPage() {
     }
   }
 
-  // --- actions (received/sent) ---
   async function setStatus(req: ReqRow, next: Status) {
     setMsg('');
     setItems((prev) =>
@@ -436,7 +397,7 @@ export default function InboxPage() {
   return (
     <section className="max-w-4xl">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Inbox</h2>
+        <h2 className="text-2xl font-bold">Exchanges</h2>
         <div className="flex gap-2">
           <button
             onClick={() => setTab('received')}
@@ -460,7 +421,6 @@ export default function InboxPage() {
       {msg && <p className="text-sm text-amber-700">{msg}</p>}
       {loading && <p className="text-sm text-gray-600">Loading…</p>}
 
-      {/* RECEIVED */}
       {tab === 'received' && me && (
         <ul className="space-y-3">
           {received.map((r) => (
@@ -485,7 +445,7 @@ export default function InboxPage() {
                     req={r}
                     me={me}
                     tab={tab}
-                    autoOpen={deepThread === r.id}
+                    autoOpen={searchParams.get('thread') === r.id}
                   />
                 </div>
 
@@ -524,7 +484,6 @@ export default function InboxPage() {
         </ul>
       )}
 
-      {/* SENT */}
       {tab === 'sent' && me && (
         <ul className="space-y-3">
           {sent.map((r) => (
@@ -549,7 +508,7 @@ export default function InboxPage() {
                     req={r}
                     me={me}
                     tab={tab}
-                    autoOpen={deepThread === r.id}
+                    autoOpen={searchParams.get('thread') === r.id}
                   />
                 </div>
 

@@ -15,7 +15,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/offers/new">New Offer</Link>
               <Link href="/offers/mine">My Offers</Link>
               <Link href="/messages">Messages</Link>
-              <Link href="/inbox">Inbox</Link>
+              <Link href="/exchange">Exchanges</Link>
               <Link href="/profile">Profile</Link>
               <Link href="/admin">Admin</Link>
             </div>
