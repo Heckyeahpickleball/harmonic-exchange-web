@@ -1,3 +1,4 @@
+// File: app/layout.tsx
 import './globals.css'
 import Link from 'next/link'
 import NotificationsBell from '@/components/NotificationsBell'
@@ -13,6 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/offers">Browse</Link>
               <Link href="/offers/new">New Offer</Link>
               <Link href="/offers/mine">My Offers</Link>
+              <Link href="/messages">Messages</Link>
               <Link href="/inbox">Inbox</Link>
               <Link href="/profile">Profile</Link>
               <Link href="/admin">Admin</Link>
