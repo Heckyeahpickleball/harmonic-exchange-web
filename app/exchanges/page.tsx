@@ -48,6 +48,7 @@ function MessageThread({
   tab: Tab;
   autoOpen?: boolean;
 }) {
+  // ... (leave your MessageThread code here unchanged)
   const [open, setOpen] = useState<boolean>(!!autoOpen);
   const [loading, setLoading] = useState(false);
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);

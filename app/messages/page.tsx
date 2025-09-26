@@ -1,7 +1,6 @@
-// File: app/messages/page.tsx
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -47,6 +46,7 @@ function ChatWindow({
   peerName?: string;
   onNewActivity?: () => void;
 }) {
+  // ... leave your ChatWindow code unchanged ...
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
@@ -205,7 +205,7 @@ function ChatWindow({
   );
 }
 
-export default function MessagesPage() {
+function MessagesContent() {
   const sp = useSearchParams();
   const deepThread = sp.get('thread') || undefined;
 
@@ -408,5 +408,14 @@ export default function MessagesPage() {
         )}
       </div>
     </section>
+  );
+}
+
+// Suspense wrapper required for Next.js 15+ if you use useSearchParams in the page tree!
+export default function MessagesPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-gray-600">Loading…</div>}>
+      <MessagesContent />
+    </Suspense>
   );
 }
