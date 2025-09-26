@@ -163,15 +163,21 @@ export default function AdminPage() {
   }
 
   async function setUserRole(id: string, next: 'user' | 'moderator' | 'admin') {
-    // Client-side guard (DB/RPC should also enforce!)
+    // Client-side guard (DB/RPC enforces as well)
     if (me?.role !== 'admin') {
       setMsg('Only admins can change roles.');
       return;
     }
     setMsg('');
-    const reason = prompt(`Reason for changing role to ${next}? (optional)`) || null;
     try {
-      await supabase.rpc('admin_user_set_role', { p_profile_id: id, p_role: next, p_reason: reason });
+      // Use the DB function you created earlier
+      const { error } = await supabase.rpc('admin_set_role', {
+        p_profile: id,
+        p_role: next,
+      });
+      if (error) throw error;
+
+      // Optimistic local update
       setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, role: next } : u)));
     } catch (e: any) {
       console.error(e);

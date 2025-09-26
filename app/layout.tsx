@@ -51,7 +51,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/messages">Messages</Link>
               <Link href="/exchanges">Exchanges</Link>
               <Link href="/profile">Profile</Link>
-              {role === 'admin' && <Link href="/admin">Admin</Link>}
+              {(role === 'admin' || role === 'moderator') && <Link href="/admin">Admin</Link>}
+
             </div>
             <div className="flex items-center gap-4">
               <Link href="/sign-in">Sign In</Link>
