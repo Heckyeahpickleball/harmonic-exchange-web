@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { Suspense, useEffect, useMemo, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
@@ -32,9 +32,7 @@ function useSafeThreadParam() {
   const searchParams = useSearchParams();
   const [thread, setThread] = useState<string | undefined>(undefined);
   useEffect(() => {
-    // Only read searchParams after mount
     setThread(searchParams.get('thread') || undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
   return thread;
 }
@@ -279,7 +277,7 @@ function MessageThread({
   );
 }
 
-export default function ExchangesPage() {
+function ExchangesContent() {
   const thread = useSafeThreadParam();
 
   const [tab, setTab] = useState<Tab>('received');
@@ -540,5 +538,14 @@ export default function ExchangesPage() {
         </ul>
       )}
     </section>
+  );
+}
+
+// Suspense wrapper is required for Next 15+ if you use useSearchParams in the page tree.
+export default function ExchangesPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-gray-600">Loading…</div>}>
+      <ExchangesContent />
+    </Suspense>
   );
 }
