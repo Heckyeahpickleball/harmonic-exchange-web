@@ -1,8 +1,9 @@
-/* HX v0.6 — 2025-09-21 — My Offers selects images for thumbnails
+/* HX v0.6 — 2025-09-21 — My Offers selects images for thumbnails + owner actions
    File: app/offers/mine/page.tsx
 */
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import OfferCard, { type OfferRow } from '@/components/OfferCard';
@@ -132,7 +133,72 @@ export default function MyOffersPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {visible.map((o) => (
-            <OfferCard key={o.id} offer={o} mine onDeleted={handleDeleted} />
+            <div key={o.id} className="space-y-2">
+              {/* Card (shows View + Delete) */}
+              <OfferCard offer={o} mine onDeleted={handleDeleted} />
+
+              {/* Owner controls under the card (Edit / Pause / Archive / Unarchive) */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href={`/offers/${o.id}/edit`}
+                  className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
+                >
+                  Edit
+                </Link>
+
+                {o.status === 'active' && (
+                  <>
+                    <button
+                      onClick={() => setStatus(o.id, 'paused')}
+                      className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
+                    >
+                      Pause
+                    </button>
+                    <button
+                      onClick={() => setStatus(o.id, 'archived')}
+                      className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
+                    >
+                      Archive
+                    </button>
+                  </>
+                )}
+
+                {o.status === 'paused' && (
+                  <>
+                    <button
+                      onClick={() => setStatus(o.id, 'active')}
+                      className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
+                    >
+                      Resume
+                    </button>
+                    <button
+                      onClick={() => setStatus(o.id, 'archived')}
+                      className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
+                    >
+                      Archive
+                    </button>
+                  </>
+                )}
+
+                {o.status === 'archived' && (
+                  <button
+                    onClick={() => setStatus(o.id, 'active')}
+                    className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
+                  >
+                    Unarchive (Resume)
+                  </button>
+                )}
+
+                {o.status === 'blocked' && (
+                  <span className="text-sm text-gray-600">Blocked</span>
+                )}
+                {o.status === 'pending' && (
+                  <span className="text-sm text-gray-600">Pending approval</span>
+                )}
+              </div>
+
+              <div className="text-xs text-gray-600">Status: {o.status}</div>
+            </div>
           ))}
         </div>
       )}
