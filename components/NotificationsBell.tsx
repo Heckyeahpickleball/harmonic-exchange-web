@@ -11,13 +11,14 @@ type NotifType =
   | 'request_declined'
   | 'request_fulfilled'
   | 'message_received'
+  | 'message' // <-- treat as chat for my own copy
   | 'system'
   | string;
 
 type Notif = {
   id: string;
   type: NotifType;
-  // data may contain: { offer_id, offer_title, request_id, requester_name, message_id, message, sender_name }
+  // data: { offer_id?, offer_title?, request_id?, requester_name?, text?, message? }
   data: any;
   created_at: string;
   read_at: string | null;
@@ -31,12 +32,12 @@ export default function NotificationsBell() {
   const unread = useMemo(() => rows.filter(r => !r.read_at).length, [rows]);
 
   // caches to avoid repeated fetches
-  const titleCache = useRef<Map<string, string>>(new Map()); // offer_id -> title
-  const requesterCache = useRef<Map<string, string>>(new Map()); // request_id -> requester display name
-  const messageCache = useRef<Map<string, { body: string; request_id: string }>>(new Map()); // message_id -> info
+  const titleCache = useRef<Map<string, string>>(new Map());       // offer_id -> title
+  const requesterCache = useRef<Map<string, string>>(new Map());   // request_id -> requester display name
 
   // ---------- enrichment helpers ----------
 
+  // Add missing offer titles (when we only have offer_id)
   async function enrichOfferTitles(notifs: Notif[]) {
     const missing = Array.from(
       new Set(
@@ -47,22 +48,30 @@ export default function NotificationsBell() {
     );
     if (!missing.length) return;
 
-    const { data } = await supabase.from('offers').select('id,title').in('id', missing);
-    for (const row of (data || []) as { id: string; title: string }[]) {
-      titleCache.current.set(row.id, row.title);
-    }
+    // Read title only. RLS: works for active offers (or owner/admin).
+    const { data, error } = await supabase
+      .from('offers')
+      .select('id,title')
+      .in('id', missing);
 
-    setRows(prev =>
-      prev.map(n => {
-        const oid = n?.data?.offer_id as string | undefined;
-        if (!oid) return n;
-        const t = titleCache.current.get(oid);
-        if (!t) return n;
-        return { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } };
-      })
-    );
+    if (!error) {
+      for (const row of (data || []) as { id: string; title: string }[]) {
+        titleCache.current.set(row.id, row.title);
+      }
+
+      setRows(prev =>
+        prev.map(n => {
+          const oid = n?.data?.offer_id as string | undefined;
+          if (!oid) return n;
+          const t = titleCache.current.get(oid);
+          if (!t) return n;
+          return { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } };
+        })
+      );
+    }
   }
 
+  // Add requester display name for request_received (when we only have request_id)
   async function enrichRequesterNames(notifs: Notif[]) {
     const ids = Array.from(
       new Set(
@@ -93,56 +102,40 @@ export default function NotificationsBell() {
     );
   }
 
-  async function enrichMessagePreviews(notifs: Notif[]) {
-    const ids = Array.from(
-      new Set(
-        notifs
-          .map(n => (n.type === 'message_received' && !n?.data?.message ? n?.data?.message_id : null))
-          .filter((v): v is string => !!v && !messageCache.current.has(v))
-      )
-    );
-    if (!ids.length) return;
-
-    const { data } = await supabase
-      .from('request_messages')
-      .select('id, body, request_id')
-      .in('id', ids);
-
-    for (const m of (data || []) as any[]) {
-      messageCache.current.set(m.id, { body: m.body as string, request_id: m.request_id as string });
-    }
-
-    setRows(prev =>
-      prev.map(n => {
-        const mid = n?.data?.message_id as string | undefined;
-        if (!mid) return n;
-        const info = messageCache.current.get(mid);
-        if (!info) return n;
-        return { ...n, data: { ...n.data, message: n.data?.message ?? info.body } };
-      })
-    );
-  }
+  // ---------- label/links ----------
 
   function label(n: Notif): { text: string; href?: string } {
-    const t = n.data?.offer_title as string | undefined;
+    const offerTitle = n.data?.offer_title as string | undefined;
     const reqName = n.data?.requester_name as string | undefined;
-    const body = n.data?.message as string | undefined;
+    const body = (n.data?.text ?? n.data?.message) as string | undefined; // read text OR message
+    const reqId = n.data?.request_id as string | undefined;
 
     switch (n.type) {
       case 'request_received':
-        return { text: `New request${t ? ` for “${t}”` : ''}${reqName ? ` from ${reqName}` : ''}`, href: '/exchanges' };
+        return {
+          text: `New request${offerTitle ? ` for “${offerTitle}”` : ''}${reqName ? ` from ${reqName}` : ''}`,
+          href: '/exchanges?tab=received',
+        };
       case 'request_accepted':
-        return { text: `Your request was accepted${t ? ` — “${t}”` : ''}`, href: '/exchanges' };
+        return { text: `Your request was accepted${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
       case 'request_declined':
-        return { text: `Your request was declined${t ? ` — “${t}”` : ''}`, href: '/exchanges' };
+        return { text: `Your request was declined${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
       case 'request_fulfilled':
-        return { text: `Request marked fulfilled${t ? ` — “${t}”` : ''}`, href: '/exchanges' };
+        return { text: `Request marked fulfilled${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
+
+      // Treat both as chat
+      case 'message':
       case 'message_received': {
         const snip = body ? `: ${body.slice(0, 80)}` : '';
-        return { text: `New message${t ? ` on “${t}”` : ''}${snip}`, href: '/messages' };
+        const on = offerTitle ? ` on “${offerTitle}”` : '';
+        return { text: `New message${on}${snip}`, href: reqId ? `/messages?thread=${reqId}` : '/messages' };
       }
-      default:
-        return { text: n.data?.message || 'Update', href: '/exchanges' };
+
+      // System notices (e.g., withdrawn) or unknown types
+      default: {
+        const text = n.data?.message || n.data?.text || 'Update';
+        return { text, href: '/exchanges' };
+      }
     }
   }
 
@@ -153,6 +146,14 @@ export default function NotificationsBell() {
     const nowISO = new Date().toISOString();
     setRows(prev => prev.map(r => (ids.includes(r.id) ? { ...r, read_at: nowISO } : r)));
     await supabase.from('notifications').update({ read_at: nowISO }).in('id', ids);
+  }
+
+  async function markOneRead(id: string) {
+    const found = rows.find(r => r.id === id);
+    if (!found || found.read_at) return;
+    const nowISO = new Date().toISOString();
+    setRows(prev => prev.map(r => (r.id === id ? { ...r, read_at: nowISO } : r)));
+    await supabase.from('notifications').update({ read_at: nowISO }).eq('id', id);
   }
 
   // ---------- effects ----------
@@ -174,10 +175,11 @@ export default function NotificationsBell() {
       const initial = (list || []) as Notif[];
       setRows(initial);
 
+      // fire-and-forget enrichment
       enrichOfferTitles(initial).catch(() => {});
       enrichRequesterNames(initial).catch(() => {});
-      enrichMessagePreviews(initial).catch(() => {});
 
+      // realtime inserts
       const chIns = supabase
         .channel('realtime:notifications:ins')
         .on(
@@ -189,12 +191,12 @@ export default function NotificationsBell() {
             await Promise.allSettled([
               enrichOfferTitles([n]),
               enrichRequesterNames([n]),
-              enrichMessagePreviews([n]),
             ]);
           }
         )
         .subscribe();
 
+      // realtime updates (e.g., read_at from another tab)
       const chUpd = supabase
         .channel('realtime:notifications:upd')
         .on(
@@ -214,10 +216,14 @@ export default function NotificationsBell() {
     })();
   }, []);
 
+  // When opening panel → mark all as read
   async function toggleOpen() {
     setOpen(v => !v);
+    // mark-as-read after opening
     if (!open) await markAllRead();
   }
+
+  // ---------- UI ----------
 
   return (
     <div className="relative">
@@ -263,12 +269,7 @@ export default function NotificationsBell() {
                       <Link
                         href={href}
                         className="whitespace-nowrap text-xs underline"
-                        onClick={() => {
-                          if (!n.read_at) {
-                            supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id)
-                              .then(() => {});
-                          }
-                        }}
+                        onClick={() => markOneRead(n.id)}
                       >
                         View
                       </Link>
