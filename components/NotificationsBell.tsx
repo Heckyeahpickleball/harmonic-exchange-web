@@ -11,14 +11,15 @@ type NotifType =
   | 'request_declined'
   | 'request_fulfilled'
   | 'message_received'
-  | 'message' // <-- treat as chat for my own copy
+  | 'message' // treat as chat for my own copy
+  | 'offer_pending' // <-- new: staff alert when an offer awaits approval
   | 'system'
   | string;
 
 type Notif = {
   id: string;
   type: NotifType;
-  // data: { offer_id?, offer_title?, request_id?, requester_name?, text?, message? }
+  // data may include: { offer_id?, offer_title?, request_id?, requester_name?, text?, message? }
   data: any;
   created_at: string;
   read_at: string | null;
@@ -29,11 +30,11 @@ export default function NotificationsBell() {
   const [open, setOpen] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [rows, setRows] = useState<Notif[]>([]);
-  const unread = useMemo(() => rows.filter(r => !r.read_at).length, [rows]);
+  const unread = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
 
   // caches to avoid repeated fetches
-  const titleCache = useRef<Map<string, string>>(new Map());       // offer_id -> title
-  const requesterCache = useRef<Map<string, string>>(new Map());   // request_id -> requester display name
+  const titleCache = useRef<Map<string, string>>(new Map()); // offer_id -> title
+  const requesterCache = useRef<Map<string, string>>(new Map()); // request_id -> requester display name
 
   // ---------- enrichment helpers ----------
 
@@ -42,25 +43,22 @@ export default function NotificationsBell() {
     const missing = Array.from(
       new Set(
         notifs
-          .map(n => (n?.data?.offer_title ? null : n?.data?.offer_id))
+          .map((n) => (n?.data?.offer_title ? null : n?.data?.offer_id))
           .filter((v): v is string => !!v && !titleCache.current.has(v))
       )
     );
     if (!missing.length) return;
 
     // Read title only. RLS: works for active offers (or owner/admin).
-    const { data, error } = await supabase
-      .from('offers')
-      .select('id,title')
-      .in('id', missing);
+    const { data, error } = await supabase.from('offers').select('id,title').in('id', missing);
 
     if (!error) {
       for (const row of (data || []) as { id: string; title: string }[]) {
         titleCache.current.set(row.id, row.title);
       }
 
-      setRows(prev =>
-        prev.map(n => {
+      setRows((prev) =>
+        prev.map((n) => {
           const oid = n?.data?.offer_id as string | undefined;
           if (!oid) return n;
           const t = titleCache.current.get(oid);
@@ -76,7 +74,7 @@ export default function NotificationsBell() {
     const ids = Array.from(
       new Set(
         notifs
-          .map(n => (n.type === 'request_received' && !n?.data?.requester_name ? n?.data?.request_id : null))
+          .map((n) => (n.type === 'request_received' && !n?.data?.requester_name ? n?.data?.request_id : null))
           .filter((v): v is string => !!v && !requesterCache.current.has(v))
       )
     );
@@ -91,8 +89,8 @@ export default function NotificationsBell() {
       requesterCache.current.set(r.id, r.requester?.display_name || 'Someone');
     }
 
-    setRows(prev =>
-      prev.map(n => {
+    setRows((prev) =>
+      prev.map((n) => {
         const rid = n?.data?.request_id as string | undefined;
         if (!rid) return n;
         const name = requesterCache.current.get(rid);
@@ -109,6 +107,7 @@ export default function NotificationsBell() {
     const reqName = n.data?.requester_name as string | undefined;
     const body = (n.data?.text ?? n.data?.message) as string | undefined; // read text OR message
     const reqId = n.data?.request_id as string | undefined;
+    const offerId = n.data?.offer_id as string | undefined;
 
     switch (n.type) {
       case 'request_received':
@@ -131,6 +130,14 @@ export default function NotificationsBell() {
         return { text: `New message${on}${snip}`, href: reqId ? `/messages?thread=${reqId}` : '/messages' };
       }
 
+      // NEW: staff notification when an offer awaits approval
+      case 'offer_pending': {
+        const title = offerTitle ? `: “${offerTitle}”` : '';
+        // If we have the offer_id, send them to the offer; otherwise to Admin → Offers
+        const href = offerId ? `/offers/${offerId}` : '/admin?tab=offers';
+        return { text: `New offer pending${title}`, href };
+      }
+
       // System notices (e.g., withdrawn) or unknown types
       default: {
         const text = n.data?.message || n.data?.text || 'Update';
@@ -141,18 +148,18 @@ export default function NotificationsBell() {
 
   async function markAllRead() {
     if (!uid) return;
-    const ids = rows.filter(r => !r.read_at).map(r => r.id);
+    const ids = rows.filter((r) => !r.read_at).map((r) => r.id);
     if (!ids.length) return;
     const nowISO = new Date().toISOString();
-    setRows(prev => prev.map(r => (ids.includes(r.id) ? { ...r, read_at: nowISO } : r)));
+    setRows((prev) => prev.map((r) => (ids.includes(r.id) ? { ...r, read_at: nowISO } : r)));
     await supabase.from('notifications').update({ read_at: nowISO }).in('id', ids);
   }
 
   async function markOneRead(id: string) {
-    const found = rows.find(r => r.id === id);
+    const found = rows.find((r) => r.id === id);
     if (!found || found.read_at) return;
     const nowISO = new Date().toISOString();
-    setRows(prev => prev.map(r => (r.id === id ? { ...r, read_at: nowISO } : r)));
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, read_at: nowISO } : r)));
     await supabase.from('notifications').update({ read_at: nowISO }).eq('id', id);
   }
 
@@ -187,11 +194,8 @@ export default function NotificationsBell() {
           { event: 'INSERT', schema: 'public', table: 'notifications', filter: `profile_id=eq.${u}` },
           async (payload) => {
             const n = payload.new as Notif;
-            setRows(prev => [n, ...prev].slice(0, 50));
-            await Promise.allSettled([
-              enrichOfferTitles([n]),
-              enrichRequesterNames([n]),
-            ]);
+            setRows((prev) => [n, ...prev].slice(0, 50));
+            await Promise.allSettled([enrichOfferTitles([n]), enrichRequesterNames([n])]);
           }
         )
         .subscribe();
@@ -204,7 +208,7 @@ export default function NotificationsBell() {
           { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `profile_id=eq.${u}` },
           (payload) => {
             const upd = payload.new as Notif;
-            setRows(prev => prev.map(r => (r.id === upd.id ? { ...r, read_at: upd.read_at } : r)));
+            setRows((prev) => prev.map((r) => (r.id === upd.id ? { ...r, read_at: upd.read_at } : r)));
           }
         )
         .subscribe();
@@ -218,8 +222,8 @@ export default function NotificationsBell() {
 
   // When opening panel → mark all as read
   async function toggleOpen() {
-    setOpen(v => !v);
-    // mark-as-read after opening
+    setOpen((v) => !v);
+    // mark-as-read after opening (check previous state)
     if (!open) await markAllRead();
   }
 
@@ -227,11 +231,7 @@ export default function NotificationsBell() {
 
   return (
     <div className="relative">
-      <button
-        className="relative rounded border px-2 py-1 text-sm"
-        onClick={toggleOpen}
-        title="Notifications"
-      >
+      <button className="relative rounded border px-2 py-1 text-sm" onClick={toggleOpen} title="Notifications">
         🔔
         {unread > 0 && (
           <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-amber-500 px-1 text-[11px] font-bold text-white">
@@ -244,33 +244,26 @@ export default function NotificationsBell() {
         <div className="absolute right-0 z-50 mt-2 w-[340px] max-w-[90vw] rounded border bg-white shadow">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <strong className="text-sm">Notifications</strong>
-            <button onClick={markAllRead} className="text-xs underline">Mark all read</button>
+            <button onClick={markAllRead} className="text-xs underline">
+              Mark all read
+            </button>
           </div>
 
           <ul className="max-h-[55vh] overflow-auto">
-            {rows.length === 0 && (
-              <li className="px-3 py-3 text-sm text-gray-600">No notifications.</li>
-            )}
+            {rows.length === 0 && <li className="px-3 py-3 text-sm text-gray-600">No notifications.</li>}
 
             {rows.map((n) => {
               const { text, href } = label(n);
               const ts = new Date(n.created_at).toLocaleString();
               return (
-                <li
-                  key={n.id}
-                  className={`border-b px-3 py-2 text-sm ${!n.read_at ? 'bg-amber-50' : ''}`}
-                >
+                <li key={n.id} className={`border-b px-3 py-2 text-sm ${!n.read_at ? 'bg-amber-50' : ''}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="text-[11px] text-gray-500">{ts}</div>
                       <div>{text}</div>
                     </div>
                     {href && (
-                      <Link
-                        href={href}
-                        className="whitespace-nowrap text-xs underline"
-                        onClick={() => markOneRead(n.id)}
-                      >
+                      <Link href={href} className="whitespace-nowrap text-xs underline" onClick={() => markOneRead(n.id)}>
                         View
                       </Link>
                     )}

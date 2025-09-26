@@ -1,4 +1,4 @@
-/* HX v0.8 — Offer card (browse + “my offers”), supports owner delete
+/* HX v0.9 — Offer card (browse + “my offers”), owner controls restored
    File: components/OfferCard.tsx
 */
 'use client';
@@ -22,10 +22,12 @@ export type OfferRow = {
 
 type Props = {
   offer: OfferRow;
-  /** Show owner controls (Delete). Use in /offers/mine only. */
+  /** Show owner controls (Edit / Pause / Archive / Set Active / Delete). Use in /offers/mine only. */
   mine?: boolean;
   /** Called after a successful delete so the parent list can remove the card. */
   onDeleted?: (id: string) => void;
+  /** Optional: called after status change so parent can refetch if it wants. */
+  onStatusChanged?: (id: string, next: OfferRow['status']) => void;
 };
 
 function StatusBadge({ status }: { status: OfferRow['status'] }) {
@@ -45,33 +47,65 @@ function StatusBadge({ status }: { status: OfferRow['status'] }) {
   );
 }
 
-export function OfferCardImpl({ offer, mine = false, onDeleted }: Props) {
-  const [deleting, setDeleting] = useState(false);
+export function OfferCardImpl({ offer, mine = false, onDeleted, onStatusChanged }: Props) {
+  // Keep a local copy so status changes reflect instantly.
+  const [local, setLocal] = useState<OfferRow>(offer);
+  const [busy, setBusy] = useState<'delete' | 'status' | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const thumb =
-    Array.isArray(offer.images) && offer.images.length > 0 ? offer.images[0] : null;
+  const thumb = Array.isArray(local.images) && local.images.length > 0 ? local.images[0] : null;
+  const href = `/offers/${local.id}`;
+  const location = local.is_online ? 'Online' : [local.city, local.country].filter(Boolean).join(', ');
 
   async function handleDelete() {
     setErr(null);
     if (!confirm('Delete this offer permanently? This cannot be undone.')) return;
 
     try {
-      setDeleting(true);
-      const { error } = await supabase.from('offers').delete().eq('id', offer.id);
+      setBusy('delete');
+      const { error } = await supabase.from('offers').delete().eq('id', local.id);
       if (error) throw error;
-      onDeleted?.(offer.id);
+      onDeleted?.(local.id);
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to delete');
     } finally {
-      setDeleting(false);
+      setBusy(null);
     }
   }
 
-  const href = `/offers/${offer.id}`;
-  const location = offer.is_online
-    ? 'Online'
-    : [offer.city, offer.country].filter(Boolean).join(', ');
+  async function setStatus(next: OfferRow['status']) {
+    setErr(null);
+
+    // Owners can set: active ↔ paused/archived. (Blocked is staff; Pending is review.)
+    if (local.status === 'blocked' || local.status === 'pending') {
+      setErr('This status can only be changed by staff.');
+      return;
+    }
+
+    try {
+      setBusy('status');
+      // Optimistic update
+      const prev = local.status;
+      setLocal((s) => ({ ...s, status: next }));
+
+      const { error } = await supabase.from('offers').update({ status: next }).eq('id', local.id);
+      if (error) throw error;
+
+      onStatusChanged?.(local.id, next);
+    } catch (e: any) {
+      // Revert if failed
+      setLocal((s) => ({ ...s, status: offer.status }));
+      setErr(e?.message ?? 'Failed to change status');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const canPause = mine && local.status === 'active';
+  const canSetActive = mine && (local.status === 'paused' || local.status === 'archived');
+  const canArchive = mine && local.status !== 'archived';
+  const canEdit = mine; // always allow owner to open edit page
+  const canDelete = mine; // always allow owner to delete
 
   return (
     <article className="rounded border">
@@ -81,15 +115,13 @@ export function OfferCardImpl({ offer, mine = false, onDeleted }: Props) {
           {thumb ? (
             <Image
               src={thumb}
-              alt={offer.title}
+              alt={local.title}
               fill
               className="object-cover"
               sizes="(max-width: 768px) 100vw, 50vw"
             />
           ) : (
-            <div className="flex h-full items-center justify-center text-xs text-gray-400">
-              No image
-            </div>
+            <div className="flex h-full items-center justify-center text-xs text-gray-400">No image</div>
           )}
         </div>
       </Link>
@@ -98,32 +130,73 @@ export function OfferCardImpl({ offer, mine = false, onDeleted }: Props) {
         <div className="flex items-start justify-between gap-2">
           <div>
             <Link href={href} className="block text-base font-semibold hover:underline">
-              {offer.title}
+              {local.title}
             </Link>
             <div className="mt-0.5 text-xs text-gray-600">
-              {offer.offer_type} • {location || '—'}
+              {local.offer_type} • {location || '—'}
             </div>
           </div>
-          <StatusBadge status={offer.status} />
+          <StatusBadge status={local.status} />
         </div>
 
-        <div className="flex gap-2">
-          <Link
-            href={href}
-            className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
-          >
-            View &amp; Request
+        {/* Primary actions */}
+        <div className="flex flex-wrap gap-2">
+          <Link href={href} className="rounded border px-2 py-1 text-sm hover:bg-gray-50">
+            {mine ? 'View' : 'View & Request'}
           </Link>
 
           {mine && (
-            <button
-              onClick={handleDelete}
-              disabled={deleting}
-              className="rounded border px-2 py-1 text-sm hover:bg-gray-50 disabled:opacity-60"
-              title="Delete permanently"
-            >
-              {deleting ? 'Deleting…' : 'Delete'}
-            </button>
+            <>
+              {canEdit && (
+                <Link
+                  href={`/offers/${local.id}/edit`}
+                  className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
+                >
+                  Edit
+                </Link>
+              )}
+
+              {canPause && (
+                <button
+                  onClick={() => setStatus('paused')}
+                  disabled={busy === 'status'}
+                  className="rounded border px-2 py-1 text-sm hover:bg-gray-50 disabled:opacity-60"
+                >
+                  {busy === 'status' ? 'Working…' : 'Pause'}
+                </button>
+              )}
+
+              {canArchive && local.status !== 'archived' && (
+                <button
+                  onClick={() => setStatus('archived')}
+                  disabled={busy === 'status'}
+                  className="rounded border px-2 py-1 text-sm hover:bg-gray-50 disabled:opacity-60"
+                >
+                  {busy === 'status' ? 'Working…' : 'Archive'}
+                </button>
+              )}
+
+              {canSetActive && (
+                <button
+                  onClick={() => setStatus('active')}
+                  disabled={busy === 'status'}
+                  className="rounded border px-2 py-1 text-sm hover:bg-gray-50 disabled:opacity-60"
+                >
+                  {busy === 'status' ? 'Working…' : 'Set Active'}
+                </button>
+              )}
+
+              {canDelete && (
+                <button
+                  onClick={handleDelete}
+                  disabled={busy === 'delete'}
+                  className="rounded border px-2 py-1 text-sm hover:bg-gray-50 disabled:opacity-60"
+                  title="Delete permanently"
+                >
+                  {busy === 'delete' ? 'Deleting…' : 'Delete'}
+                </button>
+              )}
+            </>
           )}
         </div>
 
