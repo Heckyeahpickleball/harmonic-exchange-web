@@ -1,9 +1,43 @@
 // File: app/layout.tsx
-import './globals.css'
-import Link from 'next/link'
-import NotificationsBell from '@/components/NotificationsBell'
+'use client';
+
+import './globals.css';
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import NotificationsBell from '@/components/NotificationsBell';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const [role, setRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadRole() {
+      // get current user
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth?.user?.id;
+      if (!uid) {
+        if (mounted) setRole(null);
+        return;
+      }
+
+      // read their profile role
+      const { data } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', uid)
+        .single();
+
+      if (mounted) setRole(data?.role ?? null);
+    }
+
+    loadRole();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   return (
     <html lang="en">
       <body>
@@ -15,9 +49,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/offers/new">New Offer</Link>
               <Link href="/offers/mine">My Offers</Link>
               <Link href="/messages">Messages</Link>
-              <Link href="/exchange">Exchanges</Link>
+              <Link href="/exchanges">Exchanges</Link>
               <Link href="/profile">Profile</Link>
-              <Link href="/admin">Admin</Link>
+              {role === 'admin' && <Link href="/admin">Admin</Link>}
             </div>
             <div className="flex items-center gap-4">
               <Link href="/sign-in">Sign In</Link>
@@ -28,5 +62,5 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main className="mx-auto max-w-5xl p-4">{children}</main>
       </body>
     </html>
-  )
+  );
 }
