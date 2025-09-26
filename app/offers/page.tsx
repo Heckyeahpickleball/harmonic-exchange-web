@@ -1,138 +1,106 @@
+// app/offers/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import OfferCard, { type OfferRow } from '@/components/OfferCard';
 import TagMultiSelect from '@/components/TagMultiSelect';
+import { fetchAllTags, type Tag } from '@/lib/tags';
 
-/** Keep offer_type strongly typed so filters are easy */
-type OfferType = 'product' | 'service' | 'time' | 'knowledge' | 'other';
-
-type DbOfferRow = {
-  id: string;
-  title: string;
-  offer_type: OfferType;
-  is_online: boolean;
-  city: string | null;
-  country: string | null;
-  images: string[] | null;
-  status: 'active' | 'paused' | 'archived' | 'blocked';
-  created_at: string;
-  // Supabase join shape
-  offer_tags: { tags: { id: number; name: string } | null }[] | null;
-};
-
-type Tag = { id: number; name: string };
+const TYPES = ['all types', 'product', 'service', 'time', 'knowledge', 'other'] as const;
+type TypeFilter = (typeof TYPES)[number];
 
 export default function BrowseOffersPage() {
-  const [rows, setRows] = useState<OfferRow[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // simple local filters (title/type/city/online)
   const [q, setQ] = useState('');
-  const [type, setType] = useState<'all' | OfferType>('all');
+  const [type, setType] = useState<TypeFilter>('all types');
   const [city, setCity] = useState('');
   const [onlineOnly, setOnlineOnly] = useState(false);
-
-  // tag filter
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
-  const [loadingTags, setLoadingTags] = useState(true);
+  const [offers, setOffers] = useState<OfferRow[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  // Load offers
   useEffect(() => {
-    let cancelled = false;
+    fetchAllTags().then(setAllTags).catch(console.error);
+  }, []);
 
-    (async () => {
-      setLoading(true);
+  const tagIds = useMemo(
+    () => selectedTags.filter((t) => t.id > 0).map((t) => t.id),
+    [selectedTags]
+  );
 
-      const { data, error } = await supabase
+  async function load() {
+    setLoading(true);
+    try {
+      const join = tagIds.length ? 'offer_tags!inner' : 'offer_tags';
+      let query = supabase
         .from('offers')
-        .select(`
-          id, title, offer_type, is_online, city, country, images, status, created_at,
-          offer_tags:offer_tags (
-            tags:tags ( id, name )
-          )
-        `)
+        .select(
+          `id,title,offer_type,is_online,city,country,images, ${join}(tag_id,tags(name))`
+        )
         .eq('status', 'active')
         .order('created_at', { ascending: false });
 
-      if (cancelled) return;
+      if (q.trim()) query = query.ilike('title', `%${q.trim()}%`);
+      if (type !== 'all types') query = query.eq('offer_type', type);
+      if (onlineOnly) query = query.eq('is_online', true);
+      if (!onlineOnly && city.trim()) query = query.ilike('city', `%${city.trim()}%`);
+      if (tagIds.length) query = query.in('offer_tags.tag_id', tagIds);
 
-      if (error || !data) {
-        console.error(error);
-        setRows([]);
-        setLoading(false);
-        return;
+      const { data, error } = await query;
+      if (error) throw error;
+
+      // De-dupe when inner-joining tags
+      const map = new Map<string, OfferRow>();
+      for (const row of ((data as any[]) ?? [])) {
+        const existing =
+          map.get(row.id) ??
+          ({
+            id: row.id,
+            title: row.title,
+            offer_type: row.offer_type,
+            is_online: row.is_online,
+            city: row.city,
+            country: row.country,
+            status: row.status ?? 'active',
+            images: row.images ?? [],
+          } as OfferRow);
+
+        const rowTags: { id: number; name: string }[] = (row.offer_tags ?? [])
+          .map((ot: any) => ({ id: ot?.tag_id as number, name: ot?.tags?.name as string }))
+          .filter((t: { id: number; name: string }) => t.id && t.name);
+
+        // merge unique by id (for local tag display, not OfferRow)
+        const mergedTags = rowTags.reduce(
+          (acc: { id: number; name: string }[], t: { id: number; name: string }) =>
+            acc.some((x) => x.id === t.id) ? acc : acc.concat(t),
+          []
+        );
+        // Attach tags to a parallel map for display if needed, or extend OfferRow elsewhere if required
+        (existing as any).tags = mergedTags;
+        map.set(row.id, existing);
       }
-
-      // Normalize DB rows -> OfferRow (what <OfferCard/> wants)
-      const mapped: OfferRow[] = (data as unknown as DbOfferRow[]).map((r) => ({
-        id: r.id,
-        title: r.title,
-        offer_type: r.offer_type,
-        is_online: r.is_online,
-        city: r.city,
-        country: r.country,
-        images: r.images ?? null,
-        tags: (r.offer_tags ?? []).flatMap((ot) => (ot?.tags ? [ot.tags] : [])),
-      }));
-
-      setRows(mapped);
+      setOffers(Array.from(map.values()));
+    } catch (e) {
+      console.error(e);
+      setOffers([]);
+    } finally {
       setLoading(false);
-    })();
+    }
+  }
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Load all tags for the picker
   useEffect(() => {
-    let cancelled = false;
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, type, city, onlineOnly, tagIds.join(',')]);
 
-    (async () => {
-      setLoadingTags(true);
-      const { data, error } = await supabase
-        .from('tags')
-        .select('id, name')
-        .order('name', { ascending: true });
-
-      if (!cancelled) {
-        if (!error && data) setAllTags(data as Tag[]);
-        setLoadingTags(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const filtered = useMemo(() => {
-    return rows.filter((o) => {
-      if (type !== 'all' && o.offer_type !== type) return false;
-      if (onlineOnly && !o.is_online) return false;
-      if (city && (o.city || '').toLowerCase() !== city.toLowerCase()) return false;
-      if (q && !o.title.toLowerCase().includes(q.toLowerCase())) return false;
-
-      // Tag AND filter: every selected tag must exist on the offer
-      if (selectedTags.length > 0) {
-        const tagIds = new Set((o.tags ?? []).map((t) => t.id));
-        for (const t of selectedTags) {
-          if (!tagIds.has(t.id)) return false;
-        }
-      }
-
-      return true;
-    });
-  }, [rows, type, onlineOnly, city, q, selectedTags]);
+  const filtered = offers; // all server filtering already applied
 
   return (
-    <section className="max-w-5xl">
-      <h2 className="mb-3 text-2xl font-bold">Browse Offers</h2>
+    <section className="space-y-3">
+      <h1 className="text-2xl font-bold">Browse Offers</h1>
 
-      <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-4">
+      <div className="flex flex-wrap gap-2">
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -142,15 +110,14 @@ export default function BrowseOffersPage() {
 
         <select
           value={type}
-          onChange={(e) => setType(e.target.value as 'all' | OfferType)}
+          onChange={(e) => setType(e.target.value as TypeFilter)}
           className="rounded border px-3 py-2"
         >
-          <option value="all">all types</option>
-          <option value="product">product</option>
-          <option value="service">service</option>
-          <option value="time">time</option>
-          <option value="knowledge">knowledge</option>
-          <option value="other">other</option>
+          {TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
         </select>
 
         <input
@@ -170,18 +137,12 @@ export default function BrowseOffersPage() {
         </label>
       </div>
 
-      {/* Tag filter */}
-      <div className="mb-4">
-        <TagMultiSelect
-          allTags={allTags}
-          value={selectedTags}
-          onChange={setSelectedTags}
-          placeholder={loadingTags ? 'Loading tags…' : 'Type to search tags, press Enter to add…'}
-        />
-        <p className="mt-1 text-xs text-gray-500">
-          Filter results: offers must contain all selected tags.
-        </p>
-      </div>
+      <TagMultiSelect
+        allTags={allTags}
+        value={selectedTags}
+        onChange={setSelectedTags}
+        placeholder="Filter by tag(s)"
+      />
 
       {loading ? (
         <p>Loading…</p>

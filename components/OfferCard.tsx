@@ -1,116 +1,138 @@
-/* HX v0.7.1 — 2025-09-21 — OfferCard shows first image thumbnail
+/* HX v0.8 — Offer card (browse + “my offers”), supports owner delete
    File: components/OfferCard.tsx
-
-   Notes:
-   - Exports BOTH default and named `OfferCard` to satisfy different imports.
-   - Tag id is `number | string` to tolerate varying Supabase shapes.
-   - Handles null/empty `images`, lazy-loads <img>, basic a11y.
 */
+'use client';
 
-import Link from 'next/link'
+import Link from 'next/link';
+import Image from 'next/image';
+import { useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 
-/** Minimal tag shape we display on cards. */
-export type TagLite = {
-  id: number | string
-  name: string
-}
-
+/** Minimal shape used by lists (what your pages fetch). */
 export type OfferRow = {
-  id: string
-  title: string
-  offer_type: string
-  is_online: boolean
-  city: string | null
-  country: string | null
-  images?: string[] | null
-  tags?: TagLite[] | null
-  /** sometimes present on list queries; safe to keep optional */
-  created_at?: string
+  id: string;
+  title: string;
+  offer_type: 'product' | 'service' | 'time' | 'knowledge' | 'other';
+  is_online: boolean;
+  city: string | null;
+  country: string | null;
+  status: 'pending' | 'active' | 'paused' | 'archived' | 'blocked';
+  images?: string[] | null; // optional
+};
+
+type Props = {
+  offer: OfferRow;
+  /** Show owner controls (Delete). Use in /offers/mine only. */
+  mine?: boolean;
+  /** Called after a successful delete so the parent list can remove the card. */
+  onDeleted?: (id: string) => void;
+};
+
+function StatusBadge({ status }: { status: OfferRow['status'] }) {
+  if (status === 'active') return null;
+  const label =
+    status === 'pending'
+      ? 'pending approval'
+      : status === 'blocked'
+      ? 'blocked'
+      : status === 'paused'
+      ? 'paused'
+      : 'archived';
+  return (
+    <span className="rounded bg-gray-200 px-2 py-0.5 text-[11px] uppercase tracking-wide text-gray-700">
+      {label}
+    </span>
+  );
 }
 
-/** Richer type some detail pages use */
-export type Offer = {
-  id: string
-  title: string
-  description?: string | null
-  offer_type: string
-  is_online: boolean
-  city: string | null
-  country: string | null
-  status: string
-  created_at: string
-  images?: string[] | null
-  tags?: TagLite[] | null
-}
+export function OfferCardImpl({ offer, mine = false, onDeleted }: Props) {
+  const [deleting, setDeleting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-export type OfferCardProps = { offer: OfferRow }
+  const thumb =
+    Array.isArray(offer.images) && offer.images.length > 0 ? offer.images[0] : null;
 
-function OfferCardImpl({ offer }: OfferCardProps) {
-  const { id, title, offer_type, is_online, city, country, images, tags } = offer
-  const thumb = images?.[0] ?? null
-  const location = is_online ? 'Online' : [city, country].filter(Boolean).join(', ')
+  async function handleDelete() {
+    setErr(null);
+    if (!confirm('Delete this offer permanently? This cannot be undone.')) return;
+
+    try {
+      setDeleting(true);
+      const { error } = await supabase.from('offers').delete().eq('id', offer.id);
+      if (error) throw error;
+      onDeleted?.(offer.id);
+    } catch (e: any) {
+      setErr(e?.message ?? 'Failed to delete');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  const href = `/offers/${offer.id}`;
+  const location = offer.is_online
+    ? 'Online'
+    : [offer.city, offer.country].filter(Boolean).join(', ');
 
   return (
-    <div className="overflow-hidden rounded border">
-      {thumb ? (
-        <Link href={`/offers/${id}`} aria-label={`Open ${title}`}>
-          <img
-            src={thumb}
-            alt={title}
-            loading="lazy"
-            className="h-40 w-full object-cover"
-          />
-        </Link>
-      ) : (
-        <div className="flex h-40 w-full items-center justify-center bg-gray-50 text-xs text-gray-500">
-          No image
+    <article className="rounded border">
+      {/* Image (optional) */}
+      <Link href={href} className="block">
+        <div className="relative h-48 w-full overflow-hidden rounded-t bg-gray-100">
+          {thumb ? (
+            <Image
+              src={thumb}
+              alt={offer.title}
+              fill
+              className="object-cover"
+              sizes="(max-width: 768px) 100vw, 50vw"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center text-xs text-gray-400">
+              No image
+            </div>
+          )}
         </div>
-      )}
+      </Link>
 
-      <div className="p-3">
+      <div className="space-y-2 p-3">
         <div className="flex items-start justify-between gap-2">
-          <Link
-            href={`/offers/${id}`}
-            className="min-w-0 font-semibold hover:underline"
-            title={title}
-          >
-            <span className="line-clamp-1">{title}</span>
-          </Link>
-          <span className="shrink-0 rounded bg-gray-100 px-2 py-[2px] text-[11px]">
-            {offer_type}
-          </span>
+          <div>
+            <Link href={href} className="block text-base font-semibold hover:underline">
+              {offer.title}
+            </Link>
+            <div className="mt-0.5 text-xs text-gray-600">
+              {offer.offer_type} • {location || '—'}
+            </div>
+          </div>
+          <StatusBadge status={offer.status} />
         </div>
 
-        <div className="mt-1 text-xs text-gray-600">{location || '—'}</div>
-
-        {(tags?.length ?? 0) > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1">
-            {tags!.map((t) => (
-              <span
-                key={String(t.id)}
-                className="rounded bg-gray-100 px-2 py-[2px] text-[11px]"
-              >
-                {t.name}
-              </span>
-            ))}
-          </div>
-        )}
-
-        <div className="mt-3">
+        <div className="flex gap-2">
           <Link
-            href={`/offers/${id}`}
-            className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
-            aria-label={`View and request ${title}`}
+            href={href}
+            className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
           >
             View &amp; Request
           </Link>
+
+          {mine && (
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="rounded border px-2 py-1 text-sm hover:bg-gray-50 disabled:opacity-60"
+              title="Delete permanently"
+            >
+              {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+          )}
         </div>
+
+        {err && <p className="text-xs text-red-600">{err}</p>}
       </div>
-    </div>
-  )
+    </article>
+  );
 }
 
-/** Named export */
-export const OfferCard = OfferCardImpl
-/** Default export */
-export default OfferCardImpl
+/** Named + default export so either import style works. */
+export const OfferCard = OfferCardImpl;
+export default OfferCardImpl;
