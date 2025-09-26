@@ -1,7 +1,7 @@
 // File: app/messages/page.tsx
 'use client';
 
-import { Suspense, useEffect, useMemo, useState, useCallback } from 'react';
+import { Suspense, useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import Link from 'next/link';
@@ -109,6 +109,7 @@ function ChatPane({
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const canSend = useMemo(
     () => !!thread && !!draft.trim() && !!me && !!thread.peer_id,
@@ -234,8 +235,31 @@ function ChatPane({
       setDraft(text);
     } finally {
       setSending(false);
+      // focus back to the input for quick follow-ups
+      inputRef.current?.focus();
     }
   }, [draft, me, thread]);
+
+  // explicitly insert newline at caret on Shift+Enter (for consistent behavior)
+  const insertNewlineAtCursor = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) {
+      setDraft((v) => v + '\n');
+      return;
+    }
+    const start = el.selectionStart ?? draft.length;
+    const end = el.selectionEnd ?? draft.length;
+    const nextVal = draft.slice(0, start) + '\n' + draft.slice(end);
+    setDraft(nextVal);
+    // restore caret right after the newline
+    requestAnimationFrame(() => {
+      const pos = start + 1;
+      if (inputRef.current) {
+        inputRef.current.selectionStart = pos;
+        inputRef.current.selectionEnd = pos;
+      }
+    });
+  }, [draft]);
 
   if (!thread) {
     return (
@@ -287,17 +311,32 @@ function ChatPane({
         <div className="border-t p-3">
           {err && <div className="mb-2 text-sm text-red-600">{err}</div>}
           <form
-            className="flex items-center gap-2"
+            className="flex items-end gap-2"
             onSubmit={(e) => {
               e.preventDefault();
               if (!sending) void handleSend();
             }}
           >
-            <input
+            {/* Enter = send, Shift+Enter = newline */}
+            <textarea
+              ref={inputRef}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (e.shiftKey) {
+                    e.preventDefault();
+                    insertNewlineAtCursor();
+                  } else {
+                    e.preventDefault();
+                    if (!sending) void handleSend();
+                  }
+                }
+              }}
+              rows={2}
               placeholder="Type a message…"
-              className="flex-1 rounded border px-3 py-2 text-sm"
+              className="flex-1 resize-none rounded border px-3 py-2 text-sm"
+              aria-label="Type a message"
             />
             <button
               type="submit"
@@ -310,6 +349,9 @@ function ChatPane({
               {sending ? 'Sending…' : 'Send'}
             </button>
           </form>
+          <div className="mt-1 text-[11px] text-gray-500">
+            Press <kbd>Enter</kbd> to send • <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line
+          </div>
         </div>
       </div>
     </div>
@@ -334,7 +376,6 @@ function MessagesContent() {
 
   const buildThreads = useCallback(
     async (uid: string) => {
-      // pull my message notifications
       const { data, error } = await supabase
         .from('notifications')
         .select('id, created_at, type, read_at, data')
@@ -345,7 +386,6 @@ function MessagesContent() {
 
       if (error) throw error;
 
-      // group by request_id
       const byReq = new Map<
         string,
         {
@@ -390,7 +430,6 @@ function MessagesContent() {
         return;
       }
 
-      // fetch request → to derive peer_id (other participant) and offer_id/title if missing
       const { data: reqRows } = await supabase
         .from('requests')
         .select(`
@@ -412,21 +451,21 @@ function MessagesContent() {
         const owner_id = r.offers?.owner_id as string;
         const requester_id = r.requester_profile_id as string;
 
-        const peer_id = uid === owner_id ? requester_id : owner_id;
+        const uidIsOwner = uid === owner_id;
+        const peer_id = uidIsOwner ? requester_id : owner_id;
 
         threadsBuilt.push({
           request_id: r.id as string,
           offer_id,
           offer_title,
           peer_id,
-          peer_name: undefined, // fill next step
+          peer_name: undefined,
           last_text: agg.last_text,
           last_at: agg.last_at,
           unread: agg.unread,
         });
       }
 
-      // fetch peer names in one go
       const peerIds = Array.from(new Set(threadsBuilt.map((t) => t.peer_id)));
       const { data: peers } = await supabase
         .from('profiles')
@@ -438,31 +477,28 @@ function MessagesContent() {
         nameMap.set(p.id, p.display_name || 'Someone');
       }
 
-      setThreads(
-        threadsBuilt
-          .map((t) => ({ ...t, peer_name: nameMap.get(t.peer_id) || t.peer_name }))
-          .sort((a, b) => (a.last_at < b.last_at ? 1 : -1))
-      );
+      const builtSorted = threadsBuilt
+        .map((t) => ({ ...t, peer_name: nameMap.get(t.peer_id) || t.peer_name }))
+        .sort((a, b) => (a.last_at < b.last_at ? 1 : -1));
 
-      // set selection if query param present
+      setThreads(builtSorted);
+
       const want = searchParams.get('thread');
       if (want) {
-        const found = threadsBuilt.find((t) => t.request_id === want);
+        const found = builtSorted.find((t) => t.request_id === want);
         if (found) setSelected(found);
-      } else if (!selected && threadsBuilt.length > 0) {
-        setSelected(threadsBuilt[0]);
+      } else if (!selected && builtSorted.length > 0) {
+        setSelected(builtSorted[0]);
       }
     },
     [searchParams, selected]
   );
 
-  // initial & refresh when me changes
   useEffect(() => {
     if (!me) return;
     void buildThreads(me);
   }, [me, buildThreads]);
 
-  // realtime: refresh thread list when a new notification arrives for me
   useEffect(() => {
     if (!me) return;
     const ch = supabase
@@ -498,7 +534,6 @@ function MessagesContent() {
   );
 }
 
-// Page wrapper (Suspense for Next.js 15 + useSearchParams)
 export default function MessagesPage() {
   return (
     <Suspense
