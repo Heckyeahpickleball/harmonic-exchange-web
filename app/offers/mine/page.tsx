@@ -1,58 +1,137 @@
+/* HX v0.6 — 2025-09-21 — My Offers selects images for thumbnails
+   File: app/offers/mine/page.tsx
+*/
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import OfferCard, { OfferRow } from '@/components/OfferCard';
+import OfferCard, { type OfferRow } from '@/components/OfferCard';
+
+type Status = 'active' | 'paused' | 'archived' | 'blocked' | 'pending';
+type MyOffer = OfferRow & { status: Status };
+
+const STATUS_FILTERS: Array<{ id: 'all' | Status; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'active', label: 'Active' },
+  { id: 'paused', label: 'Paused' },
+  { id: 'archived', label: 'Archived' },
+  { id: 'blocked', label: 'Blocked' },
+  { id: 'pending', label: 'Pending' },
+];
 
 export default function MyOffersPage() {
-  const [rows, setRows] = useState<OfferRow[]>([]);
+  const [offers, setOffers] = useState<MyOffer[]>([]);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const [filter, setFilter] =
+    useState<(typeof STATUS_FILTERS)[number]>(STATUS_FILTERS[0]);
+  const [msg, setMsg] = useState('');
+
+  const visible = useMemo(
+    () => (filter.id === 'all' ? offers : offers.filter((o) => o.status === filter.id)),
+    [offers, filter.id]
+  );
 
   useEffect(() => {
     (async () => {
-      setErr(null);
       setLoading(true);
       try {
-        const { data: auth } = await supabase.auth.getUser();
-        const uid = auth.user?.id;
-        if (!uid) {
-          setRows([]);
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          setOffers([]);
           return;
         }
 
         const { data, error } = await supabase
           .from('offers')
-          .select('id,title,offer_type,is_online,city,country,images,status')
-          .eq('owner_id', uid)
+          .select(`
+            id, title, offer_type, is_online, city, country, images, status,
+            offer_tags(tag_id, tags:tags(id,name))
+          `)
+          .eq('owner_id', user.id)
           .order('created_at', { ascending: false });
 
         if (error) throw error;
-        setRows((data || []) as OfferRow[]);
+
+        const map = new Map<string, MyOffer>();
+        for (const row of (data as any[]) ?? []) {
+          const base: MyOffer =
+            map.get(row.id) ??
+            ({
+              id: row.id,
+              title: row.title,
+              offer_type: row.offer_type,
+              is_online: row.is_online,
+              city: row.city,
+              country: row.country,
+              status: row.status as Status,
+              images: row.images ?? [],
+            } as MyOffer);
+
+          const rowTags: { id: number; name: string }[] = (row.offer_tags ?? [])
+            .map((r: any) => ({ id: r?.tag_id as number, name: r?.tags?.name as string }))
+            .filter((t: { id: number; name: string }) => t.id && t.name);
+
+          // Attach tags for display if needed
+          (base as any).tags = rowTags;
+          map.set(row.id, base);
+        }
+        setOffers(Array.from(map.values()));
       } catch (e: any) {
-        setErr(e?.message ?? 'Failed to load offers');
+        console.error(e);
+        setMsg(e?.message ?? 'Failed to load your offers.');
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
+  async function setStatus(id: string, next: Status) {
+    setMsg('');
+    try {
+      setOffers((prev) => prev.map((o) => (o.id === id ? { ...o, status: next } : o)));
+      const { error } = await supabase
+        .from('offers')
+        .update({ status: next })
+        .eq('id', id);
+      if (error) throw error;
+    } catch (e: any) {
+      console.error(e);
+      setMsg(e?.message ?? 'Failed to update status.');
+    }
+  }
+
   function handleDeleted(id: string) {
-    setRows((prev) => prev.filter((o) => o.id !== id));
+    setOffers((prev) => prev.filter((o) => o.id !== id));
   }
 
   return (
-    <section className="mx-auto max-w-5xl space-y-4">
+    <section className="space-y-3">
       <h1 className="text-2xl font-bold">My Offers</h1>
 
-      {err && <p className="text-sm text-red-700">{err}</p>}
+      <div className="flex flex-wrap items-center gap-2">
+        {STATUS_FILTERS.map((s) => (
+          <button
+            key={s.id}
+            onClick={() => setFilter(s)}
+            className={`rounded border px-3 py-1 text-sm ${
+              filter.id === s.id ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {msg && <p className="text-sm text-amber-700">{msg}</p>}
       {loading ? (
         <p>Loading…</p>
-      ) : rows.length === 0 ? (
+      ) : visible.length === 0 ? (
         <p>No offers yet.</p>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {rows.map((o) => (
+          {visible.map((o) => (
             <OfferCard key={o.id} offer={o} mine onDeleted={handleDeleted} />
           ))}
         </div>
