@@ -15,7 +15,6 @@ type ReqRow = {
   status: Status;
   created_at: string;
   updated_at: string | null;
-  // joined
   offers?: { id: string; title: string; owner_id: string };
   requester?: { id: string; display_name: string | null };
 };
@@ -28,6 +27,17 @@ type ChatMsg = {
   text: string;
   sender_id: string;
 };
+
+function useSafeThreadParam() {
+  const searchParams = useSearchParams();
+  const [thread, setThread] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    // Only read searchParams after mount
+    setThread(searchParams.get('thread') || undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+  return thread;
+}
 
 function MessageThread({
   req,
@@ -269,21 +279,8 @@ function MessageThread({
   );
 }
 
-// Safely get the thread param ONLY after mount
-function useThreadParam() {
-  const searchParams = useSearchParams();
-  const [thread, setThread] = useState<string | undefined>(undefined);
-
-  useEffect(() => {
-    setThread(searchParams.get('thread') || undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
-
-  return thread;
-}
-
 export default function ExchangesPage() {
-  const thread = useThreadParam();
+  const thread = useSafeThreadParam();
 
   const [tab, setTab] = useState<Tab>('received');
   const [items, setItems] = useState<ReqRow[]>([]);
