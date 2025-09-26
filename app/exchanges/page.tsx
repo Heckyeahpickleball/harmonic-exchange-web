@@ -269,21 +269,21 @@ function MessageThread({
   );
 }
 
-// Safe SearchParams hook: only returns params after mount, avoids SSR/CSR mismatch
-function useSafeSearchParams() {
+// Safely get the thread param ONLY after mount
+function useThreadParam() {
   const searchParams = useSearchParams();
-  const [params, setParams] = useState<{ thread?: string }>({});
+  const [thread, setThread] = useState<string | undefined>(undefined);
+
   useEffect(() => {
-    setParams({
-      thread: searchParams.get('thread') || undefined,
-    });
+    setThread(searchParams.get('thread') || undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
-  return params;
+
+  return thread;
 }
 
 export default function ExchangesPage() {
-  const { thread } = useSafeSearchParams();
+  const thread = useThreadParam();
 
   const [tab, setTab] = useState<Tab>('received');
   const [items, setItems] = useState<ReqRow[]>([]);
