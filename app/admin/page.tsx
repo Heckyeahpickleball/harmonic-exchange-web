@@ -1,4 +1,4 @@
-/* HX v0.9 — Admin panel with emails + delete + owner labels
+/* HX v0.9 — Admin panel with emails + delete + owner labels + offer title search
    File: app/admin/page.tsx
 */
 'use client';
@@ -57,6 +57,9 @@ function AdminContent() {
   const [me, setMe] = useState<Profile | null>(null);
   const [tab, setTab] = useState<Tab>(urlTab ?? 'users');
   const [pendingOnly, setPendingOnly] = useState<boolean>(urlPendingOnly);
+
+  // quick title search (offers tab)
+  const [offerQ, setOfferQ] = useState('');
 
   const [users, setUsers] = useState<Profile[]>([]);
   const [userEmails, setUserEmails] = useState<Record<string, string | null>>({});
@@ -219,10 +222,14 @@ function AdminContent() {
     }
   }
 
-  const offersVisible = useMemo(
-    () => (pendingOnly ? offers.filter((o) => o.status === 'pending') : offers),
-    [offers, pendingOnly]
-  );
+  // title search + pending filter
+  const offersVisible = useMemo(() => {
+    const base = pendingOnly ? offers.filter((o) => o.status === 'pending') : offers;
+    const q = offerQ.trim().toLowerCase();
+    if (!q) return base;
+    return base.filter((o) => o.title.toLowerCase().includes(q));
+  }, [offers, pendingOnly, offerQ]);
+
   const usersVisible = useMemo(() => users, [users]);
 
   // ===== Actions =====
@@ -268,7 +275,6 @@ function AdminContent() {
 
     const reason = prompt('Reason (optional):') || null;
     try {
-      // RPC name we created earlier; if it errors, you’ll see the message.
       const { error } = await supabase.rpc('admin_user_delete', { p_profile_id: id, p_reason: reason });
       if (error) throw error;
       setUsers((prev) => prev.filter((u) => u.id !== id));
@@ -413,7 +419,7 @@ function AdminContent() {
 
       {tab === 'offers' && (
         <div className="space-y-2">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <label className="inline-flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -425,6 +431,16 @@ function AdminContent() {
             <span className="text-xs text-gray-600">
               {offers.filter((o) => o.status === 'pending').length} pending
             </span>
+
+            <div className="ml-auto flex items-center gap-2">
+              <label className="text-sm text-gray-600">Title</label>
+              <input
+                value={offerQ}
+                onChange={(e) => setOfferQ(e.target.value)}
+                className="rounded border px-2 py-1 text-sm"
+                placeholder="Filter by title…"
+              />
+            </div>
           </div>
 
           <div className="overflow-auto rounded border">
@@ -452,8 +468,8 @@ function AdminContent() {
                     >
                       <td className="px-3 py-2">{o.title}</td>
                       <td className="px-3 py-2">
-                        <div>{owner?.name ?? o.owner_id}</div>
-                        <div className="text-xs text-gray-500">{owner?.email ?? '—'}</div>
+                        <div>{owner?.email ? `${owner.name} — ${owner.email}` : owner?.name ?? o.owner_id}</div>
+                        {!owner?.email && <div className="text-xs text-gray-500">—</div>}
                       </td>
                       <td className="px-3 py-2">{o.status}</td>
                       <td className="px-3 py-2">{new Date(o.created_at).toLocaleDateString()}</td>
