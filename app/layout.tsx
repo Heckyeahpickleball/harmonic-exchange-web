@@ -1,4 +1,4 @@
-// File: app/layout.tsx
+// app/layout.tsx
 'use client';
 
 import './globals.css';
@@ -14,7 +14,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     let mounted = true;
 
     async function loadRole() {
-      // get current user
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth?.user?.id;
       if (!uid) {
@@ -22,7 +21,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         return;
       }
 
-      // read their profile role
       const { data } = await supabase
         .from('profiles')
         .select('role')
@@ -40,22 +38,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <html lang="en">
-      <body>
+      <body className="min-h-screen font-sans bg-background text-foreground">
         <header className="border-b">
           <nav className="mx-auto flex max-w-5xl items-center justify-between gap-4 p-3">
             <div className="flex items-center gap-4">
-              <Link href="/">Home</Link>
-              <Link href="/offers">Browse</Link>
-              <Link href="/offers/new">New Offer</Link>
-              <Link href="/offers/mine">My Offers</Link>
-              <Link href="/messages">Messages</Link>
-              <Link href="/exchanges">Exchanges</Link>
-              <Link href="/profile">Profile</Link>
-              {(role === 'admin' || role === 'moderator') && <Link href="/admin">Admin</Link>}
-
+              <Link className="hover:underline" href="/">Home</Link>
+              <Link className="hover:underline" href="/offers">Browse</Link>
+              <Link className="hover:underline" href="/offers/new">New Offer</Link>
+              <Link className="hover:underline" href="/offers/mine">My Offers</Link>
+              <Link className="hover:underline" href="/messages">Messages</Link>
+              <Link className="hover:underline" href="/exchanges">Exchanges</Link>
+              <Link className="hover:underline" href="/profile">Profile</Link>
+              {(role === 'admin' || role === 'moderator') && (
+                <Link className="hover:underline" href="/admin">Admin</Link>
+              )}
             </div>
             <div className="flex items-center gap-4">
-              <Link href="/sign-in">Sign In</Link>
+              <Link className="hover:underline" href="/sign-in">Sign In</Link>
               <NotificationsBell />
             </div>
           </nav>
