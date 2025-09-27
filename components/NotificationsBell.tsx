@@ -11,16 +11,15 @@ type NotifType =
   | 'request_declined'
   | 'request_fulfilled'
   | 'message_received'
-  | 'message' // treat as chat for my own copy
-  | 'offer_pending' // <-- new: staff alert when an offer awaits approval
+  | 'message'
+  | 'offer_pending'       // <— new: staff notice for pending offers
   | 'system'
   | string;
 
 type Notif = {
   id: string;
   type: NotifType;
-  // data may include: { offer_id?, offer_title?, request_id?, requester_name?, text?, message? }
-  data: any;
+  data: any;             // e.g. { offer_id, offer_title, request_id, requester_name, text }
   created_at: string;
   read_at: string | null;
   profile_id: string;
@@ -30,67 +29,58 @@ export default function NotificationsBell() {
   const [open, setOpen] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [rows, setRows] = useState<Notif[]>([]);
-  const unread = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
+  const unread = useMemo(() => rows.filter(r => !r.read_at).length, [rows]);
 
-  // caches to avoid repeated fetches
-  const titleCache = useRef<Map<string, string>>(new Map()); // offer_id -> title
-  const requesterCache = useRef<Map<string, string>>(new Map()); // request_id -> requester display name
+  // caches / dedup helpers
+  const titleCache = useRef(new Map<string, string>());       // offer_id -> title
+  const requesterCache = useRef(new Map<string, string>());   // request_id -> name
+  const sigSeen = useRef<Set<string>>(new Set());             // signature-level dedup
 
-  // ---------- enrichment helpers ----------
+  // ---------- enrichment ----------
 
-  // Add missing offer titles (when we only have offer_id)
   async function enrichOfferTitles(notifs: Notif[]) {
     const missing = Array.from(
       new Set(
         notifs
-          .map((n) => (n?.data?.offer_title ? null : n?.data?.offer_id))
+          .map(n => (n?.data?.offer_title ? null : n?.data?.offer_id))
           .filter((v): v is string => !!v && !titleCache.current.has(v))
       )
     );
     if (!missing.length) return;
-
-    // Read title only. RLS: works for active offers (or owner/admin).
     const { data, error } = await supabase.from('offers').select('id,title').in('id', missing);
-
-    if (!error) {
-      for (const row of (data || []) as { id: string; title: string }[]) {
-        titleCache.current.set(row.id, row.title);
-      }
-
-      setRows((prev) =>
-        prev.map((n) => {
-          const oid = n?.data?.offer_id as string | undefined;
-          if (!oid) return n;
-          const t = titleCache.current.get(oid);
-          if (!t) return n;
-          return { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } };
-        })
-      );
+    if (error) return;
+    for (const row of (data || []) as { id: string; title: string }[]) {
+      titleCache.current.set(row.id, row.title);
     }
+    setRows(prev =>
+      prev.map(n => {
+        const oid = n?.data?.offer_id as string | undefined;
+        if (!oid) return n;
+        const t = titleCache.current.get(oid);
+        if (!t) return n;
+        return { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } };
+      })
+    );
   }
 
-  // Add requester display name for request_received (when we only have request_id)
   async function enrichRequesterNames(notifs: Notif[]) {
     const ids = Array.from(
       new Set(
         notifs
-          .map((n) => (n.type === 'request_received' && !n?.data?.requester_name ? n?.data?.request_id : null))
+          .map(n => (n.type === 'request_received' && !n?.data?.requester_name ? n?.data?.request_id : null))
           .filter((v): v is string => !!v && !requesterCache.current.has(v))
       )
     );
     if (!ids.length) return;
-
     const { data } = await supabase
       .from('requests')
       .select('id, requester:profiles(id, display_name)')
       .in('id', ids);
-
     for (const r of (data || []) as any[]) {
       requesterCache.current.set(r.id, r.requester?.display_name || 'Someone');
     }
-
-    setRows((prev) =>
-      prev.map((n) => {
+    setRows(prev =>
+      prev.map(n => {
         const rid = n?.data?.request_id as string | undefined;
         if (!rid) return n;
         const name = requesterCache.current.get(rid);
@@ -100,16 +90,23 @@ export default function NotificationsBell() {
     );
   }
 
-  // ---------- label/links ----------
+  // ---------- label + target link ----------
 
   function label(n: Notif): { text: string; href?: string } {
+    const offerId = n.data?.offer_id as string | undefined;
     const offerTitle = n.data?.offer_title as string | undefined;
     const reqName = n.data?.requester_name as string | undefined;
-    const body = (n.data?.text ?? n.data?.message) as string | undefined; // read text OR message
+    const body = (n.data?.text ?? n.data?.message) as string | undefined;
     const reqId = n.data?.request_id as string | undefined;
-    const offerId = n.data?.offer_id as string | undefined;
 
     switch (n.type) {
+      case 'offer_pending': {
+        // Deep-link right to Admin → Offers, pending filter, and focused offer row
+        const href = offerId
+          ? `/admin?tab=offers&pending=1&offer=${offerId}`
+          : '/admin?tab=offers&pending=1';
+        return { text: `New offer pending${offerTitle ? `: “${offerTitle}”` : ''}`, href };
+      }
       case 'request_received':
         return {
           text: `New request${offerTitle ? ` for “${offerTitle}”` : ''}${reqName ? ` from ${reqName}` : ''}`,
@@ -121,24 +118,12 @@ export default function NotificationsBell() {
         return { text: `Your request was declined${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
       case 'request_fulfilled':
         return { text: `Request marked fulfilled${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
-
-      // Treat both as chat
       case 'message':
       case 'message_received': {
         const snip = body ? `: ${body.slice(0, 80)}` : '';
         const on = offerTitle ? ` on “${offerTitle}”` : '';
         return { text: `New message${on}${snip}`, href: reqId ? `/messages?thread=${reqId}` : '/messages' };
       }
-
-      // NEW: staff notification when an offer awaits approval
-      case 'offer_pending': {
-        const title = offerTitle ? `: “${offerTitle}”` : '';
-        // If we have the offer_id, send them to the offer; otherwise to Admin → Offers
-        const href = offerId ? `/offers/${offerId}` : '/admin?tab=offers';
-        return { text: `New offer pending${title}`, href };
-      }
-
-      // System notices (e.g., withdrawn) or unknown types
       default: {
         const text = n.data?.message || n.data?.text || 'Update';
         return { text, href: '/exchanges' };
@@ -146,21 +131,28 @@ export default function NotificationsBell() {
     }
   }
 
+  // ---------- read helpers ----------
+
   async function markAllRead() {
     if (!uid) return;
-    const ids = rows.filter((r) => !r.read_at).map((r) => r.id);
+    const ids = rows.filter(r => !r.read_at).map(r => r.id);
     if (!ids.length) return;
     const nowISO = new Date().toISOString();
-    setRows((prev) => prev.map((r) => (ids.includes(r.id) ? { ...r, read_at: nowISO } : r)));
+    setRows(prev => prev.map(r => (ids.includes(r.id) ? { ...r, read_at: nowISO } : r)));
     await supabase.from('notifications').update({ read_at: nowISO }).in('id', ids);
   }
 
   async function markOneRead(id: string) {
-    const found = rows.find((r) => r.id === id);
+    const found = rows.find(r => r.id === id);
     if (!found || found.read_at) return;
     const nowISO = new Date().toISOString();
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, read_at: nowISO } : r)));
+    setRows(prev => prev.map(r => (r.id === id ? { ...r, read_at: nowISO } : r)));
     await supabase.from('notifications').update({ read_at: nowISO }).eq('id', id);
+  }
+
+  // Build a signature used to dedup “same event twice”
+  function sig(n: Notif) {
+    return `${n.profile_id}|${n.type}|${n.data?.offer_id ?? ''}|${n.data?.request_id ?? ''}`;
   }
 
   // ---------- effects ----------
@@ -179,14 +171,23 @@ export default function NotificationsBell() {
         .order('created_at', { ascending: false })
         .limit(50);
 
+      // initial rows with dedup by signature
       const initial = (list || []) as Notif[];
-      setRows(initial);
+      const dedup: Notif[] = [];
+      const seen = new Set<string>();
+      for (const n of initial) {
+        const s = sig(n);
+        if (seen.has(s)) continue;
+        seen.add(s);
+        dedup.push(n);
+      }
+      sigSeen.current = seen;
+      setRows(dedup);
 
       // fire-and-forget enrichment
-      enrichOfferTitles(initial).catch(() => {});
-      enrichRequesterNames(initial).catch(() => {});
+      Promise.allSettled([enrichOfferTitles(dedup), enrichRequesterNames(dedup)]);
 
-      // realtime inserts
+      // realtime INSERTS
       const chIns = supabase
         .channel('realtime:notifications:ins')
         .on(
@@ -194,13 +195,16 @@ export default function NotificationsBell() {
           { event: 'INSERT', schema: 'public', table: 'notifications', filter: `profile_id=eq.${u}` },
           async (payload) => {
             const n = payload.new as Notif;
-            setRows((prev) => [n, ...prev].slice(0, 50));
+            const s = sig(n);
+            if (sigSeen.current.has(s)) return; // drop dup
+            sigSeen.current.add(s);
+            setRows(prev => [n, ...prev].slice(0, 50));
             await Promise.allSettled([enrichOfferTitles([n]), enrichRequesterNames([n])]);
           }
         )
         .subscribe();
 
-      // realtime updates (e.g., read_at from another tab)
+      // realtime UPDATEs (e.g. read_at from another tab)
       const chUpd = supabase
         .channel('realtime:notifications:upd')
         .on(
@@ -208,7 +212,7 @@ export default function NotificationsBell() {
           { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `profile_id=eq.${u}` },
           (payload) => {
             const upd = payload.new as Notif;
-            setRows((prev) => prev.map((r) => (r.id === upd.id ? { ...r, read_at: upd.read_at } : r)));
+            setRows(prev => prev.map(r => (r.id === upd.id ? { ...r, read_at: upd.read_at } : r)));
           }
         )
         .subscribe();
@@ -218,12 +222,11 @@ export default function NotificationsBell() {
         supabase.removeChannel(chUpd);
       };
     })();
-  }, []);
+  }, []); // run once
 
   // When opening panel → mark all as read
   async function toggleOpen() {
-    setOpen((v) => !v);
-    // mark-as-read after opening (check previous state)
+    setOpen(v => !v);
     if (!open) await markAllRead();
   }
 
@@ -244,9 +247,7 @@ export default function NotificationsBell() {
         <div className="absolute right-0 z-50 mt-2 w-[340px] max-w-[90vw] rounded border bg-white shadow">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <strong className="text-sm">Notifications</strong>
-            <button onClick={markAllRead} className="text-xs underline">
-              Mark all read
-            </button>
+            <button onClick={markAllRead} className="text-xs underline">Mark all read</button>
           </div>
 
           <ul className="max-h-[55vh] overflow-auto">

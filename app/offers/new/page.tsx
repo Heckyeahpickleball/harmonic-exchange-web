@@ -1,6 +1,8 @@
+// app/offers/new/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import TagMultiSelect from '@/components/TagMultiSelect';
@@ -10,6 +12,8 @@ type Tag = { id: number; name: string };
 type OfferType = 'product' | 'service' | 'time' | 'knowledge' | 'other';
 
 export default function NewOfferPage() {
+  const router = useRouter();
+
   // form fields
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -24,7 +28,7 @@ export default function NewOfferPage() {
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [loadingTags, setLoadingTags] = useState(true);
 
-  // ui state
+  // ui
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
@@ -43,7 +47,9 @@ export default function NewOfferPage() {
         setLoadingTags(false);
       }
     })();
-    return () => { cancel = true; };
+    return () => {
+      cancel = true;
+    };
   }, []);
 
   async function onSubmit(e: React.FormEvent) {
@@ -53,12 +59,12 @@ export default function NewOfferPage() {
     setMsg('');
 
     try {
-      const { data: userRes, error: userErr } = await supabase.auth.getUser();
-      if (userErr) throw userErr;
-      const userId = userRes.user?.id;
+      // auth
+      const { data: auth } = await supabase.auth.getUser();
+      const userId = auth.user?.id;
       if (!userId) throw new Error('You must be signed in.');
 
-      // create offer
+      // create as PENDING; admins/mods will approve
       const { data: inserted, error: insErr } = await supabase
         .from('offers')
         .insert({
@@ -69,31 +75,26 @@ export default function NewOfferPage() {
           is_online: isOnline,
           city: isOnline ? null : (city || null),
           country: isOnline ? null : (country || null),
-          images,                 // <- IMAGE URLS SAVED HERE
-          status: 'active',
+          images,
+          status: 'pending',
         })
         .select('id')
         .single();
-
       if (insErr) throw insErr;
+
       const offerId = inserted!.id as string;
 
-      // attach tags
+      // attach tags (ignore duplicates)
       if (tags.length > 0) {
-        const rows = tags.map((t) => ({ offer_id: offerId, tag_id: t.id }));
-        const { error: tagErr } = await supabase.from('offer_tags').upsert(rows, { ignoreDuplicates: true });
+        const rows = tags.map(t => ({ offer_id: offerId, tag_id: t.id }));
+        const { error: tagErr } = await supabase
+          .from('offer_tags')
+          .upsert(rows, { ignoreDuplicates: true });
         if (tagErr) throw tagErr;
       }
 
-      setMsg('Offer created!');
-      // reset light fields
-      setTitle('');
-      setDescription('');
-      setIsOnline(false);
-      setCity('');
-      setCountry('');
-      setTags([]);
-      setImages([]);
+      // go to the new offer detail (will show "pending approval" badge)
+      router.push(`/offers/${offerId}`);
     } catch (e: any) {
       setErr(e?.message ?? 'Something went wrong creating the offer.');
     } finally {
@@ -182,7 +183,6 @@ export default function NewOfferPage() {
           <p className="mt-1 text-xs text-gray-500">Tip: add a few relevant tags.</p>
         </div>
 
-        {/* ✅ IMAGE UPLOADER (label is rendered inside the component) */}
         <UploadImages value={images} onChange={setImages} />
 
         <button
