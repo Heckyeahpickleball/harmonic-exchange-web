@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
+import OfferRequestGate from '@/components/OfferRequestGate';
 
 type Offer = {
   id: string;
@@ -165,9 +166,7 @@ export default function OfferDetailPage() {
     );
   }
 
-  const location = offer.is_online
-    ? 'Online'
-    : [offer.city, offer.country].filter(Boolean).join(', ');
+  const location = offer.is_online ? 'Online' : [offer.city, offer.country].filter(Boolean).join(', ');
   const thumb = Array.isArray(offer.images) && offer.images.length > 0 ? offer.images[0] : null;
 
   return (
@@ -198,6 +197,14 @@ export default function OfferDetailPage() {
       </div>
 
       {offer.description && <p className="whitespace-pre-wrap">{offer.description}</p>}
+
+      {/* Why-can’t-I-request banner (only shows if signed-in, non-owner, offer active, and no active offers) */}
+      <OfferRequestGate
+        signedIn={!!me}
+        isOwner={isOwner}
+        isOfferActive={offer.status === 'active'}
+        eligibleCount={eligibleCount}
+      />
 
       {/* Request box */}
       {!isOwner && (
@@ -232,9 +239,7 @@ export default function OfferDetailPage() {
       )}
 
       {isOwner && (
-        <div className="rounded border p-3 text-sm text-gray-600">
-          You are the owner of this offer.
-        </div>
+        <div className="rounded border p-3 text-sm text-gray-600">You are the owner of this offer.</div>
       )}
     </section>
   );
