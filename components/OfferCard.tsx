@@ -1,4 +1,4 @@
-/* HX v0.8 — Offer card (browse + “my offers”), supports owner delete
+/* HX v0.9 — Offer card (browse + “my offers”), supports owner delete + owner name
    File: components/OfferCard.tsx
 */
 'use client';
@@ -8,7 +8,7 @@ import Image from 'next/image';
 import { useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-/** Minimal shape used by lists (what your pages fetch). */
+/** Minimal shape used by lists (what pages fetch). */
 export type OfferRow = {
   id: string;
   title: string;
@@ -17,7 +17,9 @@ export type OfferRow = {
   city: string | null;
   country: string | null;
   status: 'pending' | 'active' | 'paused' | 'archived' | 'blocked';
-  images?: string[] | null; // optional
+  images?: string[] | null;
+  /** Added for Browse: owner display name (optional). */
+  owner_name?: string;
 };
 
 type Props = {
@@ -103,6 +105,10 @@ export function OfferCardImpl({ offer, mine = false, onDeleted }: Props) {
             <div className="mt-0.5 text-xs text-gray-600">
               {offer.offer_type} • {location || '—'}
             </div>
+            {/* Owner line */}
+            {offer.owner_name && (
+              <div className="mt-0.5 text-xs text-gray-500">by {offer.owner_name}</div>
+            )}
           </div>
           <StatusBadge status={offer.status} />
         </div>

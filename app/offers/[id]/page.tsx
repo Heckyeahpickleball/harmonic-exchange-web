@@ -114,9 +114,25 @@ export default function OfferDetailPage() {
       requestId = ins!.id as string;
     }
 
-    // After creating, go to Sent tab of Exchanges (keeps chat/notifications separate)
-    // You can switch this to /messages?thread=${requestId} if you prefer.
-    router.push('/exchanges?tab=sent');
+    // Seed the per-request chat with the note as the first message.
+    if (requestId) {
+      const payload = {
+        request_id: requestId,
+        offer_id: offer.id,
+        text: note.trim() || '—',
+      };
+
+      // Sender's copy + recipient notification; ignore errors so request still succeeds.
+      await supabase
+        .from('notifications')
+        .insert([
+          { profile_id: me, type: 'message', data: payload },
+          { profile_id: offer.owner_id, type: 'message_received', data: payload },
+        ]);
+    }
+
+    // Jump straight into the thread.
+    router.push(`/messages?thread=${requestId}`);
   }
 
   if (loading) {
