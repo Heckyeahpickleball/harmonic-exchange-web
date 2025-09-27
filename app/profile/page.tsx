@@ -1,8 +1,9 @@
 // /app/profile/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import ImageCropperModal from '@/components/ImageCropperModal';
 
 type ProfileRow = {
   id: string;
@@ -28,84 +29,6 @@ type FormState = {
   cover_url: string | null;
 };
 
-/* ---------- Image helpers (center-crop) ---------- */
-async function loadImage(file: File): Promise<HTMLImageElement> {
-  const url = URL.createObjectURL(file);
-  try {
-    await new Promise<void>((res, rej) => {
-      const img = new Image();
-      img.onload = () => res();
-      img.onerror = (e) => rej(e);
-      img.src = url;
-      (img as any)._url = url; // keep for cleanup
-      (loadImage as any)._last = img;
-    });
-    return (loadImage as any)._last as HTMLImageElement;
-  } finally {
-    // URL will be revoked later by caller (after draw)
-  }
-}
-
-function imageToFile(canvas: HTMLCanvasElement, name: string, type = 'image/jpeg', quality = 0.9): Promise<File> {
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => {
-      resolve(new File([blob!], name.replace(/\.\w+$/, '') + '.jpg', { type }));
-    }, type, quality);
-  });
-}
-
-async function cropSquare(file: File, size = 512): Promise<File> {
-  const img = await loadImage(file);
-  const url: string | undefined = (img as any)._url;
-
-  const side = Math.min(img.width, img.height);
-  const sx = Math.max(0, Math.floor((img.width - side) / 2));
-  const sy = Math.max(0, Math.floor((img.height - side) / 2));
-
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
-
-  if (url) URL.revokeObjectURL(url);
-  return imageToFile(canvas, file.name);
-}
-
-async function cropBanner(file: File, targetW = 1200, targetH = 400): Promise<File> {
-  const targetRatio = targetW / targetH;
-  const img = await loadImage(file);
-  const url: string | undefined = (img as any)._url;
-
-  // Determine crop rectangle that covers target ratio (center-crop)
-  const imgRatio = img.width / img.height;
-  let sx = 0, sy = 0, sw = img.width, sh = img.height;
-
-  if (imgRatio > targetRatio) {
-    // Image wider than target -> crop width
-    sh = img.height;
-    sw = Math.floor(sh * targetRatio);
-    sx = Math.floor((img.width - sw) / 2);
-    sy = 0;
-  } else {
-    // Image taller than target -> crop height
-    sw = img.width;
-    sh = Math.floor(sw / targetRatio);
-    sx = 0;
-    sy = Math.floor((img.height - sh) / 2);
-  }
-
-  const canvas = document.createElement('canvas');
-  canvas.width = targetW;
-  canvas.height = targetH;
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetW, targetH);
-
-  if (url) URL.revokeObjectURL(url);
-  return imageToFile(canvas, file.name);
-}
-/* ------------------------------------------------- */
-
 export default function ProfilePage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -125,6 +48,20 @@ export default function ProfilePage() {
     avatar_url: null,
     cover_url: null,
   });
+
+  // hidden inputs to pick a file before cropping
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+
+  // cropper session state
+  const [cropper, setCropper] = useState<{
+    src: string;
+    aspect: number;
+    targetWidth: number;
+    targetHeight: number;
+    kind: 'avatar' | 'cover';
+    title: string;
+  } | null>(null);
 
   // Load current user + profile
   useEffect(() => {
@@ -254,7 +191,6 @@ export default function ProfilePage() {
     );
   }
 
-  // ----- VIEW MODE -----
   return (
     <section className="space-y-4 p-0 md:p-4">
       {/* Header card */}
@@ -352,7 +288,7 @@ export default function ProfilePage() {
 
       {status && <p className="px-1 text-sm text-gray-700">{status}</p>}
 
-      {/* ----- EDIT DIALOG (inline) ----- */}
+      {/* ----- EDIT DIALOG ----- */}
       {editing && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
           <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-xl">
@@ -426,6 +362,7 @@ export default function ProfilePage() {
               </div>
 
               <div className="space-y-4">
+                {/* Cover uploader */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Cover photo</label>
                   {form.cover_url ? (
@@ -433,28 +370,40 @@ export default function ProfilePage() {
                   ) : (
                     <div className="rounded border p-4 text-sm text-gray-500">No cover set</div>
                   )}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={async (e) => {
-                      const input = e.currentTarget; // capture before any await
-                      const file = input?.files?.[0];
-                      if (!file) return;
-                      setStatus('Uploading cover…');
-                      try {
-                        const cropped = await cropBanner(file, 1200, 400);
-                        const url = await uploadTo('covers', cropped);
-                        setForm((f) => ({ ...f, cover_url: url }));
-                        setStatus('Cover uploaded');
-                      } catch (err: any) {
-                        setStatus(`Cover upload failed: ${err?.message ?? err}`);
-                      } finally {
-                        if (input) input.value = '';
-                      }
-                    }}
-                  />
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => coverInputRef.current?.click()}
+                      className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
+                    >
+                      Upload cover
+                    </button>
+                    <input
+                      ref={coverInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.currentTarget.files?.[0];
+                        if (!file) return;
+                        const src = URL.createObjectURL(file);
+                        setCropper({
+                          src,
+                          aspect: 3,          // 3:1 banner
+                          targetWidth: 1200,
+                          targetHeight: 400,
+                          kind: 'cover',
+                          title: 'Position your cover',
+                        });
+                        // reset input so choosing the same file twice still fires
+                        e.currentTarget.value = '';
+                      }}
+                    />
+                  </div>
                 </div>
 
+                {/* Avatar uploader */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Profile picture</label>
                   {form.avatar_url ? (
@@ -464,26 +413,36 @@ export default function ProfilePage() {
                       No avatar
                     </div>
                   )}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={async (e) => {
-                      const input = e.currentTarget; // capture before any await
-                      const file = input?.files?.[0];
-                      if (!file) return;
-                      setStatus('Uploading avatar…');
-                      try {
-                        const cropped = await cropSquare(file, 512);
-                        const url = await uploadTo('avatars', cropped);
-                        setForm((f) => ({ ...f, avatar_url: url }));
-                        setStatus('Avatar uploaded');
-                      } catch (err: any) {
-                        setStatus(`Avatar upload failed: ${err?.message ?? err}`);
-                      } finally {
-                        if (input) input.value = '';
-                      }
-                    }}
-                  />
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => avatarInputRef.current?.click()}
+                      className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
+                    >
+                      Upload photo
+                    </button>
+                    <input
+                      ref={avatarInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.currentTarget.files?.[0];
+                        if (!file) return;
+                        const src = URL.createObjectURL(file);
+                        setCropper({
+                          src,
+                          aspect: 1,          // square avatar
+                          targetWidth: 512,
+                          targetHeight: 512,
+                          kind: 'avatar',
+                          title: 'Position your photo',
+                        });
+                        e.currentTarget.value = '';
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -508,6 +467,39 @@ export default function ProfilePage() {
             {status && <p className="mt-3 text-sm text-gray-700">{status}</p>}
           </div>
         </div>
+      )}
+
+      {/* Cropper modal */}
+      {cropper && (
+        <ImageCropperModal
+          src={cropper.src}
+          aspect={cropper.aspect}
+          targetWidth={cropper.targetWidth}
+          targetHeight={cropper.targetHeight}
+          title={cropper.title}
+          onCancel={() => {
+            URL.revokeObjectURL(cropper.src);
+            setCropper(null);
+          }}
+          onConfirm={async (file) => {
+            try {
+              setStatus(`Uploading ${cropper.kind}…`);
+              const url = await uploadTo(cropper.kind === 'avatar' ? 'avatars' : 'covers', file);
+              if (cropper.kind === 'avatar') {
+                setForm((f) => ({ ...f, avatar_url: url }));
+                setStatus('Avatar uploaded');
+              } else {
+                setForm((f) => ({ ...f, cover_url: url }));
+                setStatus('Cover uploaded');
+              }
+            } catch (err: any) {
+              setStatus(`${cropper.kind} upload failed: ${err?.message ?? err}`);
+            } finally {
+              URL.revokeObjectURL(cropper.src);
+              setCropper(null);
+            }
+          }}
+        />
       )}
     </section>
   );
