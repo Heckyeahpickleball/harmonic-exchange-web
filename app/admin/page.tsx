@@ -1,4 +1,4 @@
-/* HX v0.9 — Admin panel: tab deep-linking, pending filter, offer focus+highlight
+/* HX v0.9 — Admin panel with emails + delete + owner labels
    File: app/admin/page.tsx
 */
 'use client';
@@ -19,7 +19,6 @@ type OfferRow = {
   id: string;
   title: string;
   owner_id: string;
-  // Add "pending" now that new offers require approval
   status: 'pending' | 'active' | 'paused' | 'archived' | 'blocked';
   created_at: string;
 };
@@ -36,9 +35,11 @@ type AdminAction = {
   target_label?: string;
 };
 
+type EmailRow = { id: string; email: string | null; display_name?: string };
+
 type Tab = 'users' | 'offers' | 'audit';
 
-/** Wrapper to satisfy Next 15's Suspense requirement around useSearchParams */
+/** Wrapper for Suspense requirement around useSearchParams */
 export default function Page() {
   return (
     <Suspense fallback={<div className="p-4 text-sm text-gray-600">Loading…</div>}>
@@ -51,27 +52,28 @@ function AdminContent() {
   const sp = useSearchParams();
   const urlTab = (sp.get('tab') as Tab | null) || null;
   const urlPendingOnly = sp.get('pending') === '1';
-  const urlFocusOffer = sp.get('offer'); // optional offer id to focus/scroll into view
+  const urlFocusOffer = sp.get('offer');
 
   const [me, setMe] = useState<Profile | null>(null);
   const [tab, setTab] = useState<Tab>(urlTab ?? 'users');
   const [pendingOnly, setPendingOnly] = useState<boolean>(urlPendingOnly);
 
   const [users, setUsers] = useState<Profile[]>([]);
+  const [userEmails, setUserEmails] = useState<Record<string, string | null>>({});
   const [offers, setOffers] = useState<OfferRow[]>([]);
+  const [ownerInfo, setOwnerInfo] = useState<Record<string, { name: string; email: string | null }>>({});
   const [audit, setAudit] = useState<AdminAction[]>([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
 
-  // table row refs so we can scroll to an offer row via ?offer=<id>
   const offerRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
 
-  // keep tab in sync if the URL param changes
   useEffect(() => {
     if (urlTab && urlTab !== tab) setTab(urlTab);
-  }, [urlTab]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlTab]);
 
-  // Load current user + gate
+  // Load current user
   useEffect(() => {
     (async () => {
       const { data: auth } = await supabase.auth.getUser();
@@ -89,7 +91,6 @@ function AdminContent() {
     })();
   }, []);
 
-  // Staff can view the admin area; only admins can change roles
   const canViewAdmin = me?.role === 'admin' || me?.role === 'moderator';
   const isAdmin = me?.role === 'admin';
 
@@ -106,14 +107,43 @@ function AdminContent() {
             .select('id,display_name,role,status,created_at')
             .order('created_at', { ascending: false })
             .limit(200);
-          setUsers((data || []) as Profile[]);
+          const rows = (data || []) as Profile[];
+          setUsers(rows);
+
+          // fetch emails via RPC (best-effort)
+          const ids = rows.map((u) => u.id);
+          if (ids.length) {
+            const emails = await fetchEmails(ids);
+            setUserEmails(emails);
+          } else {
+            setUserEmails({});
+          }
         } else if (tab === 'offers') {
           const { data } = await supabase
             .from('offers')
             .select('id,title,owner_id,status,created_at')
             .order('created_at', { ascending: false })
             .limit(500);
-          setOffers((data || []) as OfferRow[]);
+          const rows = (data || []) as OfferRow[];
+          setOffers(rows);
+
+          // owner labels (name + email)
+          const ownerIds = Array.from(new Set(rows.map((o) => o.owner_id)));
+          if (ownerIds.length) {
+            const [namesRes, emailsMap] = await Promise.all([
+              supabase.from('profiles').select('id,display_name').in('id', ownerIds),
+              fetchEmails(ownerIds),
+            ]);
+            const nameMap: Record<string, string> = {};
+            for (const p of ((namesRes.data || []) as Profile[])) nameMap[p.id] = p.display_name;
+            const combined: Record<string, { name: string; email: string | null }> = {};
+            for (const id of ownerIds) {
+              combined[id] = { name: nameMap[id] ?? id, email: emailsMap[id] ?? null };
+            }
+            setOwnerInfo(combined);
+          } else {
+            setOwnerInfo({});
+          }
         } else if (tab === 'audit') {
           const { data: rows } = await supabase
             .from('admin_actions')
@@ -123,7 +153,6 @@ function AdminContent() {
 
           const acts = (rows || []) as AdminAction[];
 
-          // Resolve admin names
           const adminIds = Array.from(new Set(acts.map((a) => a.admin_profile_id)));
           const adminMap = new Map<string, string>();
           if (adminIds.length) {
@@ -134,7 +163,6 @@ function AdminContent() {
             for (const a of ((admins || []) as Profile[])) adminMap.set(a.id, a.display_name);
           }
 
-          // Resolve target labels (profiles/offers)
           const profileTargets = acts.filter((a) => a.target_type === 'profile').map((a) => a.target_id);
           const offerTargets = acts.filter((a) => a.target_type === 'offer').map((a) => a.target_id);
 
@@ -172,6 +200,25 @@ function AdminContent() {
     })();
   }, [canViewAdmin, tab]);
 
+  // helper — best-effort email RPC (supports either param name)
+  async function fetchEmails(ids: string[]) {
+    try {
+      // Try common param names one by one
+      let res = await supabase.rpc('admin_get_profile_emails', { p_profile_ids: ids });
+      if (res.error) res = await supabase.rpc('admin_get_profile_emails', { ids });
+      if (res.error) res = await supabase.rpc('admin_get_profile_emails', { p_ids: ids });
+      if (res.error) throw res.error;
+
+      const rows = (res.data || []) as EmailRow[];
+      const map: Record<string, string | null> = {};
+      for (const r of rows) map[r.id] = r.email ?? null;
+      return map;
+    } catch (err) {
+      console.warn('email RPC failed (showing blanks):', err);
+      return {} as Record<string, string | null>;
+    }
+  }
+
   const offersVisible = useMemo(
     () => (pendingOnly ? offers.filter((o) => o.status === 'pending') : offers),
     [offers, pendingOnly]
@@ -207,6 +254,30 @@ function AdminContent() {
     }
   }
 
+  async function deleteUser(id: string) {
+    if (!isAdmin) {
+      setMsg('Only admins can delete users.');
+      return;
+    }
+    if (id === me?.id) {
+      setMsg("You can't delete your own account.");
+      return;
+    }
+    const confirmed = confirm('PERMANENTLY delete this member? This cannot be undone.');
+    if (!confirmed) return;
+
+    const reason = prompt('Reason (optional):') || null;
+    try {
+      // RPC name we created earlier; if it errors, you’ll see the message.
+      const { error } = await supabase.rpc('admin_user_delete', { p_profile_id: id, p_reason: reason });
+      if (error) throw error;
+      setUsers((prev) => prev.filter((u) => u.id !== id));
+    } catch (e: any) {
+      console.error(e);
+      setMsg(e?.message ?? 'Failed to delete user');
+    }
+  }
+
   async function setOfferStatus(id: string, next: OfferRow['status']) {
     setMsg('');
     const reason = prompt(`Reason for setting offer status to ${next}? (optional)`) || null;
@@ -219,7 +290,7 @@ function AdminContent() {
     }
   }
 
-  // When Offers tab loads, if ?offer=<id> is present, scroll+highlight
+  // Scroll/highlight ?offer=<id>
   useEffect(() => {
     if (tab !== 'offers' || !urlFocusOffer) return;
     const el = offerRowRefs.current.get(urlFocusOffer);
@@ -272,6 +343,7 @@ function AdminContent() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-3 py-2 text-left">Name</th>
+                <th className="px-3 py-2 text-left">Email</th>
                 <th className="px-3 py-2 text-left">Role</th>
                 <th className="px-3 py-2 text-left">Status</th>
                 <th className="px-3 py-2 text-left">Joined</th>
@@ -282,6 +354,7 @@ function AdminContent() {
               {usersVisible.map((u) => (
                 <tr key={u.id} className="border-t">
                   <td className="px-3 py-2">{u.display_name}</td>
+                  <td className="px-3 py-2">{userEmails[u.id] ?? '—'}</td>
                   <td className="px-3 py-2">{u.role}</td>
                   <td className="px-3 py-2">{u.status}</td>
                   <td className="px-3 py-2">{new Date(u.created_at).toLocaleDateString()}</td>
@@ -315,6 +388,11 @@ function AdminContent() {
                               Promote to admin
                             </button>
                           )}
+                          {u.id !== me.id && (
+                            <button onClick={() => deleteUser(u.id)} className="rounded border px-2 py-1 hover:bg-gray-50">
+                              Delete
+                            </button>
+                          )}
                         </>
                       )}
                     </div>
@@ -323,7 +401,7 @@ function AdminContent() {
               ))}
               {usersVisible.length === 0 && (
                 <tr>
-                  <td className="px-3 py-4 text-gray-600" colSpan={5}>
+                  <td className="px-3 py-4 text-gray-600" colSpan={6}>
                     No users.
                   </td>
                 </tr>
@@ -361,82 +439,88 @@ function AdminContent() {
                 </tr>
               </thead>
               <tbody>
-                {offersVisible.map((o) => (
-                  <tr
-                    key={o.id}
-                    ref={(el) => {
-                      if (el) offerRowRefs.current.set(o.id, el);
-                      else offerRowRefs.current.delete(o.id);
-                    }}
-                    className={`border-t ${urlFocusOffer === o.id ? 'bg-amber-50' : ''}`}
-                  >
-                    <td className="px-3 py-2">{o.title}</td>
-                    <td className="px-3 py-2">{o.owner_id}</td>
-                    <td className="px-3 py-2">{o.status}</td>
-                    <td className="px-3 py-2">{new Date(o.created_at).toLocaleDateString()}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-2">
-                        {o.status === 'pending' && (
-                          <>
+                {offersVisible.map((o) => {
+                  const owner = ownerInfo[o.owner_id];
+                  return (
+                    <tr
+                      key={o.id}
+                      ref={(el) => {
+                        if (el) offerRowRefs.current.set(o.id, el);
+                        else offerRowRefs.current.delete(o.id);
+                      }}
+                      className={`border-t ${urlFocusOffer === o.id ? 'bg-amber-50' : ''}`}
+                    >
+                      <td className="px-3 py-2">{o.title}</td>
+                      <td className="px-3 py-2">
+                        <div>{owner?.name ?? o.owner_id}</div>
+                        <div className="text-xs text-gray-500">{owner?.email ?? '—'}</div>
+                      </td>
+                      <td className="px-3 py-2">{o.status}</td>
+                      <td className="px-3 py-2">{new Date(o.created_at).toLocaleDateString()}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-2">
+                          {o.status === 'pending' && (
+                            <>
+                              <button
+                                onClick={() => setOfferStatus(o.id, 'active')}
+                                className="rounded border px-2 py-1 hover:bg-gray-50"
+                                title="Approve (set Active)"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={() => setOfferStatus(o.id, 'archived')}
+                                className="rounded border px-2 py-1 hover:bg-gray-50"
+                                title="Reject (archive)"
+                              >
+                                Reject
+                              </button>
+                            </>
+                          )}
+                          {o.status !== 'blocked' ? (
+                            <button
+                              onClick={() => setOfferStatus(o.id, 'blocked')}
+                              className="rounded border px-2 py-1 hover:bg-gray-50"
+                            >
+                              Block
+                            </button>
+                          ) : (
                             <button
                               onClick={() => setOfferStatus(o.id, 'active')}
                               className="rounded border px-2 py-1 hover:bg-gray-50"
-                              title="Approve (set Active)"
                             >
-                              Approve
+                              Unblock
                             </button>
+                          )}
+                          {o.status !== 'paused' && (
+                            <button
+                              onClick={() => setOfferStatus(o.id, 'paused')}
+                              className="rounded border px-2 py-1 hover:bg-gray-50"
+                            >
+                              Pause
+                            </button>
+                          )}
+                          {o.status !== 'archived' && (
                             <button
                               onClick={() => setOfferStatus(o.id, 'archived')}
                               className="rounded border px-2 py-1 hover:bg-gray-50"
-                              title="Reject (archive)"
                             >
-                              Reject
+                              Archive
                             </button>
-                          </>
-                        )}
-                        {o.status !== 'blocked' ? (
-                          <button
-                            onClick={() => setOfferStatus(o.id, 'blocked')}
-                            className="rounded border px-2 py-1 hover:bg-gray-50"
-                          >
-                            Block
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => setOfferStatus(o.id, 'active')}
-                            className="rounded border px-2 py-1 hover:bg-gray-50"
-                          >
-                            Unblock
-                          </button>
-                        )}
-                        {o.status !== 'paused' && (
-                          <button
-                            onClick={() => setOfferStatus(o.id, 'paused')}
-                            className="rounded border px-2 py-1 hover:bg-gray-50"
-                          >
-                            Pause
-                          </button>
-                        )}
-                        {o.status !== 'archived' && (
-                          <button
-                            onClick={() => setOfferStatus(o.id, 'archived')}
-                            className="rounded border px-2 py-1 hover:bg-gray-50"
-                          >
-                            Archive
-                          </button>
-                        )}
-                        {o.status !== 'active' && (
-                          <button
-                            onClick={() => setOfferStatus(o.id, 'active')}
-                            className="rounded border px-2 py-1 hover:bg-gray-50"
-                          >
-                            Set Active
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          )}
+                          {o.status !== 'active' && (
+                            <button
+                              onClick={() => setOfferStatus(o.id, 'active')}
+                              className="rounded border px-2 py-1 hover:bg-gray-50"
+                            >
+                              Set Active
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
                 {offersVisible.length === 0 && (
                   <tr>
                     <td className="px-3 py-4 text-gray-600" colSpan={5}>
