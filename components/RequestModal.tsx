@@ -1,7 +1,7 @@
 // /components/RequestModal.tsx
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export default function RequestModal({
   title = 'Send a request',
@@ -22,14 +22,26 @@ export default function RequestModal({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
+  // Close on Escape
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onCancel();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-3">
-      <div className="w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-3"
+      onClick={onCancel} // click backdrop to close
+    >
+      <div
+        className="w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()} // prevent backdrop close when clicking inside
+      >
+        <div className="border-b px-4 py-3">
           <h3 className="text-lg font-semibold">{title}</h3>
-          <button onClick={onCancel} className="rounded border px-2 py-1 text-sm hover:bg-gray-50">
-            Cancel
-          </button>
         </div>
 
         <form
