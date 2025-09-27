@@ -28,6 +28,84 @@ type FormState = {
   cover_url: string | null;
 };
 
+/* ---------- Image helpers (center-crop) ---------- */
+async function loadImage(file: File): Promise<HTMLImageElement> {
+  const url = URL.createObjectURL(file);
+  try {
+    await new Promise<void>((res, rej) => {
+      const img = new Image();
+      img.onload = () => res();
+      img.onerror = (e) => rej(e);
+      img.src = url;
+      (img as any)._url = url; // keep for cleanup
+      (loadImage as any)._last = img;
+    });
+    return (loadImage as any)._last as HTMLImageElement;
+  } finally {
+    // URL will be revoked later by caller (after draw)
+  }
+}
+
+function imageToFile(canvas: HTMLCanvasElement, name: string, type = 'image/jpeg', quality = 0.9): Promise<File> {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      resolve(new File([blob!], name.replace(/\.\w+$/, '') + '.jpg', { type }));
+    }, type, quality);
+  });
+}
+
+async function cropSquare(file: File, size = 512): Promise<File> {
+  const img = await loadImage(file);
+  const url: string | undefined = (img as any)._url;
+
+  const side = Math.min(img.width, img.height);
+  const sx = Math.max(0, Math.floor((img.width - side) / 2));
+  const sy = Math.max(0, Math.floor((img.height - side) / 2));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+
+  if (url) URL.revokeObjectURL(url);
+  return imageToFile(canvas, file.name);
+}
+
+async function cropBanner(file: File, targetW = 1200, targetH = 400): Promise<File> {
+  const targetRatio = targetW / targetH;
+  const img = await loadImage(file);
+  const url: string | undefined = (img as any)._url;
+
+  // Determine crop rectangle that covers target ratio (center-crop)
+  const imgRatio = img.width / img.height;
+  let sx = 0, sy = 0, sw = img.width, sh = img.height;
+
+  if (imgRatio > targetRatio) {
+    // Image wider than target -> crop width
+    sh = img.height;
+    sw = Math.floor(sh * targetRatio);
+    sx = Math.floor((img.width - sw) / 2);
+    sy = 0;
+  } else {
+    // Image taller than target -> crop height
+    sw = img.width;
+    sh = Math.floor(sw / targetRatio);
+    sx = 0;
+    sy = Math.floor((img.height - sh) / 2);
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = targetW;
+  canvas.height = targetH;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetW, targetH);
+
+  if (url) URL.revokeObjectURL(url);
+  return imageToFile(canvas, file.name);
+}
+/* ------------------------------------------------- */
+
 export default function ProfilePage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -274,7 +352,7 @@ export default function ProfilePage() {
 
       {status && <p className="px-1 text-sm text-gray-700">{status}</p>}
 
-      {/* ----- EDIT DIALOG (inline, no extra files) ----- */}
+      {/* ----- EDIT DIALOG (inline) ----- */}
       {editing && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
           <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-xl">
@@ -359,17 +437,19 @@ export default function ProfilePage() {
                     type="file"
                     accept="image/*"
                     onChange={async (e) => {
-                      const file = e.target.files?.[0];
+                      const input = e.currentTarget; // capture before any await
+                      const file = input?.files?.[0];
                       if (!file) return;
                       setStatus('Uploading cover…');
                       try {
-                        const url = await uploadTo('covers', file);
+                        const cropped = await cropBanner(file, 1200, 400);
+                        const url = await uploadTo('covers', cropped);
                         setForm((f) => ({ ...f, cover_url: url }));
                         setStatus('Cover uploaded');
                       } catch (err: any) {
                         setStatus(`Cover upload failed: ${err?.message ?? err}`);
                       } finally {
-                        e.currentTarget.value = '';
+                        if (input) input.value = '';
                       }
                     }}
                   />
@@ -388,17 +468,19 @@ export default function ProfilePage() {
                     type="file"
                     accept="image/*"
                     onChange={async (e) => {
-                      const file = e.target.files?.[0];
+                      const input = e.currentTarget; // capture before any await
+                      const file = input?.files?.[0];
                       if (!file) return;
                       setStatus('Uploading avatar…');
                       try {
-                        const url = await uploadTo('avatars', file);
+                        const cropped = await cropSquare(file, 512);
+                        const url = await uploadTo('avatars', cropped);
                         setForm((f) => ({ ...f, avatar_url: url }));
                         setStatus('Avatar uploaded');
                       } catch (err: any) {
                         setStatus(`Avatar upload failed: ${err?.message ?? err}`);
                       } finally {
-                        e.currentTarget.value = '';
+                        if (input) input.value = '';
                       }
                     }}
                   />
