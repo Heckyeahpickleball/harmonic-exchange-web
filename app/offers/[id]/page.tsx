@@ -1,4 +1,4 @@
-// app/offers/[id]/page.tsx
+// /app/offers/[id]/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
+import RequestModal from '@/components/RequestModal';
 
 type Offer = {
   id: string;
@@ -28,10 +29,10 @@ export default function OfferDetailPage() {
   const [me, setMe] = useState<string | null>(null);
   const [offer, setOffer] = useState<Offer | null>(null);
   const [loading, setLoading] = useState(true);
-  const [note, setNote] = useState('');
-  const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [eligibleCount, setEligibleCount] = useState<number>(0);
+
+  const [showModal, setShowModal] = useState(false);
 
   // load session + offer + eligibility
   useEffect(() => {
@@ -44,7 +45,7 @@ export default function OfferDetailPage() {
         const uid = auth.user?.id ?? null;
         if (!cancel) setMe(uid);
 
-        // fetch the offer (RLS will allow: active for everyone, plus owner/admin/mod)
+        // fetch the offer (RLS allows: active for everyone, plus owner/admin/mod)
         const { data: o, error: oErr } = await supabase
           .from('offers')
           .select(
@@ -86,51 +87,36 @@ export default function OfferDetailPage() {
     return eligibleCount > 0;
   }, [offer, isOwner, eligibleCount]);
 
-  async function handleRequest(e: React.FormEvent) {
-    e.preventDefault();
-    if (!offer) return;
-    if (!me) {
-      setErr('Please sign in to request.');
-      return;
+  async function createRequest(note: string) {
+    if (!offer || !me) return;
+
+    // Try RPC if it exists (may also create notifications), else fall back to direct insert.
+    let requestId: string | null = null;
+
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('create_request', {
+      p_offer: offer.id,
+      p_note: note.trim() || '—',
+    });
+
+    if (!rpcErr && rpcData) {
+      requestId = typeof rpcData === 'string' ? rpcData : (rpcData as any);
+    } else {
+      const { data: ins, error: insErr } = await supabase
+        .from('requests')
+        .insert({
+          offer_id: offer.id,
+          requester_profile_id: me,
+          note: note.trim() || '—',
+        })
+        .select('id')
+        .single();
+      if (insErr) throw insErr;
+      requestId = ins!.id as string;
     }
-    if (!canRequest) return;
 
-    setSending(true);
-    setErr(null);
-    try {
-      // Try RPC if it exists (creates notification), else fall back to direct insert
-      let requestId: string | null = null;
-
-      const { data: rpcData, error: rpcErr } = await supabase.rpc('create_request', {
-        p_offer: offer.id,
-        p_note: note.trim() || '—',
-      });
-
-      if (!rpcErr && rpcData) {
-        // RPC returns UUID (request id)
-        requestId = typeof rpcData === 'string' ? rpcData : (rpcData as any);
-      } else {
-        // Direct insert (RLS enforces eligibility)
-        const { data: ins, error: insErr } = await supabase
-          .from('requests')
-          .insert({
-            offer_id: offer.id,
-            requester_profile_id: me,
-            note: note.trim() || '—',
-          })
-          .select('id')
-          .single();
-        if (insErr) throw insErr;
-        requestId = ins!.id as string;
-      }
-
-      // go to messages thread (uses request id as thread)
-      router.push(`/messages?thread=${requestId}`);
-    } catch (e: any) {
-      setErr(e?.message ?? 'Could not send request.');
-    } finally {
-      setSending(false);
-    }
+    // After creating, go to Sent tab of Exchanges (keeps chat/notifications separate)
+    // You can switch this to /messages?thread=${requestId} if you prefer.
+    router.push('/exchanges?tab=sent');
   }
 
   if (loading) {
@@ -199,42 +185,62 @@ export default function OfferDetailPage() {
 
       {offer.description && <p className="whitespace-pre-wrap">{offer.description}</p>}
 
-      {/* Request box */}
+      {/* Friendly eligibility banner */}
       {!isOwner && (
-        <form onSubmit={handleRequest} className="space-y-2 rounded border p-3">
-          <label className="block text-sm font-medium">Tell the owner what you need…</label>
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            className="w-full rounded border px-3 py-2"
-            rows={4}
-            placeholder="Write a short note"
-          />
-          <div className="flex items-center justify-between">
-            {!me ? (
-              <span className="text-sm text-gray-600">Sign in to request.</span>
-            ) : offer.status !== 'active' ? (
-              <span className="text-sm text-gray-600">This offer isn’t active yet.</span>
-            ) : eligibleCount < 1 ? (
-              <span className="text-sm text-gray-600">
-                You need at least one <b>active</b> offer to request.
-              </span>
-            ) : null}
+        <div className="rounded border p-3">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm text-gray-700">
+              {!me ? (
+                <>Please <Link href="/sign-in" className="underline">sign in</Link> to request.</>
+              ) : offer.status !== 'active' ? (
+                <>This offer isn’t active yet.</>
+              ) : eligibleCount < 1 ? (
+                <>
+                  You need at least one <b>active</b> offer to request.{' '}
+                  <Link href="/offers/new" className="underline">Create an offer</Link>.
+                </>
+              ) : (
+                <>Ready to send a request?</>
+              )}
+            </div>
+
             <button
-              type="submit"
-              disabled={!canRequest || sending}
+              type="button"
+              disabled={!canRequest}
+              onClick={() => setShowModal(true)}
               className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
             >
-              {sending ? 'Sending…' : 'Send request'}
+              Request
             </button>
           </div>
-        </form>
+        </div>
       )}
 
       {isOwner && (
         <div className="rounded border p-3 text-sm text-gray-600">
           You are the owner of this offer.
         </div>
+      )}
+
+      {/* Modal */}
+      {showModal && (
+        <RequestModal
+          title="Send a request"
+          placeholder="Add a short note for the owner…"
+          onCancel={() => setShowModal(false)}
+          onSubmit={async (note, setBusy, setError) => {
+            setBusy(true);
+            setError('');
+            try {
+              await createRequest(note);
+            } catch (e: any) {
+              setError(e?.message ?? 'Could not send request.');
+              setBusy(false);
+              return;
+            }
+            // on success, the page navigates away
+          }}
+        />
       )}
     </section>
   );
