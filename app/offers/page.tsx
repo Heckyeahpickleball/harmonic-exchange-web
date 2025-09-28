@@ -83,10 +83,10 @@ function BrowseOffersPage() {
 
   const tagIds = useMemo(() => selectedTags.map((t) => t.id).filter((id) => id > 0), [selectedTags]);
 
-  // Helpers to build the base query (we make a fresh one for each branch)
+  // Helper: build base query (used for title search and owner search)
   function makeBaseQuery() {
     const tagJoin = tagIds.length ? 'offer_tags!inner' : 'offer_tags';
-    let q = supabase
+    let qb = supabase
       .from('offers')
       .select(
         `
@@ -108,12 +108,12 @@ function BrowseOffersPage() {
       .order('created_at', { ascending: false })
       .limit(500);
 
-    if (type !== 'all types') q = q.eq('offer_type', type);
-    if (onlineOnly) q = q.eq('is_online', true);
-    if (!onlineOnly && city.trim()) q = q.ilike('city', `%${city.trim()}%`);
-    if (tagIds.length) q = q.in('offer_tags.tag_id', tagIds);
+    if (type !== 'all types') qb = qb.eq('offer_type', type);
+    if (onlineOnly) qb = qb.eq('is_online', true);
+    if (!onlineOnly && city.trim()) qb = qb.ilike('city', `%${city.trim()}%`);
+    if (tagIds.length) qb = qb.in('offer_tags.tag_id', tagIds);
 
-    return q;
+    return qb;
   }
 
   // --- Load offers whenever filters change
@@ -123,12 +123,12 @@ function BrowseOffersPage() {
       const qTrim = q.trim();
       const like = `%${qTrim}%`;
 
-      // 1) Always search by title (if q given)
-      const titleQuery = makeBaseQuery();
-      const titlePromise = qTrim ? titleQuery.ilike('title', like) : titleQuery;
+      // 1) Title search (or all active if no q)
+      const titleQB = makeBaseQuery();
+      const byTitle = await (qTrim ? titleQB.ilike('title', like) : titleQB);
 
-      // 2) If q given, also search owners whose display_name matches → fetch their IDs, then fetch offers by owner_id
-      let ownersPromise: Promise<any> | null = null;
+      // 2) Owner search: find matching profile IDs then fetch offers by owner_id
+      let byOwnerData: any[] = [];
       if (qTrim) {
         const { data: profs } = await supabase
           .from('profiles')
@@ -138,18 +138,15 @@ function BrowseOffersPage() {
 
         const ownerIds = ((profs || []) as { id: string }[]).map((p) => p.id);
         if (ownerIds.length) {
-          ownersPromise = makeBaseQuery().in('owner_id', ownerIds);
+          const ownerQB = makeBaseQuery().in('owner_id', ownerIds);
+          const byOwner = await ownerQB;
+          byOwnerData = (byOwner?.data as any[]) || [];
         }
       }
 
-      const [byTitle, byOwner] = await Promise.all([
-        titlePromise,
-        ownersPromise ? ownersPromise : Promise.resolve({ data: [] }),
-      ]);
+      const rows = ([] as any[]).concat((byTitle?.data as any[]) || [], byOwnerData);
 
-      const rows = ([] as any[]).concat(byTitle.data || [], byOwner.data || []);
-
-      // De-dupe by offer id (tag join can create multiples, and we unioned two queries)
+      // De-dupe by offer id and collect tags
       const map = new Map<
         string,
         OfferRow & { tags?: { id: number; name: string }[]; owner_id?: string; owner_name?: string }
