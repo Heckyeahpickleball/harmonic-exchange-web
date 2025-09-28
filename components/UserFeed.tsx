@@ -13,7 +13,13 @@ type PostRow = {
   created_at: string;
 };
 
-export default function UserFeed({ profileId, me }: { profileId: string; me: string | null }) {
+export default function UserFeed({
+  profileId,
+  me,
+}: {
+  profileId: string;
+  me: string | null;
+}) {
   const [posts, setPosts] = useState<PostRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string>('');
@@ -37,13 +43,16 @@ export default function UserFeed({ profileId, me }: { profileId: string; me: str
       if (error) throw error;
       setPosts((data || []) as PostRow[]);
     } catch (e: any) {
-      // If table doesn’t exist yet, don’t crash the page.
-      if (typeof e?.message === 'string' && e.message.toLowerCase().includes('does not exist')) {
+      if (
+        typeof e?.message === 'string' &&
+        e.message.toLowerCase().includes('does not exist')
+      ) {
         setUnsupported(true);
+        setPosts([]);
       } else {
         setErr(e?.message ?? 'Failed to load feed.');
+        setPosts([]);
       }
-      setPosts([]);
     } finally {
       setLoading(false);
     }
@@ -92,7 +101,9 @@ export default function UserFeed({ profileId, me }: { profileId: string; me: str
                   <PostItem
                     post={p}
                     me={me}
-                    onDeleted={() => setPosts((prev) => prev.filter((x) => x.id !== p.id))}
+                    onDeleted={() =>
+                      setPosts((prev) => prev.filter((x) => x.id !== p.id))
+                    }
                   />
                 </li>
               ))}

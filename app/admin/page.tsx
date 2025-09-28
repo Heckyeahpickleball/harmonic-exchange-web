@@ -7,11 +7,14 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
+type Role = 'user' | 'moderator' | 'admin';
+type Status = 'active' | 'suspended';
+
 type Profile = {
   id: string;
   display_name: string;
-  role: 'user' | 'moderator' | 'admin';
-  status: 'active' | 'suspended';
+  role: Role;
+  status: Status;
   created_at: string;
 };
 
@@ -96,6 +99,15 @@ function AdminContent() {
 
   const canViewAdmin = me?.role === 'admin' || me?.role === 'moderator';
   const isAdmin = me?.role === 'admin';
+
+  // ——— helpers for permissions (client guard) ———
+  const canChangeStatus = (actor: Profile | null, target: Profile) => {
+    if (!actor) return false;
+    if (actor.id === target.id) return false; // never self
+    if (actor.role === 'admin') return true;  // admins can change anyone
+    // moderators: only user accounts (not mods/admins)
+    return actor.role === 'moderator' && target.role === 'user';
+  };
 
   // Fetch tab data
   useEffect(() => {
@@ -233,11 +245,30 @@ function AdminContent() {
   const usersVisible = useMemo(() => users, [users]);
 
   // ===== Actions =====
-  async function setUserStatus(id: string, next: 'active' | 'suspended') {
+  async function setUserStatus(
+    id: string,
+    targetRole: Role,
+    next: Status
+  ) {
+    if (!me) return;
+    // client-side guard: moderators may only change status for regular users
+    if (!isAdmin && (me.role === 'moderator') && targetRole !== 'user') {
+      setMsg('Only admins can change status for moderators and admins.');
+      return;
+    }
+    if (id === me.id) {
+      setMsg("You can't change your own status.");
+      return;
+    }
+
     setMsg('');
     const reason = prompt(`Reason for setting status to ${next}? (optional)`) || null;
     try {
-      await supabase.rpc('admin_user_set_status', { p_profile_id: id, p_status: next, p_reason: reason });
+      await supabase.rpc('admin_user_set_status', {
+        p_profile_id: id,
+        p_status: next,
+        p_reason: reason,
+      });
       setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, status: next } : u)));
     } catch (e: any) {
       console.error(e);
@@ -245,8 +276,8 @@ function AdminContent() {
     }
   }
 
-  async function setUserRole(id: string, next: 'user' | 'moderator' | 'admin') {
-    if (me?.role !== 'admin') {
+  async function setUserRole(id: string, next: Role) {
+    if (!isAdmin) {
       setMsg('Only admins can change roles.');
       return;
     }
@@ -357,54 +388,76 @@ function AdminContent() {
               </tr>
             </thead>
             <tbody>
-              {usersVisible.map((u) => (
-                <tr key={u.id} className="border-t">
-                  <td className="px-3 py-2">{u.display_name}</td>
-                  <td className="px-3 py-2">{userEmails[u.id] ?? '—'}</td>
-                  <td className="px-3 py-2">{u.role}</td>
-                  <td className="px-3 py-2">{u.status}</td>
-                  <td className="px-3 py-2">{new Date(u.created_at).toLocaleDateString()}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex flex-wrap gap-2">
-                      {u.status === 'active' ? (
-                        <button onClick={() => setUserStatus(u.id, 'suspended')} className="rounded border px-2 py-1 hover:bg-gray-50">
-                          Suspend
-                        </button>
-                      ) : (
-                        <button onClick={() => setUserStatus(u.id, 'active')} className="rounded border px-2 py-1 hover:bg-gray-50">
-                          Unsuspend
-                        </button>
-                      )}
+              {usersVisible.map((u) => {
+                const canStatus = canChangeStatus(me, u);
+                const commonBtn =
+                  'rounded border px-2 py-1 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed';
+                const tooltip =
+                  !canStatus && (me?.role === 'moderator')
+                    ? 'Moderators can only change status for regular users.'
+                    : !canStatus && (me?.id === u.id)
+                    ? "You can't change your own status."
+                    : undefined;
 
-                      {/* Role-change controls — admins only */}
-                      {isAdmin && (
-                        <>
-                          {u.role !== 'user' && (
-                            <button onClick={() => setUserRole(u.id, 'user')} className="rounded border px-2 py-1 hover:bg-gray-50">
-                              Demote to user
-                            </button>
-                          )}
-                          {u.role !== 'moderator' && (
-                            <button onClick={() => setUserRole(u.id, 'moderator')} className="rounded border px-2 py-1 hover:bg-gray-50">
-                              Promote to mod
-                            </button>
-                          )}
-                          {u.role !== 'admin' && (
-                            <button onClick={() => setUserRole(u.id, 'admin')} className="rounded border px-2 py-1 hover:bg-gray-50">
-                              Promote to admin
-                            </button>
-                          )}
-                          {u.id !== me.id && (
-                            <button onClick={() => deleteUser(u.id)} className="rounded border px-2 py-1 hover:bg-gray-50">
-                              Delete
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                return (
+                  <tr key={u.id} className="border-t">
+                    <td className="px-3 py-2">{u.display_name}</td>
+                    <td className="px-3 py-2">{userEmails[u.id] ?? '—'}</td>
+                    <td className="px-3 py-2">{u.role}</td>
+                    <td className="px-3 py-2">{u.status}</td>
+                    <td className="px-3 py-2">{new Date(u.created_at).toLocaleDateString()}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-2">
+                        {u.status === 'active' ? (
+                          <button
+                            title={tooltip}
+                            disabled={!canStatus}
+                            onClick={() => setUserStatus(u.id, u.role, 'suspended')}
+                            className={commonBtn}
+                          >
+                            Suspend
+                          </button>
+                        ) : (
+                          <button
+                            title={tooltip}
+                            disabled={!canStatus}
+                            onClick={() => setUserStatus(u.id, u.role, 'active')}
+                            className={commonBtn}
+                          >
+                            Unsuspend
+                          </button>
+                        )}
+
+                        {/* Role-change controls — admins only */}
+                        {isAdmin && (
+                          <>
+                            {u.role !== 'user' && (
+                              <button onClick={() => setUserRole(u.id, 'user')} className={commonBtn}>
+                                Demote to user
+                              </button>
+                            )}
+                            {u.role !== 'moderator' && (
+                              <button onClick={() => setUserRole(u.id, 'moderator')} className={commonBtn}>
+                                Promote to mod
+                              </button>
+                            )}
+                            {u.role !== 'admin' && (
+                              <button onClick={() => setUserRole(u.id, 'admin')} className={commonBtn}>
+                                Promote to admin
+                              </button>
+                            )}
+                            {u.id !== me.id && (
+                              <button onClick={() => deleteUser(u.id)} className={commonBtn}>
+                                Delete
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
               {usersVisible.length === 0 && (
                 <tr>
                   <td className="px-3 py-4 text-gray-600" colSpan={6}>
