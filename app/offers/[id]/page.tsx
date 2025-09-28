@@ -13,9 +13,10 @@ type Offer = {
   owner_id: string;
   title: string;
   description: string | null;
-  type: 'service' | 'item' | 'space' | 'other';
-  online_only: boolean | null;
+  offer_type: 'product' | 'service' | 'time' | 'knowledge' | 'other';
+  is_online: boolean | null;
   city: string | null;
+  country: string | null;
   images: string[] | null;
   status: 'pending' | 'active' | 'paused' | 'archived' | 'blocked';
   created_at: string;
@@ -43,9 +44,12 @@ export default function OfferDetailPage() {
         const uid = auth.user?.id ?? null;
         if (!cancel) setMe(uid);
 
+        // NOTE: use offer_type and is_online (not type / online_only)
         const { data: o, error: oErr } = await supabase
           .from('offers')
-          .select('id, owner_id, title, description, type, online_only, city, images, status, created_at')
+          .select(
+            'id, owner_id, title, description, offer_type, is_online, city, country, images, status, created_at'
+          )
           .eq('id', id)
           .single();
 
@@ -86,7 +90,7 @@ export default function OfferDetailPage() {
 
     let requestId: string | null = null;
 
-    // Try RPC first (if you created it), else fall back to direct insert.
+    // Try RPC first (if you have it), else fall back to direct insert.
     const { data: rpcData, error: rpcErr } = await supabase.rpc('create_request', {
       p_offer: offer.id,
       p_note: note.trim() || '—',
@@ -117,11 +121,11 @@ export default function OfferDetailPage() {
           { profile_id: offer.owner_id, type: 'message_received', data: payload },
         ]);
       } catch {
-        // ignore; not critical
+        // non-fatal
       }
     }
 
-    router.push(`/messages?thread=${requestId}`);
+    router.push(requestId ? `/messages?thread=${requestId}` : '/messages');
   }
 
   if (loading) {
@@ -146,7 +150,7 @@ export default function OfferDetailPage() {
     );
   }
 
-  const location = offer.online_only ? 'Online' : (offer.city || '—');
+  const location = offer.is_online ? 'Online' : [offer.city, offer.country].filter(Boolean).join(', ') || '—';
   const thumb = Array.isArray(offer.images) && offer.images.length > 0 ? offer.images[0] : null;
 
   return (
@@ -171,7 +175,7 @@ export default function OfferDetailPage() {
       </div>
 
       <div className="text-sm text-gray-600">
-        {offer.type} • {location}
+        {offer.offer_type} • {location}
       </div>
 
       {offer.description && <p className="whitespace-pre-wrap">{offer.description}</p>}

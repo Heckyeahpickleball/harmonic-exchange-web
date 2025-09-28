@@ -27,7 +27,12 @@ export default function RequestModal({
 
   useEffect(() => {
     taRef.current?.focus();
-  }, []);
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [onCancel]);
 
   const remaining = maxLength - note.length;
   const canSend = !busy && note.trim().length > 0 && remaining >= 0;
@@ -37,13 +42,7 @@ export default function RequestModal({
       <div className="w-full max-w-xl rounded-xl bg-white p-4 shadow-xl">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-lg font-semibold">{title}</h3>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
-          >
-            Cancel
-          </button>
+          {/* removed duplicate Cancel button from header */}
         </div>
 
         <div className="space-y-3">

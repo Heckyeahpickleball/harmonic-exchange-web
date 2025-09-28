@@ -2,9 +2,9 @@
 
 type Props = {
   displayName: string;
-  city?: string | null;
+  city?: string | null;            // you can pass "City, Country" combined
   role?: 'user' | 'moderator' | 'admin';
-  memberSince?: string; // ISO date
+  memberSince?: string;            // ISO date
   avatarUrl?: string | null;
   coverUrl?: string | null;
   canEdit?: boolean;
@@ -26,6 +26,7 @@ export default function ProfileHeader({
       {/* Cover */}
       <div className="relative h-40 w-full md:h-56">
         {coverUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
           <img src={coverUrl} alt="Cover" className="h-full w-full object-cover" />
         ) : (
           <div className="h-full w-full bg-gradient-to-r from-slate-200 to-slate-100" />
@@ -37,6 +38,7 @@ export default function ProfileHeader({
         {/* Avatar */}
         <div className="absolute -top-10 left-4 h-20 w-20 overflow-hidden rounded-full border-4 border-white md:left-6 md:h-24 md:w-24">
           {avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
             <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
           ) : (
             <div className="grid h-full w-full place-items-center bg-slate-200 text-slate-500">☺</div>
@@ -46,7 +48,9 @@ export default function ProfileHeader({
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="mt-2 md:mt-0 md:pl-24">
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-semibold md:text-2xl">{displayName || 'Unnamed'}</h1>
+              <h1 className="text-xl font-semibold md:text-2xl">
+                {displayName || 'Unnamed'}
+              </h1>
               {role && (
                 <span className="rounded-full border px-2 py-0.5 text-xs capitalize text-gray-700">
                   {role}

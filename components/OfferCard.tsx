@@ -20,6 +20,8 @@ export type OfferRow = {
   images?: string[] | null;
   /** Added for Browse: owner display name (optional). */
   owner_name?: string;
+  /** Optional owner id so we can link to public profile if callers provide it. */
+  owner_id?: string;
 };
 
 type Props = {
@@ -105,9 +107,22 @@ export function OfferCardImpl({ offer, mine = false, onDeleted }: Props) {
             <div className="mt-0.5 text-xs text-gray-600">
               {offer.offer_type} • {location || '—'}
             </div>
-            {/* Owner line */}
+            {/* Owner line (links to public profile if owner_id is available) */}
             {offer.owner_name && (
-              <div className="mt-0.5 text-xs text-gray-500">by {offer.owner_name}</div>
+              <div className="mt-0.5 text-xs text-gray-500">
+                by{' '}
+                {offer.owner_id ? (
+                  <Link
+                    href={`/u/${offer.owner_id}`}
+                    className="underline hover:opacity-80"
+                    aria-label={`View ${offer.owner_name}'s profile`}
+                  >
+                    {offer.owner_name}
+                  </Link>
+                ) : (
+                  offer.owner_name
+                )}
+              </div>
             )}
           </div>
           <StatusBadge status={offer.status} />
