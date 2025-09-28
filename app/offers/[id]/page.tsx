@@ -13,10 +13,9 @@ type Offer = {
   owner_id: string;
   title: string;
   description: string | null;
-  offer_type: 'product' | 'service' | 'time' | 'knowledge' | 'other';
-  is_online: boolean;
+  type: 'service' | 'item' | 'space' | 'other';
+  online_only: boolean | null;
   city: string | null;
-  country: string | null;
   images: string[] | null;
   status: 'pending' | 'active' | 'paused' | 'archived' | 'blocked';
   created_at: string;
@@ -34,7 +33,6 @@ export default function OfferDetailPage() {
 
   const [showModal, setShowModal] = useState(false);
 
-  // load session + offer + eligibility
   useEffect(() => {
     let cancel = false;
     (async () => {
@@ -45,25 +43,21 @@ export default function OfferDetailPage() {
         const uid = auth.user?.id ?? null;
         if (!cancel) setMe(uid);
 
-        // fetch the offer (RLS allows: active for everyone, plus owner/admin/mod)
         const { data: o, error: oErr } = await supabase
           .from('offers')
-          .select(
-            'id, owner_id, title, description, offer_type, is_online, city, country, images, status, created_at'
-          )
+          .select('id, owner_id, title, description, type, online_only, city, images, status, created_at')
           .eq('id', id)
           .single();
 
         if (oErr) throw oErr;
         if (!cancel) setOffer(o as Offer);
 
-        // eligibility: count of active offers for the viewer
         if (uid) {
           const { data: c } = await supabase
             .from('profile_active_offer_count')
             .select('active_offers')
             .eq('profile_id', uid)
-            .maybeSingle(); // view row may not exist
+            .maybeSingle();
           if (!cancel) setEligibleCount(c?.active_offers ?? 0);
         } else {
           if (!cancel) setEligibleCount(0);
@@ -79,7 +73,7 @@ export default function OfferDetailPage() {
     };
   }, [id]);
 
-  const isOwner = useMemo(() => !!offer && me === offer.owner_id, [offer, me]);
+  const isOwner = useMemo(() => !!offer && me === offer?.owner_id, [offer, me]);
   const canRequest = useMemo(() => {
     if (!offer) return false;
     if (isOwner) return false;
@@ -90,9 +84,9 @@ export default function OfferDetailPage() {
   async function createRequest(note: string) {
     if (!offer || !me) return;
 
-    // Try RPC if it exists (may also create notifications), else fall back to direct insert.
     let requestId: string | null = null;
 
+    // Try RPC first (if you created it), else fall back to direct insert.
     const { data: rpcData, error: rpcErr } = await supabase.rpc('create_request', {
       p_offer: offer.id,
       p_note: note.trim() || '—',
@@ -116,41 +110,30 @@ export default function OfferDetailPage() {
 
     // Seed the per-request chat with the note as the first message.
     if (requestId) {
-      const payload = {
-        request_id: requestId,
-        offer_id: offer.id,
-        text: note.trim() || '—',
-      };
-
-      // Sender's copy + recipient notification; ignore errors so request still succeeds.
-      await supabase
-        .from('notifications')
-        .insert([
-          { profile_id: me, type: 'message', data: payload },
+      const payload = { request_id: requestId, offer_id: offer.id, sender_id: me, text: note.trim() || '—' };
+      try {
+        await supabase.from('notifications').insert([
+          { profile_id: me, type: 'message', data: payload, read_at: new Date().toISOString() },
           { profile_id: offer.owner_id, type: 'message_received', data: payload },
         ]);
+      } catch {
+        // ignore; not critical
+      }
     }
 
-    // Jump straight into the thread.
     router.push(`/messages?thread=${requestId}`);
   }
 
   if (loading) {
     return (
-      <section className="max-w-3xl">
-        <p>Loading…</p>
-      </section>
+      <section className="max-w-3xl"><p>Loading…</p></section>
     );
   }
   if (err) {
     return (
       <section className="max-w-3xl">
         <p className="text-red-600">{err}</p>
-        <p className="mt-2">
-          <Link href="/offers" className="underline">
-            ← Back to Browse
-          </Link>
-        </p>
+        <p className="mt-2"><Link href="/offers" className="underline">← Back to Browse</Link></p>
       </section>
     );
   }
@@ -158,25 +141,17 @@ export default function OfferDetailPage() {
     return (
       <section className="max-w-3xl">
         <p>Offer not found.</p>
-        <p className="mt-2">
-          <Link href="/offers" className="underline">
-            ← Back to Browse
-          </Link>
-        </p>
+        <p className="mt-2"><Link href="/offers" className="underline">← Back to Browse</Link></p>
       </section>
     );
   }
 
-  const location = offer.is_online
-    ? 'Online'
-    : [offer.city, offer.country].filter(Boolean).join(', ');
+  const location = offer.online_only ? 'Online' : (offer.city || '—');
   const thumb = Array.isArray(offer.images) && offer.images.length > 0 ? offer.images[0] : null;
 
   return (
     <section className="max-w-3xl space-y-4">
-      <Link href="/offers" className="text-sm underline">
-        ← Back to Browse
-      </Link>
+      <Link href="/offers" className="text-sm underline">← Back to Browse</Link>
 
       <div className="flex items-start justify-between gap-3">
         <h1 className="text-2xl font-bold">{offer.title}</h1>
@@ -196,12 +171,11 @@ export default function OfferDetailPage() {
       </div>
 
       <div className="text-sm text-gray-600">
-        {offer.offer_type} • {location || '—'}
+        {offer.type} • {location}
       </div>
 
       {offer.description && <p className="whitespace-pre-wrap">{offer.description}</p>}
 
-      {/* Friendly eligibility banner */}
       {!isOwner && (
         <div className="rounded border p-3">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -211,10 +185,7 @@ export default function OfferDetailPage() {
               ) : offer.status !== 'active' ? (
                 <>This offer isn’t active yet.</>
               ) : eligibleCount < 1 ? (
-                <>
-                  You need at least one <b>active</b> offer to request.{' '}
-                  <Link href="/offers/new" className="underline">Create an offer</Link>.
-                </>
+                <>You need at least one <b>active</b> offer to request. <Link href="/offers/new" className="underline">Create an offer</Link>.</>
               ) : (
                 <>Ready to send a request?</>
               )}
@@ -233,12 +204,9 @@ export default function OfferDetailPage() {
       )}
 
       {isOwner && (
-        <div className="rounded border p-3 text-sm text-gray-600">
-          You are the owner of this offer.
-        </div>
+        <div className="rounded border p-3 text-sm text-gray-600">You are the owner of this offer.</div>
       )}
 
-      {/* Modal */}
       {showModal && (
         <RequestModal
           title="Send a request"
@@ -254,7 +222,6 @@ export default function OfferDetailPage() {
               setBusy(false);
               return;
             }
-            // on success, the page navigates away
           }}
         />
       )}
