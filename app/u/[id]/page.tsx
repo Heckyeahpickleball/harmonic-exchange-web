@@ -1,21 +1,33 @@
 // /app/u/[id]/page.tsx
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import OfferCard, { type OfferRow } from '@/components/OfferCard';
+import ProfileHeader from '@/components/ProfileHeader';
+import UserFeed from '@/components/UserFeed';
 
 type ProfileRow = {
   id: string;
   display_name: string | null;
   bio?: string | null;
+  // we keep these optional; if your schema has them, great — otherwise we won’t break
+  city?: string | null;
+  country?: string | null;
+  role?: 'user' | 'moderator' | 'admin' | null;
+  created_at?: string | null;
+  avatar_url?: string | null;
+  cover_url?: string | null;
 };
 
-function ProfileContent() {
-  const params = useParams<{ id: string }>();
-  const profileId = params?.id;
+export const dynamic = 'force-dynamic';
 
+function ProfileContent() {
+  const { id: profileId } = useParams<{ id: string }>();
+
+  const [me, setMe] = useState<string | null>(null);
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [offers, setOffers] = useState<OfferRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,28 +42,31 @@ function ProfileContent() {
       setMsg('');
 
       try {
-        // Profile
+        // who am I?
+        const { data: auth } = await supabase.auth.getUser();
+        const uid = auth?.user?.id ?? null;
+        if (!cancelled) setMe(uid);
+
+        // profile (keep selection conservative to avoid unknown-column errors)
         const { data: p, error: pErr } = await supabase
           .from('profiles')
-          .select('id, display_name, bio')
+          .select('id, display_name, bio, created_at')
           .eq('id', profileId)
           .single();
         if (pErr) throw pErr;
         if (!cancelled) setProfile(p as ProfileRow);
 
-        // Owner's active offers (note the column names: offer_type, is_online, etc.)
+        // owner’s ACTIVE offers
         const { data: o, error: oErr } = await supabase
           .from('offers')
-          .select(
-            'id, title, offer_type, is_online, city, country, images, status'
-          )
+          .select('id, title, offer_type, is_online, city, country, images, status')
           .eq('owner_id', profileId)
           .eq('status', 'active')
           .order('created_at', { ascending: false })
           .limit(100);
         if (oErr) throw oErr;
 
-        // Map to OfferRow; include owner_name for card display
+        const ownerName = (p as any)?.display_name ?? '—';
         const list: OfferRow[] = (o || []).map((row: any) => ({
           id: row.id,
           title: row.title,
@@ -61,7 +76,7 @@ function ProfileContent() {
           country: row.country,
           status: row.status,
           images: row.images ?? [],
-          owner_name: (p as any)?.display_name ?? '—',
+          owner_name: ownerName,
         }));
 
         if (!cancelled) setOffers(list);
@@ -77,28 +92,63 @@ function ProfileContent() {
     };
   }, [profileId]);
 
+  const cityLine = useMemo(() => {
+    if (!profile) return undefined;
+    const parts = [profile.city, profile.country].filter(Boolean);
+    return parts.length ? parts.join(', ') : undefined;
+  }, [profile]);
+
   return (
     <section className="space-y-4">
-      <h1 className="text-2xl font-bold">{profile?.display_name || 'Profile'}</h1>
+      {/* Header */}
+      <ProfileHeader
+        displayName={profile?.display_name || 'Profile'}
+        city={cityLine}
+        role={(profile?.role as any) || undefined}
+        memberSince={profile?.created_at || undefined}
+        avatarUrl={profile?.avatar_url || undefined}
+        coverUrl={profile?.cover_url || undefined}
+        canEdit={me === profile?.id}
+        onEdit={() => (window.location.href = '/profile')}
+      />
+
+      {/* Bio */}
       {profile?.bio && (
-        <p className="max-w-2xl whitespace-pre-wrap text-sm text-gray-700">
-          {profile.bio}
-        </p>
+        <p className="max-w-2xl whitespace-pre-wrap text-sm text-gray-700">{profile.bio}</p>
       )}
 
-      <h2 className="mt-4 text-xl font-semibold">Active Offers</h2>
-      {msg && <p className="text-sm text-amber-700">{msg}</p>}
-      {loading ? (
-        <p className="text-sm text-gray-600">Loading…</p>
-      ) : offers.length === 0 ? (
-        <p className="text-sm text-gray-600">No active offers.</p>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {offers.map((o) => (
-            <OfferCard key={o.id} offer={o} />
-          ))}
+      {/* Layout: left = offers, right = feed */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Left: offers */}
+        <div className="lg:col-span-1">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Active Offers</h2>
+            {me === profile?.id && (
+              <Link href="/offers/new" className="text-sm underline">
+                New offer
+              </Link>
+            )}
+          </div>
+
+          {msg && <p className="text-sm text-amber-700">{msg}</p>}
+          {loading ? (
+            <p className="text-sm text-gray-600">Loading…</p>
+          ) : offers.length === 0 ? (
+            <p className="text-sm text-gray-600">No active offers.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-3">
+              {offers.map((o) => (
+                <OfferCard key={o.id} offer={o} />
+              ))}
+            </div>
+          )}
         </div>
-      )}
+
+        {/* Right: feed */}
+        <div className="lg:col-span-2">
+          <UserFeed profileId={profileId} me={me} />
+        </div>
+      </div>
     </section>
   );
 }

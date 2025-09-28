@@ -1,8 +1,9 @@
+// /components/ProfileHeader.tsx
 'use client';
 
 type Props = {
   displayName: string;
-  city?: string | null;            // you can pass "City, Country" combined
+  city?: string | null;            // pass "City, Country" combined if you like
   role?: 'user' | 'moderator' | 'admin';
   memberSince?: string;            // ISO date
   avatarUrl?: string | null;
