@@ -1,4 +1,4 @@
-/* HX v0.9 — Offer card (browse + “my offers”), supports owner delete + owner name
+/* HX v0.9 — Offer card (browse + “my offers”), supports owner delete + owner name + profile link
    File: components/OfferCard.tsx
 */
 'use client';
