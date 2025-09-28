@@ -8,6 +8,8 @@ import {
   useState,
   useCallback,
   useRef,
+  memo,
+  useTransition,
 } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
@@ -15,13 +17,7 @@ import { supabase } from '@/lib/supabaseClient';
 
 export const dynamic = 'force-dynamic';
 
-type ChatMsg = {
-  id: string;
-  created_at: string;
-  text: string;
-  sender_id: string;
-};
-
+type ChatMsg = { id: string; created_at: string; text: string; sender_id: string };
 type Thread = {
   request_id: string;
   offer_id: string;
@@ -33,9 +29,7 @@ type Thread = {
   unread: number;
 };
 
-function formatTS(ts: string) {
-  return new Date(ts).toLocaleString();
-}
+const formatTS = (ts: string) => new Date(ts).toLocaleString();
 
 /* ---------- auth ---------- */
 function useMe() {
@@ -50,7 +44,7 @@ function useMe() {
 }
 
 /* ---------- left column ---------- */
-function ThreadsList({
+const ThreadsList = memo(function ThreadsList({
   threads,
   selected,
   onSelect,
@@ -99,7 +93,7 @@ function ThreadsList({
       </ul>
     </aside>
   );
-}
+});
 
 /* ---------- right column ---------- */
 function ChatPane({
@@ -119,7 +113,6 @@ function ChatPane({
   const [err, setErr] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // keep local messages in sync with cache immediately on thread change
   useEffect(() => {
     setMsgs(initialMsgs ?? []);
   }, [thread?.request_id, initialMsgs]);
@@ -129,9 +122,7 @@ function ChatPane({
     [thread, draft, me]
   );
 
-  // cancel stale fetches if user switches threads quickly
   const reqCounter = useRef(0);
-
   const loadThread = useCallback(async () => {
     if (!thread) return;
     setErr(null);
@@ -145,11 +136,8 @@ function ChatPane({
       .contains('data', { request_id: thread.request_id })
       .order('created_at', { ascending: true });
 
-    if (reqCounter.current !== myTurn) return; // thread changed; ignore
-    if (error) {
-      setErr(error.message);
-      return;
-    }
+    if (reqCounter.current !== myTurn) return;
+    if (error) return setErr(error.message);
 
     const mapped: ChatMsg[] = (data || []).map((row: any) => ({
       id: row.id,
@@ -161,7 +149,7 @@ function ChatPane({
     setMsgs(mapped);
     onCache(thread.request_id, mapped);
 
-    // mark incoming messages for this thread as read
+    // mark incoming messages read
     await supabase
       .from('notifications')
       .update({ read_at: new Date().toISOString() })
@@ -175,25 +163,16 @@ function ChatPane({
     void loadThread();
   }, [loadThread]);
 
-  // realtime updates for this thread
   useEffect(() => {
     if (!thread) return;
     const ch = supabase
       .channel(`realtime:messages:${thread.request_id}:${me}`)
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-          filter: `profile_id=eq.${me}`,
-        },
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `profile_id=eq.${me}` },
         (payload) => {
           const n = payload.new as any;
-          if (
-            (n.type === 'message' || n.type === 'message_received') &&
-            n?.data?.request_id === thread.request_id
-          ) {
+          if ((n.type === 'message' || n.type === 'message_received') && n?.data?.request_id === thread.request_id) {
             const msg: ChatMsg = {
               id: n.id,
               created_at: n.created_at,
@@ -204,10 +183,7 @@ function ChatPane({
             onCache(thread.request_id, (prev) => [...(prev || []), msg]);
 
             if (n.type === 'message_received') {
-              void supabase
-                .from('notifications')
-                .update({ read_at: new Date().toISOString() })
-                .eq('id', n.id);
+              void supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id);
             }
           }
         }
@@ -236,14 +212,8 @@ function ChatPane({
     setDraft('');
 
     try {
-      const payload = {
-        request_id: thread.request_id,
-        offer_id: thread.offer_id,
-        sender_id: me,
-        text,
-      };
+      const payload = { request_id: thread.request_id, offer_id: thread.offer_id, sender_id: me, text };
       const now = new Date().toISOString();
-
       const { error } = await supabase.from('notifications').insert([
         { profile_id: me, type: 'message', data: payload, read_at: now },
         { profile_id: thread.peer_id, type: 'message_received', data: payload },
@@ -251,7 +221,6 @@ function ChatPane({
       if (error) throw error;
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to send message.');
-      // revert optimistic
       setMsgs((m) => m.filter((x) => x.id !== optimistic.id));
       onCache(thread.request_id, (prev) => (prev || []).filter((x) => x.id !== optimistic.id));
       setDraft(text);
@@ -261,7 +230,6 @@ function ChatPane({
     }
   }, [draft, me, thread, onCache]);
 
-  // Delete just your copy (your notifications row)
   const deleteMsg = useCallback(
     async (msgId: string) => {
       if (!thread) return;
@@ -269,40 +237,31 @@ function ChatPane({
         await supabase.from('notifications').delete().eq('id', msgId).eq('profile_id', me);
         setMsgs((m) => m.filter((x) => x.id !== msgId));
         onCache(thread.request_id, (prev) => (prev || []).filter((x) => x.id !== msgId));
-      } catch {
-        /* non-fatal */
-      }
+      } catch {}
     },
     [me, thread, onCache]
   );
 
-  // Shift+Enter inserts newline at caret
-  const inputRef2 = inputRef;
   const insertNewlineAtCursor = useCallback(() => {
-    const el = inputRef2.current;
-    if (!el) {
-      setDraft((v) => v + '\n');
-      return;
-    }
+    const el = inputRef.current;
+    if (!el) return setDraft((v) => v + '\n');
     const start = el.selectionStart ?? draft.length;
     const end = el.selectionEnd ?? draft.length;
     const nextVal = draft.slice(0, start) + '\n' + draft.slice(end);
     setDraft(nextVal);
     requestAnimationFrame(() => {
       const pos = start + 1;
-      if (inputRef2.current) {
-        inputRef2.current.selectionStart = pos;
-        inputRef2.current.selectionEnd = pos;
+      if (inputRef.current) {
+        inputRef.current.selectionStart = pos;
+        inputRef.current.selectionEnd = pos;
       }
     });
-  }, [draft, inputRef2]);
+  }, [draft]);
 
   if (!thread) {
     return (
       <div className="flex-1">
-        <div className="rounded border p-6 text-sm text-gray-600">
-          Select a conversation on the left to start chatting.
-        </div>
+        <div className="rounded border p-6 text-sm text-gray-600">Select a conversation on the left to start chatting.</div>
       </div>
     );
   }
@@ -315,34 +274,24 @@ function ChatPane({
             <div className="truncate text-sm text-gray-600">Chat with {thread.peer_name || 'Someone'}</div>
             <div className="truncate font-semibold">{thread.offer_title || '—'}</div>
           </div>
-          <Link className="text-xs underline" href={`/offers/${thread.offer_id}`}>
-            View offer
-          </Link>
+          <Link className="text-xs underline" href={`/offers/${thread.offer_id}`}>View offer</Link>
         </div>
 
         <div className="max-h-[55vh] min-h-[45vh] overflow-auto p-3">
           {msgs.map((m) => {
             const mine = m.sender_id === me;
             return (
-              <div
-                key={m.id}
-                className={`group relative mb-2 max-w-[85%] rounded px-3 py-2 text-sm ${
-                  mine ? 'ml-auto bg-black text-white' : 'bg-gray-100'
-                }`}
-              >
+              <div key={m.id} className={`group relative mb-2 max-w-[85%] rounded px-3 py-2 text-sm ${mine ? 'ml-auto bg-black text-white' : 'bg-gray-100'}`}>
                 <button
                   aria-label="Delete message"
                   title="Delete message"
                   onClick={() => deleteMsg(m.id)}
                   className={`absolute right-1 top-1 hidden rounded px-1 text-[11px] ${
-                    mine
-                      ? 'group-hover:inline-block bg-white/10 hover:bg-white/20'
-                      : 'group-hover:inline-block bg-black/5 hover:bg-black/10'
+                    mine ? 'group-hover:inline-block bg-white/10 hover:bg-white/20' : 'group-hover:inline-block bg-black/5 hover:bg-black/10'
                   }`}
                 >
                   🗑
                 </button>
-
                 <div className="text-[11px] opacity-70">{formatTS(m.created_at)}</div>
                 <div className="mt-1 whitespace-pre-wrap">{m.text}</div>
               </div>
@@ -365,13 +314,8 @@ function ChatPane({
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
-                  if (e.shiftKey) {
-                    e.preventDefault();
-                    insertNewlineAtCursor();
-                  } else {
-                    e.preventDefault();
-                    if (!sending) void handleSend();
-                  }
+                  if (e.shiftKey) { e.preventDefault(); insertNewlineAtCursor(); }
+                  else { e.preventDefault(); if (!sending) void handleSend(); }
                 }
               }}
               rows={2}
@@ -379,20 +323,11 @@ function ChatPane({
               className="flex-1 resize-none rounded border px-3 py-2 text-sm"
               aria-label="Type a message"
             />
-            <button
-              type="submit"
-              onClick={() => {
-                if (!sending) void handleSend();
-              }}
-              disabled={!canSend || sending}
-              className="rounded bg-black px-3 py-2 text-sm text-white disabled:opacity-60"
-            >
+            <button type="submit" disabled={!canSend || sending} className="rounded bg-black px-3 py-2 text-sm text-white disabled:opacity-60">
               {sending ? 'Sending…' : 'Send'}
             </button>
           </form>
-          <div className="mt-1 text-[11px] text-gray-500">
-            Press <kbd>Enter</kbd> to send • <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line
-          </div>
+          <div className="mt-1 text-[11px] text-gray-500">Press <kbd>Enter</kbd> to send • <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line</div>
         </div>
       </div>
     </div>
@@ -405,23 +340,19 @@ function MessagesContent() {
   const router = useRouter();
   const pathname = usePathname();
   const me = useMe();
+  const [isPending, startTransition] = useTransition();
 
   const [threads, setThreads] = useState<Thread[]>([]);
   const [selected, setSelected] = useState<Thread | undefined>(undefined);
-
-  // Message cache by request_id so switching feels instant
   const [msgCache, setMsgCache] = useState<Record<string, ChatMsg[]>>({});
 
-  const setCache = useCallback(
-    (rid: string, next: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])) => {
-      setMsgCache((prev) => {
-        const prevArr = prev[rid] || [];
-        const arr = typeof next === 'function' ? (next as any)(prevArr) : next;
-        return { ...prev, [rid]: arr };
-      });
-    },
-    []
-  );
+  const setCache = useCallback((rid: string, next: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])) => {
+    setMsgCache((prev) => {
+      const prevArr = prev[rid] || [];
+      const arr = typeof next === 'function' ? (next as any)(prevArr) : next;
+      return { ...prev, [rid]: arr };
+    });
+  }, []);
 
   const buildThreads = useCallback(async (uid: string) => {
     const { data, error } = await supabase
@@ -431,27 +362,16 @@ function MessagesContent() {
       .or('type.eq.message,type.eq.message_received')
       .order('created_at', { ascending: false })
       .limit(500);
-
     if (error) throw error;
 
-    const byReq = new Map<
-      string,
-      { last_at: string; last_text?: string; offer_id?: string; offer_title?: string; unread: number }
-    >();
-
+    const byReq = new Map<string, { last_at: string; last_text?: string; offer_id?: string; offer_title?: string; unread: number }>();
     for (const row of (data || []) as any[]) {
       const rid = row.data?.request_id as string | undefined;
       if (!rid) continue;
       const prev = byReq.get(rid);
       const isUnread = row.type === 'message_received' && !row.read_at;
       if (!prev) {
-        byReq.set(rid, {
-          last_at: row.created_at,
-          last_text: (row.data?.text ?? row.data?.message) ?? '',
-          offer_id: row.data?.offer_id,
-          offer_title: row.data?.offer_title,
-          unread: isUnread ? 1 : 0,
-        });
+        byReq.set(rid, { last_at: row.created_at, last_text: (row.data?.text ?? row.data?.message) ?? '', offer_id: row.data?.offer_id, offer_title: row.data?.offer_title, unread: isUnread ? 1 : 0 });
       } else {
         if (row.created_at > prev.last_at) {
           prev.last_at = row.created_at;
@@ -470,64 +390,58 @@ function MessagesContent() {
 
     const { data: reqRows } = await supabase
       .from('requests')
-      .select(`
-        id,
-        offer_id,
-        requester_profile_id,
-        offers!inner ( id, title, owner_id )
-      `)
+      .select(`id, offer_id, requester_profile_id, offers!inner ( id, title, owner_id )`)
       .in('id', reqIds);
 
     const tmp: Thread[] = [];
     for (const r of (reqRows || []) as any[]) {
-      const agg = byReq.get(r.id);
-      if (!agg) continue;
+      const agg = byReq.get(r.id); if (!agg) continue;
       const owner_id = r.offers?.owner_id as string;
       const requester_id = r.requester_profile_id as string;
       const peer_id = uid === owner_id ? requester_id : owner_id;
-
-      tmp.push({
-        request_id: r.id as string,
-        offer_id: r.offer_id as string,
-        offer_title: agg.offer_title ?? (r.offers?.title as string | undefined),
-        peer_id,
-        peer_name: undefined,
-        last_text: agg.last_text,
-        last_at: agg.last_at,
-        unread: agg.unread,
-      });
+      tmp.push({ request_id: r.id as string, offer_id: r.offer_id as string, offer_title: agg.offer_title ?? (r.offers?.title as string | undefined), peer_id, peer_name: undefined, last_text: agg.last_text, last_at: agg.last_at, unread: agg.unread });
     }
 
     const peerIds = Array.from(new Set(tmp.map((t) => t.peer_id)));
     const { data: peers } = await supabase.from('profiles').select('id, display_name').in('id', peerIds);
-    const nameMap = new Map<string, string>();
-    for (const p of (peers || []) as any[]) nameMap.set(p.id, p.display_name || 'Someone');
+    const nameMap = new Map<string, string>(); for (const p of (peers || []) as any[]) nameMap.set(p.id, p.display_name || 'Someone');
 
-    const builtSorted = tmp
-      .map((t) => ({ ...t, peer_name: nameMap.get(t.peer_id) || t.peer_name }))
-      .sort((a, b) => (a.last_at < b.last_at ? 1 : -1));
-
+    const builtSorted = tmp.map((t) => ({ ...t, peer_name: nameMap.get(t.peer_id) || t.peer_name })).sort((a, b) => (a.last_at < b.last_at ? 1 : -1));
     setThreads(builtSorted);
-  }, []);
 
-  // fetch threads
+    // Prefetch the first 3 threads for instant open
+    const toPrefetch = builtSorted.slice(0, 3).map((t) => t.request_id);
+    for (const rid of toPrefetch) {
+      if (msgCache[rid]) continue;
+      const { data: m } = await supabase
+        .from('notifications')
+        .select('id, created_at, type, data')
+        .eq('profile_id', uid)
+        .or('type.eq.message,type.eq.message_received')
+        .contains('data', { request_id: rid })
+        .order('created_at', { ascending: true });
+      const mapped: ChatMsg[] = (m || []).map((row: any) => ({
+        id: row.id,
+        created_at: row.created_at,
+        text: (row.data?.text ?? row.data?.message) ?? '',
+        sender_id: row.data?.sender_id ?? '',
+      }));
+      setMsgCache((prev) => ({ ...prev, [rid]: mapped }));
+    }
+  }, [msgCache]);
+
   useEffect(() => {
-    if (!me) return;
-    void buildThreads(me);
+    const uid = me;
+    if (!uid) return;
+    void buildThreads(uid);
   }, [me, buildThreads]);
 
-  // choose selected whenever threads or URL param changes
   useEffect(() => {
-    if (threads.length === 0) {
-      setSelected(undefined);
-      return;
-    }
+    if (threads.length === 0) { setSelected(undefined); return; }
     const fromUrl = searchParams.get('thread');
     if (fromUrl) {
       const found = threads.find((t) => t.request_id === fromUrl);
-      if (found && found.request_id !== selected?.request_id) {
-        setSelected(found);
-      }
+      if (found && found.request_id !== selected?.request_id) setSelected(found);
     } else if (!selected) {
       setSelected(threads[0]);
     }
@@ -540,14 +454,14 @@ function MessagesContent() {
         selected={selected?.request_id}
         onSelect={(t) => {
           // update immediately for snappy UI
-          setSelected(t);
-          // only update URL if it actually differs (avoid extra rerenders)
+          if (t.request_id !== selected?.request_id) setSelected(t);
+          // update URL without blocking UI
           const current = searchParams.get('thread');
           if (current !== t.request_id) {
             const sp = new URLSearchParams(Array.from(searchParams.entries()));
             sp.set('thread', t.request_id);
             const url = `${pathname}?${sp.toString()}`;
-            router.replace(url);
+            startTransition(() => router.replace(url));
           }
         }}
       />
