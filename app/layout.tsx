@@ -1,10 +1,10 @@
-// app/layout.tsx
 'use client';
 
 import './globals.css';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import NotificationsBell from '@/components/NotificationsBell';
+import MessagesUnreadBadge from '@/components/MessagesUnreadBadge';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -58,7 +58,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link className="hover:underline" href="/offers">Browse</Link>
               <Link className="hover:underline" href="/offers/new">New Offer</Link>
               <Link className="hover:underline" href="/offers/mine">My Offers</Link>
-              <Link className="hover:underline" href="/messages">Messages</Link>
+
+              <span className="flex items-center">
+                <Link className="hover:underline" href="/messages">Messages</Link>
+                <MessagesUnreadBadge />
+              </span>
+
               <Link className="hover:underline" href="/exchanges">Exchanges</Link>
               <Link className="hover:underline" href="/profile">Profile</Link>
               {(role === 'admin' || role === 'moderator') && (

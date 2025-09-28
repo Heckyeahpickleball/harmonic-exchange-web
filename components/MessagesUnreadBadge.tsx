@@ -34,26 +34,30 @@ export default function MessagesUnreadBadge() {
     void refresh();
 
     const chIns = supabase
-      .channel('notif-ins')
+      .channel('realtime:msg_unread:ins')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications', filter: `profile_id=eq.${uid}` },
         (payload) => {
           const n = payload.new as any;
-          if (n.type === 'message_received' && !n.read_at) setCount((c) => c + 1);
+          if (n.type === 'message_received' && !n.read_at) {
+            setCount((c) => c + 1);
+          }
         }
       )
       .subscribe();
 
     const chUpd = supabase
-      .channel('notif-upd')
+      .channel('realtime:msg_unread:upd')
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `profile_id=eq.${uid}` },
         (payload) => {
           const n = payload.new as any;
           // if a message_received gets marked read, decrement safely (don’t go below 0)
-          if (n.type === 'message_received' && n.read_at) setCount((c) => Math.max(0, c - 1));
+          if (n.type === 'message_received' && n.read_at) {
+            setCount((c) => Math.max(0, c - 1));
+          }
         }
       )
       .subscribe();
