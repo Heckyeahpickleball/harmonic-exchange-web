@@ -1,8 +1,8 @@
-// app/browse/page.tsx
+// app/new/page.tsx
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
-export default function BrowseAlias() {
-  redirect("/offers");
+export default function NewAlias() {
+  redirect("/offers/new");
 }
