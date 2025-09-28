@@ -16,7 +16,7 @@ import { supabase } from '@/lib/supabaseClient';
 export const dynamic = 'force-dynamic';
 
 type ChatMsg = {
-  id: string;            // notifications.id (your row)
+  id: string;
   created_at: string;
   text: string;
   sender_id: string;
@@ -78,15 +78,9 @@ function ThreadsList({
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="truncate font-semibold">
-                    {t.peer_name || 'Someone'}
-                  </div>
-                  <div className="truncate text-gray-700">
-                    {t.offer_title || '—'}
-                  </div>
-                  <div className="truncate text-xs text-gray-500">
-                    {t.last_text || ''}
-                  </div>
+                  <div className="truncate font-semibold">{t.peer_name || 'Someone'}</div>
+                  <div className="truncate text-gray-700">{t.offer_title || '—'}</div>
+                  <div className="truncate text-xs text-gray-500">{t.last_text || ''}</div>
                 </div>
                 <div className="text-right">
                   <div className="text-[11px] text-gray-500">
@@ -108,21 +102,40 @@ function ThreadsList({
 }
 
 /* ---------- right column ---------- */
-function ChatPane({ me, thread }: { me: string; thread?: Thread }) {
-  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
+function ChatPane({
+  me,
+  thread,
+  initialMsgs,
+  onCache,
+}: {
+  me: string;
+  thread?: Thread;
+  initialMsgs?: ChatMsg[];
+  onCache: (rid: string, msgs: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])) => void;
+}) {
+  const [msgs, setMsgs] = useState<ChatMsg[]>(initialMsgs ?? []);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // keep local messages in sync with cache immediately on thread change
+  useEffect(() => {
+    setMsgs(initialMsgs ?? []);
+  }, [thread?.request_id, initialMsgs]);
 
   const canSend = useMemo(
     () => !!thread && !!draft.trim() && !!me && !!thread.peer_id,
     [thread, draft, me]
   );
 
+  // cancel stale fetches if user switches threads quickly
+  const reqCounter = useRef(0);
+
   const loadThread = useCallback(async () => {
     if (!thread) return;
     setErr(null);
+    const myTurn = ++reqCounter.current;
 
     const { data, error } = await supabase
       .from('notifications')
@@ -132,6 +145,7 @@ function ChatPane({ me, thread }: { me: string; thread?: Thread }) {
       .contains('data', { request_id: thread.request_id })
       .order('created_at', { ascending: true });
 
+    if (reqCounter.current !== myTurn) return; // thread changed; ignore
     if (error) {
       setErr(error.message);
       return;
@@ -143,7 +157,9 @@ function ChatPane({ me, thread }: { me: string; thread?: Thread }) {
       text: (row.data?.text ?? row.data?.message) ?? '',
       sender_id: row.data?.sender_id ?? '',
     }));
+
     setMsgs(mapped);
+    onCache(thread.request_id, mapped);
 
     // mark incoming messages for this thread as read
     await supabase
@@ -153,7 +169,7 @@ function ChatPane({ me, thread }: { me: string; thread?: Thread }) {
       .eq('type', 'message_received')
       .is('read_at', null)
       .contains('data', { request_id: thread.request_id });
-  }, [me, thread]);
+  }, [me, thread, onCache]);
 
   useEffect(() => {
     void loadThread();
@@ -185,6 +201,7 @@ function ChatPane({ me, thread }: { me: string; thread?: Thread }) {
               sender_id: n.data?.sender_id ?? '',
             };
             setMsgs((m) => [...m, msg]);
+            onCache(thread.request_id, (prev) => [...(prev || []), msg]);
 
             if (n.type === 'message_received') {
               void supabase
@@ -200,7 +217,7 @@ function ChatPane({ me, thread }: { me: string; thread?: Thread }) {
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [me, thread]);
+  }, [me, thread, onCache]);
 
   const handleSend = useCallback(async () => {
     if (!thread || !draft.trim()) return;
@@ -215,6 +232,7 @@ function ChatPane({ me, thread }: { me: string; thread?: Thread }) {
       sender_id: me,
     };
     setMsgs((m) => [...m, optimistic]);
+    onCache(thread.request_id, (prev) => [...(prev || []), optimistic]);
     setDraft('');
 
     try {
@@ -235,29 +253,33 @@ function ChatPane({ me, thread }: { me: string; thread?: Thread }) {
       setErr(e?.message ?? 'Failed to send message.');
       // revert optimistic
       setMsgs((m) => m.filter((x) => x.id !== optimistic.id));
+      onCache(thread.request_id, (prev) => (prev || []).filter((x) => x.id !== optimistic.id));
       setDraft(text);
     } finally {
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [draft, me, thread]);
+  }, [draft, me, thread, onCache]);
 
   // Delete just your copy (your notifications row)
   const deleteMsg = useCallback(
     async (msgId: string) => {
+      if (!thread) return;
       try {
         await supabase.from('notifications').delete().eq('id', msgId).eq('profile_id', me);
         setMsgs((m) => m.filter((x) => x.id !== msgId));
+        onCache(thread.request_id, (prev) => (prev || []).filter((x) => x.id !== msgId));
       } catch {
         /* non-fatal */
       }
     },
-    [me]
+    [me, thread, onCache]
   );
 
   // Shift+Enter inserts newline at caret
+  const inputRef2 = inputRef;
   const insertNewlineAtCursor = useCallback(() => {
-    const el = inputRef.current;
+    const el = inputRef2.current;
     if (!el) {
       setDraft((v) => v + '\n');
       return;
@@ -268,12 +290,12 @@ function ChatPane({ me, thread }: { me: string; thread?: Thread }) {
     setDraft(nextVal);
     requestAnimationFrame(() => {
       const pos = start + 1;
-      if (inputRef.current) {
-        inputRef.current.selectionStart = pos;
-        inputRef.current.selectionEnd = pos;
+      if (inputRef2.current) {
+        inputRef2.current.selectionStart = pos;
+        inputRef2.current.selectionEnd = pos;
       }
     });
-  }, [draft]);
+  }, [draft, inputRef2]);
 
   if (!thread) {
     return (
@@ -290,12 +312,8 @@ function ChatPane({ me, thread }: { me: string; thread?: Thread }) {
       <div className="rounded border">
         <div className="flex items-center justify-between border-b px-3 py-2">
           <div className="min-w-0">
-            <div className="truncate text-sm text-gray-600">
-              Chat with {thread.peer_name || 'Someone'}
-            </div>
-            <div className="truncate font-semibold">
-              {thread.offer_title || '—'}
-            </div>
+            <div className="truncate text-sm text-gray-600">Chat with {thread.peer_name || 'Someone'}</div>
+            <div className="truncate font-semibold">{thread.offer_title || '—'}</div>
           </div>
           <Link className="text-xs underline" href={`/offers/${thread.offer_id}`}>
             View offer
@@ -312,7 +330,6 @@ function ChatPane({ me, thread }: { me: string; thread?: Thread }) {
                   mine ? 'ml-auto bg-black text-white' : 'bg-gray-100'
                 }`}
               >
-                {/* Delete (your copy only) */}
                 <button
                   aria-label="Delete message"
                   title="Delete message"
@@ -392,6 +409,20 @@ function MessagesContent() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [selected, setSelected] = useState<Thread | undefined>(undefined);
 
+  // Message cache by request_id so switching feels instant
+  const [msgCache, setMsgCache] = useState<Record<string, ChatMsg[]>>({});
+
+  const setCache = useCallback(
+    (rid: string, next: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])) => {
+      setMsgCache((prev) => {
+        const prevArr = prev[rid] || [];
+        const arr = typeof next === 'function' ? (next as any)(prevArr) : next;
+        return { ...prev, [rid]: arr };
+      });
+    },
+    []
+  );
+
   const buildThreads = useCallback(async (uid: string) => {
     const { data, error } = await supabase
       .from('notifications')
@@ -405,22 +436,14 @@ function MessagesContent() {
 
     const byReq = new Map<
       string,
-      {
-        last_at: string;
-        last_text?: string;
-        offer_id?: string;
-        offer_title?: string;
-        unread: number;
-      }
+      { last_at: string; last_text?: string; offer_id?: string; offer_title?: string; unread: number }
     >();
 
     for (const row of (data || []) as any[]) {
       const rid = row.data?.request_id as string | undefined;
       if (!rid) continue;
-
       const prev = byReq.get(rid);
       const isUnread = row.type === 'message_received' && !row.read_at;
-
       if (!prev) {
         byReq.set(rid, {
           last_at: row.created_at,
@@ -456,23 +479,17 @@ function MessagesContent() {
       .in('id', reqIds);
 
     const tmp: Thread[] = [];
-
     for (const r of (reqRows || []) as any[]) {
       const agg = byReq.get(r.id);
       if (!agg) continue;
-
-      const offer_id = r.offer_id as string;
-      const offer_title = agg.offer_title ?? (r.offers?.title as string | undefined);
       const owner_id = r.offers?.owner_id as string;
       const requester_id = r.requester_profile_id as string;
-
-      const uidIsOwner = uid === owner_id;
-      const peer_id = uidIsOwner ? requester_id : owner_id;
+      const peer_id = uid === owner_id ? requester_id : owner_id;
 
       tmp.push({
         request_id: r.id as string,
-        offer_id,
-        offer_title,
+        offer_id: r.offer_id as string,
+        offer_title: agg.offer_title ?? (r.offers?.title as string | undefined),
         peer_id,
         peer_name: undefined,
         last_text: agg.last_text,
@@ -482,11 +499,7 @@ function MessagesContent() {
     }
 
     const peerIds = Array.from(new Set(tmp.map((t) => t.peer_id)));
-    const { data: peers } = await supabase
-      .from('profiles')
-      .select('id, display_name')
-      .in('id', peerIds);
-
+    const { data: peers } = await supabase.from('profiles').select('id, display_name').in('id', peerIds);
     const nameMap = new Map<string, string>();
     for (const p of (peers || []) as any[]) nameMap.set(p.id, p.display_name || 'Someone');
 
@@ -497,13 +510,13 @@ function MessagesContent() {
     setThreads(builtSorted);
   }, []);
 
-  // fetch thread list
+  // fetch threads
   useEffect(() => {
     if (!me) return;
     void buildThreads(me);
   }, [me, buildThreads]);
 
-  // choose which thread is selected whenever threads or the URL param changes
+  // choose selected whenever threads or URL param changes
   useEffect(() => {
     if (threads.length === 0) {
       setSelected(undefined);
@@ -526,15 +539,24 @@ function MessagesContent() {
         threads={threads}
         selected={selected?.request_id}
         onSelect={(t) => {
-          setSelected(t); // update immediately for snappy UI
-          const sp = new URLSearchParams(Array.from(searchParams.entries()));
-          sp.set('thread', t.request_id);
-          const url = `${pathname}?${sp.toString()}`;
-          // keep URL in sync without a full navigation
-          router.replace(url);
+          // update immediately for snappy UI
+          setSelected(t);
+          // only update URL if it actually differs (avoid extra rerenders)
+          const current = searchParams.get('thread');
+          if (current !== t.request_id) {
+            const sp = new URLSearchParams(Array.from(searchParams.entries()));
+            sp.set('thread', t.request_id);
+            const url = `${pathname}?${sp.toString()}`;
+            router.replace(url);
+          }
         }}
       />
-      <ChatPane me={me || ''} thread={selected} />
+      <ChatPane
+        me={me || ''}
+        thread={selected}
+        initialMsgs={selected ? msgCache[selected.request_id] : undefined}
+        onCache={setCache}
+      />
     </section>
   );
 }
