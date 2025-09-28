@@ -1,3 +1,3 @@
 import { redirect } from 'next/navigation';
 export const dynamic = 'force-dynamic';
-export default function BrowseAlias() { redirect('/offers'); }
+export default function ConversationsAlias() { redirect('/messages'); }
