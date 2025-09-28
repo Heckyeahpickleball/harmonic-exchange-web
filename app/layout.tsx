@@ -8,33 +8,45 @@ import NotificationsBell from '@/components/NotificationsBell';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const [uid, setUid] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
 
+  // load once and keep in sync with auth changes
   useEffect(() => {
     let mounted = true;
 
-    async function loadRole() {
+    async function readUser() {
       const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) {
-        if (mounted) setRole(null);
+      const id = auth?.user?.id ?? null;
+      if (!mounted) return;
+      setUid(id);
+
+      if (!id) {
+        setRole(null);
         return;
       }
-
-      const { data } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', uid)
-        .single();
-
+      const { data } = await supabase.from('profiles').select('role').eq('id', id).single();
       if (mounted) setRole(data?.role ?? null);
     }
 
-    loadRole();
+    const { data: sub } = supabase.auth.onAuthStateChange(() => {
+      // user signed in/out elsewhere -> refresh header
+      readUser().catch(() => {});
+    });
+
+    readUser().catch(() => {});
+
     return () => {
       mounted = false;
+      sub.subscription.unsubscribe();
     };
   }, []);
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    // simplest way to refresh client state
+    if (typeof window !== 'undefined') window.location.href = '/';
+  }
 
   return (
     <html lang="en">
@@ -53,9 +65,24 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <Link className="hover:underline" href="/admin">Admin</Link>
               )}
             </div>
-            <div className="flex items-center gap-4">
-              <Link className="hover:underline" href="/sign-in">Sign In</Link>
-              <NotificationsBell />
+
+            <div className="flex items-center gap-3">
+              {uid ? (
+                <>
+                  <NotificationsBell />
+                  <button
+                    onClick={handleSignOut}
+                    className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
+                    aria-label="Sign out"
+                  >
+                    Sign out
+                  </button>
+                </>
+              ) : (
+                <Link className="rounded border px-2 py-1 text-sm hover:bg-gray-50" href="/sign-in">
+                  Sign In
+                </Link>
+              )}
             </div>
           </nav>
         </header>

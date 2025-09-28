@@ -174,19 +174,27 @@ function ChatPane({
         { event: 'INSERT', schema: 'public', table: 'notifications', filter: `profile_id=eq.${me}` },
         (payload) => {
           const n = payload.new as any;
-          if ((n.type === 'message' || n.type === 'message_received') && n?.data?.request_id === thread.request_id) {
-            const msg: ChatMsg = {
-              id: n.id,
-              created_at: n.created_at,
-              text: (n.data?.text ?? n.data?.message) ?? '',
-              sender_id: n.data?.sender_id ?? '',
-            };
-            setMsgs((m) => [...m, msg]);
-            onCache(thread.request_id, (prev) => [...(prev || []), msg]);
+          // only this thread
+          if (n?.data?.request_id !== thread.request_id) return;
 
-            if (n.type === 'message_received') {
-              void supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id);
-            }
+          // IMPORTANT: ignore our own 'message' inserts to avoid duplicating the optimistic message
+          if (n.type === 'message' && n?.data?.sender_id === me) return;
+
+          const msg: ChatMsg = {
+            id: n.id,
+            created_at: n.created_at,
+            text: (n.data?.text ?? n.data?.message) ?? '',
+            sender_id: n.data?.sender_id ?? '',
+          };
+
+          setMsgs((prev) => (prev.some((x) => x.id === msg.id) ? prev : [...prev, msg]));
+          onCache(thread.request_id, (prev) => {
+            const arr = prev || [];
+            return arr.some((x) => x.id === msg.id) ? arr : [...arr, msg];
+          });
+
+          if (n.type === 'message_received') {
+            void supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id);
           }
         }
       )
@@ -248,7 +256,6 @@ function ChatPane({
     if (!thread) return;
     const ok = confirm('Leave this conversation? This removes it from your inbox (does not affect the other person).');
     if (!ok) return;
-    // delete ONLY your rows for this request_id
     await supabase
       .from('notifications')
       .delete()
@@ -503,11 +510,9 @@ function MessagesContent() {
     });
     setSelected((prev) => {
       if (!prev || prev.request_id !== rid) return prev;
-      // pick next available thread
       const next = threads.find((t) => t.request_id !== rid);
       return next;
     });
-    // also clear ?thread= if it matched
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       if (url.searchParams.get('thread') === rid) {
