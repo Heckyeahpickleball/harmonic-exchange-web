@@ -1,87 +1,91 @@
 // /components/RequestModal.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export default function RequestModal({
   title = 'Send a request',
-  placeholder = 'Write a short note…',
+  placeholder = 'Add a short note…',
+  maxLength = 600,
   onCancel,
   onSubmit,
 }: {
   title?: string;
   placeholder?: string;
+  maxLength?: number;
   onCancel: () => void;
   onSubmit: (
     note: string,
     setBusy: (b: boolean) => void,
     setError: (m: string) => void
-  ) => Promise<void> | void;
+  ) => void | Promise<void>;
 }) {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const taRef = useRef<HTMLTextAreaElement>(null);
 
-  // Close on Escape
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onCancel();
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onCancel]);
+    taRef.current?.focus();
+  }, []);
+
+  const remaining = maxLength - note.length;
+  const canSend = !busy && note.trim().length > 0 && remaining >= 0;
 
   return (
-    <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-3"
-      onClick={onCancel} // click backdrop to close
-    >
-      <div
-        className="w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-xl"
-        onClick={(e) => e.stopPropagation()} // prevent backdrop close when clicking inside
-      >
-        <div className="border-b px-4 py-3">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
+      <div className="w-full max-w-xl rounded-xl bg-white p-4 shadow-xl">
+        <div className="mb-3 flex items-center justify-between">
           <h3 className="text-lg font-semibold">{title}</h3>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
+          >
+            Cancel
+          </button>
         </div>
 
-        <form
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (!note.trim()) return;
-            await onSubmit(note.trim(), setBusy, setErr);
-          }}
-          className="grid gap-3 p-4"
-        >
-          <label className="text-sm font-medium">Note</label>
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            rows={5}
-            className="w-full rounded border px-3 py-2"
-            placeholder={placeholder}
-          />
-          <div className="flex items-center justify-between">
-            <div className="text-xs text-gray-600">{note.trim().length} chars</div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onCancel}
-                className="rounded border px-4 py-2 text-sm hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={busy || !note.trim()}
-                className="rounded bg-black px-4 py-2 text-sm text-white disabled:opacity-50"
-              >
-                {busy ? 'Sending…' : 'Send request'}
-              </button>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium">Note</label>
+            <textarea
+              ref={taRef}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={5}
+              maxLength={maxLength}
+              placeholder={placeholder}
+              className="mt-1 w-full resize-y rounded border p-2 text-sm"
+            />
+            <div className="mt-1 flex items-center justify-between text-xs text-gray-500">
+              <span>Tell the owner what you’re hoping for.</span>
+              <span className={remaining < 0 ? 'text-red-600' : ''}>
+                {remaining} characters left
+              </span>
             </div>
           </div>
 
-          {err && <p className="text-sm text-red-600">{err}</p>}
-        </form>
+          {err && <div className="text-sm text-red-600">{err}</div>}
+
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!canSend}
+              onClick={() => onSubmit(note.trim(), setBusy, setErr)}
+              className="rounded bg-black px-4 py-2 text-sm text-white disabled:opacity-50"
+            >
+              {busy ? 'Sending…' : 'Send request'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
