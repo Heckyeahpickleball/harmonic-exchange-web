@@ -1,4 +1,4 @@
-/* HX v0.9 — Offer card (browse + “my offers”), supports owner delete + owner name + profile link
+/* HX v0.9 — Offer card (browse + “my offers”), supports owner delete + owner name
    File: components/OfferCard.tsx
 */
 'use client';
@@ -18,9 +18,9 @@ export type OfferRow = {
   country: string | null;
   status: 'pending' | 'active' | 'paused' | 'archived' | 'blocked';
   images?: string[] | null;
-  /** Added for Browse: owner display name (optional). */
+  /** Added for Browse / profile pages: owner display name (optional). */
   owner_name?: string;
-  /** Optional owner id so we can link to public profile if callers provide it. */
+  /** NEW (optional): owner id so we can link to /u/[id]. */
   owner_id?: string;
 };
 
@@ -107,20 +107,16 @@ export function OfferCardImpl({ offer, mine = false, onDeleted }: Props) {
             <div className="mt-0.5 text-xs text-gray-600">
               {offer.offer_type} • {location || '—'}
             </div>
-            {/* Owner line (links to public profile if owner_id is available) */}
+            {/* Owner line (link to /u/[id] when we have the id) */}
             {offer.owner_name && (
               <div className="mt-0.5 text-xs text-gray-500">
                 by{' '}
                 {offer.owner_id ? (
-                  <Link
-                    href={`/u/${offer.owner_id}`}
-                    className="underline hover:opacity-80"
-                    aria-label={`View ${offer.owner_name}'s profile`}
-                  >
+                  <Link href={`/u/${offer.owner_id}`} className="underline">
                     {offer.owner_name}
                   </Link>
                 ) : (
-                  offer.owner_name
+                  <>{offer.owner_name}</>
                 )}
               </div>
             )}

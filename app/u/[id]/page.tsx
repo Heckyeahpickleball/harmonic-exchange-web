@@ -13,9 +13,9 @@ type ProfileRow = {
   id: string;
   display_name: string | null;
   bio?: string | null;
-  // we keep these optional; if your schema has them, great — otherwise we won’t break
-  city?: string | null;
-  country?: string | null;
+  // optional fields (won’t crash if not present in your schema)
+  area_city?: string | null;
+  area_country?: string | null;
   role?: 'user' | 'moderator' | 'admin' | null;
   created_at?: string | null;
   avatar_url?: string | null;
@@ -47,10 +47,10 @@ function ProfileContent() {
         const uid = auth?.user?.id ?? null;
         if (!cancelled) setMe(uid);
 
-        // profile (keep selection conservative to avoid unknown-column errors)
+        // profile row (conservative selection)
         const { data: p, error: pErr } = await supabase
           .from('profiles')
-          .select('id, display_name, bio, created_at')
+          .select('id, display_name, bio, area_city, area_country, role, created_at, avatar_url, cover_url')
           .eq('id', profileId)
           .single();
         if (pErr) throw pErr;
@@ -77,6 +77,7 @@ function ProfileContent() {
           status: row.status,
           images: row.images ?? [],
           owner_name: ownerName,
+          owner_id: String(profileId),
         }));
 
         if (!cancelled) setOffers(list);
@@ -94,7 +95,7 @@ function ProfileContent() {
 
   const cityLine = useMemo(() => {
     if (!profile) return undefined;
-    const parts = [profile.city, profile.country].filter(Boolean);
+    const parts = [profile.area_city, profile.area_country].filter(Boolean);
     return parts.length ? parts.join(', ') : undefined;
   }, [profile]);
 

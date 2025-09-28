@@ -2,8 +2,12 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import ImageCropperModal from '@/components/ImageCropperModal';
+import OfferCard, { type OfferRow } from '@/components/OfferCard';
+import UserFeed from '@/components/UserFeed';
+import PostComposer from '@/components/PostComposer';
 
 type ProfileRow = {
   id: string;
@@ -32,6 +36,7 @@ type FormState = {
 export default function ProfilePage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -48,6 +53,11 @@ export default function ProfilePage() {
     avatar_url: null,
     cover_url: null,
   });
+
+  // offers for this user
+  const [offers, setOffers] = useState<OfferRow[]>([]);
+  const [offersLoading, setOffersLoading] = useState(false);
+  const [offersMsg, setOffersMsg] = useState('');
 
   // hidden inputs to pick a file before cropping
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -77,18 +87,23 @@ export default function ProfilePage() {
       }
       const u = userRes.user;
       if (cancelled) return;
+
       setUserEmail(u.email ?? u.phone ?? null);
       setUserId(u.id);
 
       // Fetch profile row
       const { data: prof, error: profErr } = await supabase
         .from('profiles')
-        .select('id, display_name, area_city, area_country, skills, bio, avatar_url, cover_url, role, status, created_at')
+        .select(
+          'id, display_name, area_city, area_country, skills, bio, avatar_url, cover_url, role, status, created_at'
+        )
         .eq('id', u.id)
         .single();
 
       if (profErr) {
-        setStatus(`Heads up: profile not found yet. Try Sign Out then Sign In again to create it. (${profErr.message})`);
+        setStatus(
+          `Heads up: profile not found yet. Try Sign Out then Sign In again to create it. (${profErr.message})`
+        );
         setLoading(false);
         return;
       }
@@ -112,6 +127,56 @@ export default function ProfilePage() {
       cancelled = true;
     };
   }, []);
+
+  // Load my active offers
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+
+    (async () => {
+      setOffersLoading(true);
+      setOffersMsg('');
+      try {
+        const { data, error } = await supabase
+          .from('offers')
+          .select(
+            'id, title, offer_type, is_online, city, country, images, status, created_at'
+          )
+          .eq('owner_id', userId)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        // Shape rows for OfferCard
+        const shaped: OfferRow[] =
+          (data ?? []).map((r: any) => ({
+            id: r.id,
+            title: r.title,
+            offer_type: r.offer_type,
+            is_online: r.is_online,
+            city: r.city,
+            country: r.country,
+            status: r.status,
+            images: r.images ?? [],
+            owner_name: undefined, // not shown on my own profile
+          })) ?? [];
+
+        if (!cancelled) setOffers(shaped);
+      } catch (e: any) {
+        if (!cancelled) {
+          setOffers([]);
+          setOffersMsg(e?.message ?? 'Failed to load your offers.');
+        }
+      } finally {
+        if (!cancelled) setOffersLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   const skillsList = useMemo(
     () =>
@@ -165,7 +230,9 @@ export default function ProfilePage() {
         cover_url: form.cover_url,
       })
       .eq('id', userId)
-      .select('id, display_name, area_city, area_country, skills, bio, avatar_url, cover_url, role, status, created_at')
+      .select(
+        'id, display_name, area_city, area_country, skills, bio, avatar_url, cover_url, role, status, created_at'
+      )
       .single();
 
     setSaving(false);
@@ -176,6 +243,30 @@ export default function ProfilePage() {
       setProfile(data as ProfileRow);
       setStatus('Saved! ✅');
       setEditing(false);
+    }
+  }
+
+  // ---- NEW: hook up PostComposer(onPost) ----
+  async function handlePost(text: string) {
+    if (!userId) return;
+    const body = text.trim();
+    if (!body) return;
+
+    try {
+      setStatus('Posting…');
+      const { error } = await supabase
+        .from('posts')
+        .insert({ profile_id: userId, body })
+        .select('id')
+        .single();
+      if (error) throw error;
+      setStatus('Posted! ✅');
+      // UserFeed will pick this up via its own fetch/realtime.
+    } catch (e: any) {
+      setStatus(e?.message ?? 'Failed to post.');
+    } finally {
+      // clear the hint after a moment
+      setTimeout(() => setStatus(''), 1200);
     }
   }
 
@@ -287,6 +378,42 @@ export default function ProfilePage() {
       )}
 
       {status && <p className="px-1 text-sm text-gray-700">{status}</p>}
+
+      {/* ===== Main content: Offers (left) + Posts (right) ===== */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+        {/* Offers column */}
+        <section className="md:col-span-5 space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold">Active Offers</h2>
+            <Link href="/offers/new" className="text-xs underline">New offer</Link>
+          </div>
+
+          {offersLoading && <p className="text-sm text-gray-600">Loading…</p>}
+          {offersMsg && <p className="text-sm text-amber-700">{offersMsg}</p>}
+
+          {!offersLoading && offers.length === 0 && (
+            <p className="text-sm text-gray-600">No active offers yet.</p>
+          )}
+
+          <div className="grid grid-cols-1 gap-3">
+            {offers.map((o) => (
+              <OfferCard
+                key={o.id}
+                offer={o}
+                mine
+                onDeleted={(id) => setOffers((prev) => prev.filter((x) => x.id !== id))}
+              />
+            ))}
+          </div>
+        </section>
+
+        {/* Posts column */}
+        <section className="md:col-span-7 space-y-2">
+          <h2 className="text-base font-semibold">Posts</h2>
+          {userId && <PostComposer onPost={handlePost} />}
+          {userId && <UserFeed profileId={userId} me={userId} />}
+        </section>
+      </div>
 
       {/* ----- EDIT DIALOG ----- */}
       {editing && (

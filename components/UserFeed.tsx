@@ -18,14 +18,16 @@ export default function UserFeed({
   me,
 }: {
   profileId: string;
-  me: string | null;
+  me?: string | null; // <- optional so callers can omit it
 }) {
+  const meNorm = me ?? null;
+
   const [posts, setPosts] = useState<PostRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string>('');
   const [unsupported, setUnsupported] = useState(false);
 
-  const canCompose = useMemo(() => !!me && me === profileId, [me, profileId]);
+  const canCompose = useMemo(() => !!meNorm && meNorm === profileId, [meNorm, profileId]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -43,14 +45,13 @@ export default function UserFeed({
       if (error) throw error;
       setPosts((data || []) as PostRow[]);
     } catch (e: any) {
-      if (
-        typeof e?.message === 'string' &&
-        e.message.toLowerCase().includes('does not exist')
-      ) {
+      const msg = typeof e?.message === 'string' ? e.message : '';
+      if (msg.toLowerCase().includes('does not exist')) {
+        // Table not present in some envs — don’t break the page.
         setUnsupported(true);
         setPosts([]);
       } else {
-        setErr(e?.message ?? 'Failed to load feed.');
+        setErr(msg || 'Failed to load feed.');
         setPosts([]);
       }
     } finally {
@@ -67,9 +68,7 @@ export default function UserFeed({
       <h2 className="text-lg font-semibold">Posts</h2>
 
       {unsupported && (
-        <div className="rounded border p-3 text-sm text-gray-600">
-          Feed coming soon.
-        </div>
+        <div className="rounded border p-3 text-sm text-gray-600">Feed coming soon.</div>
       )}
 
       {!unsupported && canCompose && (
@@ -100,10 +99,8 @@ export default function UserFeed({
                 <li key={p.id}>
                   <PostItem
                     post={p}
-                    me={me}
-                    onDeleted={() =>
-                      setPosts((prev) => prev.filter((x) => x.id !== p.id))
-                    }
+                    me={meNorm}
+                    onDeleted={() => setPosts((prev) => prev.filter((x) => x.id !== p.id))}
                   />
                 </li>
               ))}
