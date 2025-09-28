@@ -10,7 +10,7 @@ import {
   useRef,
   memo,
 } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 export const dynamic = 'force-dynamic';
@@ -99,12 +99,15 @@ function ChatPane({
   thread,
   initialMsgs,
   onCache,
+  onLeave,
 }: {
   me: string;
   thread?: Thread;
   initialMsgs?: ChatMsg[];
   onCache: (rid: string, msgs: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])) => void;
+  onLeave: (rid: string) => void;
 }) {
+  const router = useRouter();
   const [msgs, setMsgs] = useState<ChatMsg[]>(initialMsgs ?? []);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -189,7 +192,7 @@ function ChatPane({
       )
       .subscribe();
 
-  return () => {
+    return () => {
       supabase.removeChannel(ch);
     };
   }, [me, thread, onCache]);
@@ -241,6 +244,20 @@ function ChatPane({
     [me, thread, onCache]
   );
 
+  const leaveChat = useCallback(async () => {
+    if (!thread) return;
+    const ok = confirm('Leave this conversation? This removes it from your inbox (does not affect the other person).');
+    if (!ok) return;
+    // delete ONLY your rows for this request_id
+    await supabase
+      .from('notifications')
+      .delete()
+      .eq('profile_id', me)
+      .contains('data', { request_id: thread.request_id });
+
+    onLeave(thread.request_id);
+  }, [me, thread, onLeave]);
+
   const insertNewlineAtCursor = useCallback(() => {
     const el = inputRef.current;
     if (!el) return setDraft((v) => v + '\n');
@@ -274,16 +291,24 @@ function ChatPane({
             <div className="truncate font-semibold">{thread.offer_title || '—'}</div>
           </div>
 
-          {/* Button-styled link */}
-          <Link
-            href={`/offers/${thread.offer_id}`}
-            className="inline-flex items-center rounded bg-black px-3 py-2 text-xs font-medium text-white hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
-            role="button"
-            aria-label="View offer details"
-            title="View offer"
-          >
-            View offer
-          </Link>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded border px-2 py-1 text-xs hover:bg-gray-50"
+              onClick={() => router.push(`/offers/${thread.offer_id}`)}
+              title="View Offer"
+            >
+              View offer
+            </button>
+            <button
+              type="button"
+              className="rounded border px-2 py-1 text-xs hover:bg-gray-50"
+              onClick={leaveChat}
+              title="Leave chat"
+            >
+              Leave chat
+            </button>
+          </div>
         </div>
 
         <div className="max-h-[55vh] min-h-[45vh] overflow-auto p-3">
@@ -461,7 +486,6 @@ function MessagesContent() {
     }
   }, [threads, initialThreadId, selected]);
 
-  // Click handler: local state + update URL without Next navigation
   const selectThread = useCallback((t: Thread) => {
     setSelected(t);
     if (typeof window !== 'undefined') {
@@ -470,6 +494,28 @@ function MessagesContent() {
       window.history.replaceState({}, '', url.toString());
     }
   }, []);
+
+  const leaveThread = useCallback((rid: string) => {
+    setThreads((prev) => prev.filter((t) => t.request_id !== rid));
+    setMsgCache((prev) => {
+      const { [rid]: _, ...rest } = prev;
+      return rest;
+    });
+    setSelected((prev) => {
+      if (!prev || prev.request_id !== rid) return prev;
+      // pick next available thread
+      const next = threads.find((t) => t.request_id !== rid);
+      return next;
+    });
+    // also clear ?thread= if it matched
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('thread') === rid) {
+        url.searchParams.delete('thread');
+        window.history.replaceState({}, '', url.toString());
+      }
+    }
+  }, [threads]);
 
   return (
     <section className="flex gap-4">
@@ -483,6 +529,7 @@ function MessagesContent() {
         thread={selected}
         initialMsgs={selected ? msgCache[selected.request_id] : undefined}
         onCache={setCache}
+        onLeave={leaveThread}
       />
     </section>
   );
