@@ -9,9 +9,7 @@ import {
   useCallback,
   useRef,
   memo,
-  useTransition,
 } from 'react';
-import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -122,6 +120,7 @@ function ChatPane({
     [thread, draft, me]
   );
 
+  // cancel stale fetches if user switches threads quickly
   const reqCounter = useRef(0);
   const loadThread = useCallback(async () => {
     if (!thread) return;
@@ -323,7 +322,7 @@ function ChatPane({
               className="flex-1 resize-none rounded border px-3 py-2 text-sm"
               aria-label="Type a message"
             />
-            <button type="submit" disabled={!canSend || sending} className="rounded bg-black px-3 py-2 text-sm text-white disabled:opacity-60">
+            <button type="submit" disabled={sending || !canSend} className="rounded bg-black px-3 py-2 text-sm text-white disabled:opacity-60">
               {sending ? 'Sending…' : 'Send'}
             </button>
           </form>
@@ -336,15 +335,20 @@ function ChatPane({
 
 /* ---------- page shell ---------- */
 function MessagesContent() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
   const me = useMe();
-  const [isPending, startTransition] = useTransition();
 
   const [threads, setThreads] = useState<Thread[]>([]);
   const [selected, setSelected] = useState<Thread | undefined>(undefined);
   const [msgCache, setMsgCache] = useState<Record<string, ChatMsg[]>>({});
+  const [initialThreadId, setInitialThreadId] = useState<string | null>(null);
+
+  // Read ?thread= once on mount (deep link), then ignore URL changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      setInitialThreadId(sp.get('thread'));
+    }
+  }, []);
 
   const setCache = useCallback((rid: string, next: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])) => {
     setMsgCache((prev) => {
@@ -409,7 +413,7 @@ function MessagesContent() {
     const builtSorted = tmp.map((t) => ({ ...t, peer_name: nameMap.get(t.peer_id) || t.peer_name })).sort((a, b) => (a.last_at < b.last_at ? 1 : -1));
     setThreads(builtSorted);
 
-    // Prefetch the first 3 threads for instant open
+    // Prefetch first 3 threads
     const toPrefetch = builtSorted.slice(0, 3).map((t) => t.request_id);
     for (const rid of toPrefetch) {
       if (msgCache[rid]) continue;
@@ -431,39 +435,38 @@ function MessagesContent() {
   }, [msgCache]);
 
   useEffect(() => {
-    const uid = me;
-    if (!uid) return;
-    void buildThreads(uid);
+    if (!me) return;
+    void buildThreads(me);
   }, [me, buildThreads]);
 
+  // Pick selected based on initial ?thread= (once), else first thread
   useEffect(() => {
     if (threads.length === 0) { setSelected(undefined); return; }
-    const fromUrl = searchParams.get('thread');
-    if (fromUrl) {
-      const found = threads.find((t) => t.request_id === fromUrl);
-      if (found && found.request_id !== selected?.request_id) setSelected(found);
+    if (initialThreadId) {
+      const found = threads.find((t) => t.request_id === initialThreadId);
+      setSelected(found || threads[0]);
+      setInitialThreadId(null); // only apply once
     } else if (!selected) {
       setSelected(threads[0]);
     }
-  }, [threads, searchParams, selected]);
+  }, [threads, initialThreadId, selected]);
+
+  // Click handler: local state + update URL without Next navigation
+  const selectThread = useCallback((t: Thread) => {
+    setSelected(t);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('thread', t.request_id);
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, []);
 
   return (
     <section className="flex gap-4">
       <ThreadsList
         threads={threads}
         selected={selected?.request_id}
-        onSelect={(t) => {
-          // update immediately for snappy UI
-          if (t.request_id !== selected?.request_id) setSelected(t);
-          // update URL without blocking UI
-          const current = searchParams.get('thread');
-          if (current !== t.request_id) {
-            const sp = new URLSearchParams(Array.from(searchParams.entries()));
-            sp.set('thread', t.request_id);
-            const url = `${pathname}?${sp.toString()}`;
-            startTransition(() => router.replace(url));
-          }
-        }}
+        onSelect={selectThread}
       />
       <ChatPane
         me={me || ''}
