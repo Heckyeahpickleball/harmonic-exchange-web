@@ -189,7 +189,7 @@ function ChatPane({
       )
       .subscribe();
 
-    return () => {
+  return () => {
       supabase.removeChannel(ch);
     };
   }, [me, thread, onCache]);
@@ -273,7 +273,17 @@ function ChatPane({
             <div className="truncate text-sm text-gray-600">Chat with {thread.peer_name || 'Someone'}</div>
             <div className="truncate font-semibold">{thread.offer_title || '—'}</div>
           </div>
-          <Link className="text-xs underline" href={`/offers/${thread.offer_id}`}>View offer</Link>
+
+          {/* Button-styled link */}
+          <Link
+            href={`/offers/${thread.offer_id}`}
+            className="inline-flex items-center rounded bg-black px-3 py-2 text-xs font-medium text-white hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+            role="button"
+            aria-label="View offer details"
+            title="View offer"
+          >
+            View offer
+          </Link>
         </div>
 
         <div className="max-h-[55vh] min-h-[45vh] overflow-auto p-3">
