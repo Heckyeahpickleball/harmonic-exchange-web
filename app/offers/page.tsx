@@ -90,19 +90,40 @@ function BrowseOffersPage() {
   async function load() {
     setLoading(true);
     try {
-      const join = tagIds.length ? 'offer_tags!inner' : 'offer_tags';
+      // Join profiles always so we can search by owner display_name
+      // If tag filtering, use inner join for offer_tags; otherwise keep it outer to still return rows with 0 tags.
+      const tagJoin = tagIds.length ? 'offer_tags!inner' : 'offer_tags';
 
-      // 1) Fetch active offers (with owner_id so we can look up names)
       let query = supabase
         .from('offers')
         .select(
-          `id,title,offer_type,is_online,city,country,images,status,created_at,owner_id, ${join}(tag_id,tags(name))`
+          `
+          id,
+          title,
+          offer_type,
+          is_online,
+          city,
+          country,
+          images,
+          status,
+          created_at,
+          owner_id,
+          profiles!inner ( id, display_name ),
+          ${tagJoin} ( tag_id, tags(name) )
+        `
         )
         .eq('status', 'active')
         .order('created_at', { ascending: false })
         .limit(500);
 
-      if (q.trim()) query = query.ilike('title', `%${q.trim()}%`);
+      // text search: title OR owner name
+      const qTrim = q.trim();
+      if (qTrim) {
+        // Supabase 'or' syntax uses dotted paths for joined columns
+        const like = `%${qTrim}%`;
+        query = query.or(`title.ilike.${like},profiles.display_name.ilike.${like}`);
+      }
+
       if (type !== 'all types') query = query.eq('offer_type', type);
       if (onlineOnly) query = query.eq('is_online', true);
       if (!onlineOnly && city.trim()) query = query.ilike('city', `%${city.trim()}%`);
@@ -111,17 +132,13 @@ function BrowseOffersPage() {
       const { data, error } = await query;
       if (error) throw error;
 
-      // 2) De-dupe rows (because of tag join) and collect owner IDs + tags
+      // De-dupe by offer id (tag join can create multiples)
       const map = new Map<
         string,
-        OfferRow & { tags?: { id: number; name: string }[]; owner_id?: string }
+        OfferRow & { tags?: { id: number; name: string }[]; owner_id?: string; owner_name?: string }
       >();
 
-      const ownerIds = new Set<string>();
-
       for (const row of ((data as unknown) as any[]) ?? []) {
-        ownerIds.add(row.owner_id);
-
         const base =
           map.get(row.id) ??
           ({
@@ -135,8 +152,9 @@ function BrowseOffersPage() {
             images: row.images ?? [],
             created_at: row.created_at,
             owner_id: row.owner_id,
+            owner_name: row.profiles?.display_name ?? '—',
             tags: [],
-          } as OfferRow & { tags?: { id: number; name: string }[]; owner_id?: string });
+          } as OfferRow & { tags?: { id: number; name: string }[]; owner_id?: string; owner_name?: string });
 
         const rowTags: { id: number; name: string }[] = (row.offer_tags ?? [])
           .map((ot: any) => ({ id: ot?.tag_id as number, name: ot?.tags?.name as string }))
@@ -148,25 +166,7 @@ function BrowseOffersPage() {
         map.set(row.id, base);
       }
 
-      // 3) Look up owner display names in one query
-      let ownerNameById = new Map<string, string>();
-      if (ownerIds.size) {
-        const { data: owners } = await supabase
-          .from('profiles')
-          .select('id, display_name')
-          .in('id', Array.from(ownerIds));
-        for (const p of (owners || []) as { id: string; display_name: string | null }[]) {
-          ownerNameById.set(p.id, p.display_name || '—');
-        }
-      }
-
-      // 4) Attach owner_name to the rows we return to the UI
-      const all: OfferRow[] = Array.from(map.values()).map((r) => ({
-        ...r,
-        owner_name: r.owner_id ? ownerNameById.get(r.owner_id) || '—' : '—',
-      }));
-
-      setOffers(all);
+      setOffers(Array.from(map.values()));
       setPage(1);
     } catch (e) {
       console.error(e);
@@ -195,7 +195,7 @@ function BrowseOffersPage() {
         <input
           value={qInput}
           onChange={(e) => setQInput(e.target.value)}
-          placeholder="Search title…"
+          placeholder="Search title or owner…"
           className="rounded border px-3 py-2"
         />
 
