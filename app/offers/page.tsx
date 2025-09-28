@@ -81,79 +81,81 @@ function BrowseOffersPage() {
     router.replace(`/offers${qs ? `?${qs}` : ''}`);
   }, [q, type, city, onlineOnly, selectedTags, page, router]);
 
-  const tagIds = useMemo(
-    () => selectedTags.filter((t) => t.id > 0).map((t) => t.id),
-    [selectedTags]
-  );
+  const tagIds = useMemo(() => selectedTags.map((t) => t.id).filter((id) => id > 0), [selectedTags]);
+
+  // Helpers to build the base query (we make a fresh one for each branch)
+  function makeBaseQuery() {
+    const tagJoin = tagIds.length ? 'offer_tags!inner' : 'offer_tags';
+    let q = supabase
+      .from('offers')
+      .select(
+        `
+        id,
+        title,
+        offer_type,
+        is_online,
+        city,
+        country,
+        images,
+        status,
+        created_at,
+        owner_id,
+        profiles!inner ( id, display_name ),
+        ${tagJoin} ( tag_id, tags(name) )
+      `
+      )
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(500);
+
+    if (type !== 'all types') q = q.eq('offer_type', type);
+    if (onlineOnly) q = q.eq('is_online', true);
+    if (!onlineOnly && city.trim()) q = q.ilike('city', `%${city.trim()}%`);
+    if (tagIds.length) q = q.in('offer_tags.tag_id', tagIds);
+
+    return q;
+  }
 
   // --- Load offers whenever filters change
   async function load() {
     setLoading(true);
     try {
-      // If there’s text, pre-lookup owner profile IDs that match the display_name
       const qTrim = q.trim();
-      let ownerIds: string[] = [];
+      const like = `%${qTrim}%`;
+
+      // 1) Always search by title (if q given)
+      const titleQuery = makeBaseQuery();
+      const titlePromise = qTrim ? titleQuery.ilike('title', like) : titleQuery;
+
+      // 2) If q given, also search owners whose display_name matches → fetch their IDs, then fetch offers by owner_id
+      let ownersPromise: Promise<any> | null = null;
       if (qTrim) {
-        const like = `%${qTrim}%`;
-        const { data: owners } = await supabase
+        const { data: profs } = await supabase
           .from('profiles')
           .select('id')
           .ilike('display_name', like)
-          .limit(50);
-        ownerIds = (owners || []).map((o: any) => o.id);
-      }
+          .limit(100);
 
-      // Join profiles always so we can show owner_name
-      // For tags, inner-join only when filtering so we still get rows with 0 tags otherwise.
-      const tagJoin = tagIds.length ? 'offer_tags!inner' : 'offer_tags';
-
-      let query = supabase
-        .from('offers')
-        .select(
-          `
-          id,
-          title,
-          offer_type,
-          is_online,
-          city,
-          region,
-          country,
-          images,
-          cover_url,
-          status,
-          created_at,
-          owner_id,
-          profiles!inner ( id, display_name ),
-          ${tagJoin} ( tag_id, tags(name) )
-        `
-        )
-        .eq('status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(500);
-
-      // text search: title OR city OR owner_id in (looked up by display_name)
-      if (qTrim) {
-        const like = `%${qTrim}%`;
-        const parts = [`title.ilike.${like}`, `city.ilike.${like}`];
+        const ownerIds = ((profs || []) as { id: string }[]).map((p) => p.id);
         if (ownerIds.length) {
-          const list = ownerIds.map((id) => `"${id}"`).join(',');
-          parts.push(`owner_id.in.(${list})`);
+          ownersPromise = makeBaseQuery().in('owner_id', ownerIds);
         }
-        query = query.or(parts.join(','));
       }
 
-      if (type !== 'all types') query = query.eq('offer_type', type);
-      if (onlineOnly) query = query.eq('is_online', true);
-      if (!onlineOnly && city.trim()) query = query.ilike('city', `%${city.trim()}%`);
-      if (tagIds.length) query = query.in('offer_tags.tag_id', tagIds);
+      const [byTitle, byOwner] = await Promise.all([
+        titlePromise,
+        ownersPromise ? ownersPromise : Promise.resolve({ data: [] }),
+      ]);
 
-      const { data, error } = await query;
-      if (error) throw error;
+      const rows = ([] as any[]).concat(byTitle.data || [], byOwner.data || []);
 
-      // De-dupe by offer id (tag join can create multiples) and shape to your OfferRow
-      const map = new Map<string, OfferRow & { tags?: { id: number; name: string }[] }>();
+      // De-dupe by offer id (tag join can create multiples, and we unioned two queries)
+      const map = new Map<
+        string,
+        OfferRow & { tags?: { id: number; name: string }[]; owner_id?: string; owner_name?: string }
+      >();
 
-      for (const row of ((data as unknown) as any[]) ?? []) {
+      for (const row of rows) {
         const base =
           map.get(row.id) ??
           ({
@@ -162,16 +164,14 @@ function BrowseOffersPage() {
             offer_type: row.offer_type,
             is_online: row.is_online,
             city: row.city,
-            region: row.region,
             country: row.country,
             status: row.status ?? 'active',
             images: row.images ?? [],
-            cover_url: row.cover_url ?? null,
             created_at: row.created_at,
             owner_id: row.owner_id,
             owner_name: row.profiles?.display_name ?? '—',
             tags: [],
-          } as OfferRow & { tags?: { id: number; name: string }[] });
+          } as OfferRow & { tags?: { id: number; name: string }[]; owner_id?: string; owner_name?: string });
 
         const rowTags: { id: number; name: string }[] = (row.offer_tags ?? [])
           .map((ot: any) => ({ id: ot?.tag_id as number, name: ot?.tags?.name as string }))
@@ -245,7 +245,6 @@ function BrowseOffersPage() {
         </label>
       </div>
 
-      {/* Tags (uses Tag[] from your TagMultiSelect) */}
       <TagMultiSelect
         allTags={allTags}
         value={selectedTags}
