@@ -1,11 +1,10 @@
 // /app/u/[id]/page.tsx
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
-import ProfileHeader from '@/components/ProfileHeader';
 import OfferCard, { type OfferRow } from '@/components/OfferCard';
 import UserFeed from '@/components/UserFeed';
 
@@ -51,14 +50,9 @@ function ProfileContent() {
         .eq('id', id)
         .single();
 
-      if (!cancelled) {
-        if (error) setProfile(null);
-        else setProfile(data as ProfileRow);
-      }
+      if (!cancelled) setProfile(error ? null : (data as ProfileRow));
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [id]);
 
   // load active offers by this owner
@@ -71,28 +65,23 @@ function ProfileContent() {
       try {
         const { data, error } = await supabase
           .from('offers')
-          .select(
-            'id, title, offer_type, is_online, city, country, images, status, created_at'
-          )
+          .select('id, title, offer_type, is_online, city, country, images, status, created_at')
           .eq('owner_id', id)
           .eq('status', 'active')
           .order('created_at', { ascending: false });
 
         if (error) throw error;
 
-        const shaped: OfferRow[] =
-          (data ?? []).map((r: any) => ({
-            id: r.id,
-            title: r.title,
-            offer_type: r.offer_type,
-            is_online: r.is_online,
-            city: r.city,
-            country: r.country,
-            status: r.status,
-            images: r.images ?? [],
-            owner_name: undefined,
-            owner_id: undefined,
-          })) ?? [];
+        const shaped: OfferRow[] = (data ?? []).map((r: any) => ({
+          id: r.id,
+          title: r.title,
+          offer_type: r.offer_type,
+          is_online: r.is_online,
+          city: r.city,
+          country: r.country,
+          status: r.status,
+          images: r.images ?? [],
+        }));
 
         if (!cancelled) setOffers(shaped);
       } catch (e: any) {
@@ -104,9 +93,7 @@ function ProfileContent() {
         if (!cancelled) setLoadingOffers(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [id]);
 
   if (!profile) {
@@ -122,8 +109,63 @@ function ProfileContent() {
 
   return (
     <section className="mx-auto max-w-5xl space-y-4">
-      {/* Same header component as /profile for a consistent look */}
-      <ProfileHeader profile={profile} isSelf={false} />
+      {/* Header card (read-only) */}
+      <div className="overflow-hidden rounded-xl border">
+        {/* Cover */}
+        <div className="relative h-40 w-full md:h-56">
+          {profile.cover_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={profile.cover_url} alt="Cover" className="h-full w-full object-cover" />
+          ) : (
+            <div className="h-full w-full bg-gradient-to-r from-slate-200 to-slate-100" />
+          )}
+        </div>
+
+        {/* Header content */}
+        <div className="relative px-4 pb-4 pt-12 md:px-6">
+          {/* Avatar */}
+          <div className="absolute -top-10 left-4 h-20 w-20 overflow-hidden rounded-full border-4 border-white md:left-6 md:h-24 md:w-24">
+            {profile.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={profile.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
+            ) : (
+              <div className="grid h-full w-full place-items-center bg-slate-200 text-slate-500">☺</div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="mt-2 md:mt-0 md:pl-24">
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-semibold md:text-2xl">
+                  {profile.display_name || 'Unnamed'}
+                </h1>
+                {profile.role && (
+                  <span className="rounded-full border px-2 py-0.5 text-xs capitalize text-gray-700">
+                    {profile.role}
+                  </span>
+                )}
+              </div>
+              <div className="mt-1 text-sm text-gray-600">
+                {profile.area_city || profile.area_country ? (
+                  <span>
+                    {[profile.area_city, profile.area_country].filter(Boolean).join(', ')}
+                  </span>
+                ) : (
+                  <span>—</span>
+                )}
+                {profile.created_at && (
+                  <>
+                    <span className="mx-2">•</span>
+                    <span>Member since {new Date(profile.created_at).toLocaleDateString()}</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* No edit/sign-out buttons on public view */}
+          </div>
+        </div>
+      </div>
 
       {/* About/skills (read-only) */}
       {(profile.bio || (profile.skills?.length ?? 0) > 0) && (
@@ -153,7 +195,6 @@ function ProfileContent() {
         <section className="space-y-2 md:col-span-5">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold">Active Offers</h2>
-            {/* no “New offer” here */}
           </div>
 
           {loadingOffers && <p className="text-sm text-gray-600">Loading…</p>}
@@ -169,7 +210,7 @@ function ProfileContent() {
           </div>
         </section>
 
-        {/* Posts (right) – read-only feed (no composer) */}
+        {/* Posts (right) – read-only feed */}
         <section className="space-y-2 md:col-span-7">
           <h2 className="text-base font-semibold">Posts</h2>
           <UserFeed profileId={profile.id} />
