@@ -27,7 +27,7 @@ type FormState = {
   display_name: string;
   area_city: string;
   area_country: string;
-  skillsCSV: string;
+  skillsCSV: string; // comma-separated
   bio: string;
   avatar_url: string | null;
   cover_url: string | null;
@@ -54,16 +54,13 @@ export default function ProfilePage() {
     cover_url: null,
   });
 
-  // offers for this user
   const [offers, setOffers] = useState<OfferRow[]>([]);
   const [offersLoading, setOffersLoading] = useState(false);
   const [offersMsg, setOffersMsg] = useState('');
 
-  // hidden inputs to pick a file before cropping
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
 
-  // cropper session state
   const [cropper, setCropper] = useState<{
     src: string;
     aspect: number;
@@ -91,7 +88,6 @@ export default function ProfilePage() {
       setUserEmail(u.email ?? u.phone ?? null);
       setUserId(u.id);
 
-      // Fetch profile row
       const { data: prof, error: profErr } = await supabase
         .from('profiles')
         .select(
@@ -139,9 +135,7 @@ export default function ProfilePage() {
       try {
         const { data, error } = await supabase
           .from('offers')
-          .select(
-            'id, title, offer_type, is_online, city, country, images, status, created_at'
-          )
+          .select('id, title, offer_type, is_online, city, country, images, status, created_at')
           .eq('owner_id', userId)
           .eq('status', 'active')
           .order('created_at', { ascending: false });
@@ -158,7 +152,7 @@ export default function ProfilePage() {
             country: r.country,
             status: r.status,
             images: r.images ?? [],
-            owner_name: undefined, // not shown on my own profile
+            owner_name: undefined,
           })) ?? [];
 
         if (!cancelled) setOffers(shaped);
@@ -224,7 +218,7 @@ export default function ProfilePage() {
         area_city: form.area_city.trim() || null,
         area_country: form.area_country.trim() || null,
         bio: form.bio.trim() || null,
-        skills, // text[]
+        skills,
         avatar_url: form.avatar_url,
         cover_url: form.cover_url,
       })
@@ -408,7 +402,6 @@ export default function ProfilePage() {
               }}
               className="grid gap-4 md:grid-cols-2"
             >
-              {/* left column */}
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium">Display name *</label>
@@ -464,9 +457,7 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* right column */}
               <div className="space-y-4">
-                {/* Cover uploader */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Cover photo</label>
                   {form.cover_url ? (
@@ -494,7 +485,7 @@ export default function ProfilePage() {
                         const src = URL.createObjectURL(file);
                         setCropper({
                           src,
-                          aspect: 3,          // 3:1 banner
+                          aspect: 3,
                           targetWidth: 1200,
                           targetHeight: 400,
                           kind: 'cover',
@@ -506,7 +497,6 @@ export default function ProfilePage() {
                   </div>
                 </div>
 
-                {/* Avatar uploader */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Profile picture</label>
                   {form.avatar_url ? (
@@ -536,7 +526,7 @@ export default function ProfilePage() {
                         const src = URL.createObjectURL(file);
                         setCropper({
                           src,
-                          aspect: 1,          // square avatar
+                          aspect: 1,
                           targetWidth: 512,
                           targetHeight: 512,
                           kind: 'avatar',
