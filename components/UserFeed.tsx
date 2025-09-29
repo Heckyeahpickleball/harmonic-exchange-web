@@ -4,7 +4,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import PostItem from './PostItem';
-import PostComposer from './PostComposer';
 
 type PostRow = {
   id: string;
@@ -37,6 +36,7 @@ export default function UserFeed({ profileId }: Props) {
         .eq('profile_id', profileId)
         .order('created_at', { ascending: false })
         .limit(50);
+
       if (error) throw error;
       setPosts((data || []) as any);
     } catch (e: any) {
@@ -53,13 +53,8 @@ export default function UserFeed({ profileId }: Props) {
 
   return (
     <div className="space-y-3">
-      {/* Composer only if you're viewing your own feed */}
-      {me === profileId && (
-        <PostComposer
-          profileId={profileId}
-          onCreated={load}
-        />
-      )}
+      {/* NOTE: Composer intentionally NOT rendered here to avoid duplicates.
+          The page decides if/where to show a composer. */}
 
       {loading && <p className="text-sm text-gray-600">Loading…</p>}
       {err && <p className="text-sm text-amber-700">{err}</p>}
@@ -69,7 +64,9 @@ export default function UserFeed({ profileId }: Props) {
           key={post.id}
           post={post}
           me={me}
-          onDeleted={() => setPosts((prev) => prev.filter((p) => p.id !== post.id))}
+          onDeleted={() =>
+            setPosts((prev) => prev.filter((p) => p.id !== post.id))
+          }
         />
       ))}
     </div>
