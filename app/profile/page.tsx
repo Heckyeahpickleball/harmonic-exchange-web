@@ -27,7 +27,7 @@ type FormState = {
   display_name: string;
   area_city: string;
   area_country: string;
-  skillsCSV: string; // comma-separated
+  skillsCSV: string;
   bio: string;
   avatar_url: string | null;
   cover_url: string | null;
@@ -148,7 +148,6 @@ export default function ProfilePage() {
 
         if (error) throw error;
 
-        // Shape rows for OfferCard
         const shaped: OfferRow[] =
           (data ?? []).map((r: any) => ({
             id: r.id,
@@ -159,7 +158,7 @@ export default function ProfilePage() {
             country: r.country,
             status: r.status,
             images: r.images ?? [],
-            owner_name: undefined, // not shown on my own profile
+            owner_name: undefined,
           })) ?? [];
 
         if (!cancelled) setOffers(shaped);
@@ -225,7 +224,7 @@ export default function ProfilePage() {
         area_city: form.area_city.trim() || null,
         area_country: form.area_country.trim() || null,
         bio: form.bio.trim() || null,
-        skills, // text[]
+        skills,
         avatar_url: form.avatar_url,
         cover_url: form.cover_url,
       })
@@ -383,7 +382,7 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        {/* Posts column (SINGLE composer lives here) */}
+        {/* Posts column — SINGLE composer + feed */}
         <section className="md:col-span-7 space-y-2">
           <h2 className="text-base font-semibold">Posts</h2>
           {userId && <PostComposer profileId={userId} />}
@@ -493,13 +492,12 @@ export default function ProfilePage() {
                         const src = URL.createObjectURL(file);
                         setCropper({
                           src,
-                          aspect: 3,          // 3:1 banner
+                          aspect: 3,
                           targetWidth: 1200,
                           targetHeight: 400,
                           kind: 'cover',
                           title: 'Position your cover',
                         });
-                        // reset input so choosing the same file twice still fires
                         e.currentTarget.value = '';
                       }}
                     />
@@ -536,7 +534,7 @@ export default function ProfilePage() {
                         const src = URL.createObjectURL(file);
                         setCropper({
                           src,
-                          aspect: 1,          // square avatar
+                          aspect: 1,
                           targetWidth: 512,
                           targetHeight: 512,
                           kind: 'avatar',
