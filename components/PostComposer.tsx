@@ -5,42 +5,41 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 type Props = {
-  /** ID of the profile we're posting as */
-  profileId: string;
-  /** Called after a successful post so the parent can refresh */
-  onPost?: () => void;
-  /** Optional character limit (default 600) */
-  limit?: number;
+  profileId: string;            // author profile id (required)
+  onPost?: () => void;          // optional: parent can refresh after a post
+  limit?: number;               // max chars (default 600)
 };
 
 export default function PostComposer({ profileId, onPost, limit = 600 }: Props) {
+  const [me, setMe] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-
   const remaining = useMemo(() => Math.max(0, limit - text.length), [text, limit]);
-  const disabled = busy || !text.trim() || text.length > limit;
+  const disabled = !me || !text.trim() || busy;
 
-  useEffect(() => setErr(''), [text]);
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      if (!cancel) setMe(data.user?.id ?? null);
+    })();
+    return () => { cancel = true; };
+  }, []);
 
   async function submit() {
-    if (disabled) return;
+    const body = text.trim();
+    if (!body || !me) return;
+    setBusy(true);
     try {
-      setBusy(true);
-      setErr('');
-
-      const body = text.trim();
-      const { error } = await supabase
-        .from('posts')
-        .insert({ profile_id: profileId, body })
-        .select('id')
-        .single();
-
+      const { error } = await supabase.from('posts').insert({
+        profile_id: profileId,   // write to the profile’s feed
+        body,
+      });
       if (error) throw error;
       setText('');
       onPost?.();
     } catch (e: any) {
-      setErr(e?.message ?? 'Could not publish post.');
+      alert(e?.message ?? 'Could not post.');
     } finally {
       setBusy(false);
     }
@@ -48,29 +47,26 @@ export default function PostComposer({ profileId, onPost, limit = 600 }: Props) 
 
   return (
     <div className="rounded border p-3">
-      <div className="text-sm font-medium">Share an update</div>
-
+      <label className="text-sm font-medium">Share an update</label>
       <textarea
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          const v = e.target.value;
+          setText(v.length > limit ? v.slice(0, limit) : v);
+        }}
         onKeyDown={(e) => {
-          // Enter posts, Shift+Enter inserts a newline.
+          // Enter -> post; Shift+Enter -> newline
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            submit();
+            void submit();
           }
         }}
-        className="mt-1 w-full resize-none rounded border px-3 py-2 text-sm"
         rows={3}
-        placeholder="What's on your mind?"
+        placeholder="What’s on your mind?"
+        className="mt-1 w-full resize-none rounded border px-3 py-2"
       />
-
-      <div className="mt-1 flex items-center justify-between text-xs">
+      <div className="mt-2 flex items-center justify-between text-xs text-gray-600">
         <span>{remaining} characters left</span>
-        {err && <span className="text-rose-600">{err}</span>}
-      </div>
-
-      <div className="mt-2 text-right">
         <button
           onClick={submit}
           disabled={disabled}

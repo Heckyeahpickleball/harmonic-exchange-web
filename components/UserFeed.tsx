@@ -52,9 +52,7 @@ export default function UserFeed({ profileId }: Props) {
 
   useEffect(() => {
     if (!profileId) return;
-    let cancel = false;
-    (async () => { await load(); })();
-    return () => { cancel = true; };
+    void load();
   }, [profileId]);
 
   return (

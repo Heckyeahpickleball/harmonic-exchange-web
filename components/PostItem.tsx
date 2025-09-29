@@ -1,7 +1,7 @@
 // /components/PostItem.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -10,9 +10,7 @@ type Post = {
   profile_id: string;
   body: string;
   created_at: string;
-  // When the parent selects a join, it may provide the author object here.
-  // We won't rely on its exact type; we only read display_name defensively.
-  profiles?: any;
+  profiles?: any; // parent may join; read defensively
 };
 
 type Props = {
@@ -32,24 +30,47 @@ type CommentItem = {
 
 export default function PostItem({ post, me, onDeleted }: Props) {
   const [comments, setComments] = useState<CommentItem[]>([]);
+  const [count, setCount] = useState<number>(0);          // true count (even before opening)
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const authorName = useMemo(() => {
-    if (!post?.profiles) return 'Someone';
-    // profiles can arrive as an object or array depending on how the relation
-    // is inferred on the server. Handle both shapes.
-    const maybe = Array.isArray(post.profiles) ? post.profiles[0] : post.profiles;
-    return maybe?.display_name || 'Someone';
+    const p = Array.isArray(post.profiles) ? post.profiles?.[0] : post.profiles;
+    return p?.display_name || 'Someone';
   }, [post]);
+
+  const authorHref = me && me === post.profile_id ? '/profile' : `/u/${post.profile_id}`;
+
+  // Click-away for ⋯ menu
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    if (menuOpen) document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [menuOpen]);
+
+  // Fetch comment COUNT up-front so the link isn’t “(0)”
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { count: c, error } = await supabase
+        .from('post_comments')
+        .select('id', { count: 'exact', head: true })
+        .eq('post_id', post.id);
+      if (!cancelled && !error && typeof c === 'number') setCount(c);
+    })();
+    return () => { cancelled = true; };
+  }, [post.id]);
 
   async function loadComments() {
     try {
       setErr(null);
-      // Note: We intentionally keep the type as `any` and normalize below,
-      // because Supabase can surface `profiles(...)` as an array depending on FK naming.
       const { data, error } = await supabase
         .from('post_comments')
         .select('id, post_id, profile_id, body, created_at, profiles(display_name)')
@@ -58,26 +79,23 @@ export default function PostItem({ post, me, onDeleted }: Props) {
 
       if (error) throw error;
 
-      const mapped: CommentItem[] = (data as any[] | null | undefined)?.map((row: any) => {
-        const p = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-        const name = p?.display_name || 'Someone';
+      const mapped: CommentItem[] = (data ?? []).map((row: any) => {
+        const p = Array.isArray(row.profiles) ? row.profiles?.[0] : row.profiles;
         return {
           id: String(row.id),
           post_id: String(row.post_id),
           profile_id: String(row.profile_id),
           body: String(row.body ?? ''),
           created_at: String(row.created_at),
-          author_name: name,
+          author_name: p?.display_name || 'Someone',
         };
-      }) ?? [];
+      });
 
       setComments(mapped);
+      setCount(mapped.length); // keep count in sync once loaded
     } catch (e: any) {
-      // If the table doesn't exist in prod yet, don't break the page.
       const msg = String(e?.message ?? '');
-      if (!msg.toLowerCase().includes('does not exist')) {
-        setErr(msg || 'Failed to load comments.');
-      }
+      if (!msg.toLowerCase().includes('does not exist')) setErr(msg || 'Failed to load comments.');
       setComments([]);
     }
   }
@@ -92,17 +110,13 @@ export default function PostItem({ post, me, onDeleted }: Props) {
     if (!text || !me) return;
     setBusy(true);
     setErr(null);
-
     try {
-      const { error } = await supabase
-        .from('post_comments')
-        .insert({
-          post_id: post.id,
-          profile_id: me,
-          body: text,
-        });
+      const { error } = await supabase.from('post_comments').insert({
+        post_id: post.id,
+        profile_id: me,
+        body: text,
+      });
       if (error) throw error;
-
       setDraft('');
       await loadComments();
     } catch (e: any) {
@@ -114,28 +128,30 @@ export default function PostItem({ post, me, onDeleted }: Props) {
 
   async function deletePost() {
     if (!me || me !== post.profile_id) return;
-    if (!confirm('Delete this post?')) return;
-    try {
-      const { error } = await supabase.from('posts').delete().eq('id', post.id);
-      if (error) throw error;
-      onDeleted?.();
-    } catch (e: any) {
-      alert(e?.message ?? 'Failed to delete post.');
+    if (!confirm('Delete this post? This cannot be undone.')) return;
+    const { error } = await supabase.from('posts').delete().eq('id', post.id);
+    if (error) {
+      alert(error.message);
+      return;
     }
+    onDeleted?.();
   }
 
   async function deleteComment(id: string) {
     if (!me) return;
-    try {
-      const { error } = await supabase.from('post_comments').delete().eq('id', id).eq('profile_id', me);
-      if (error) throw error;
-      setComments(prev => prev.filter(c => c.id !== id));
-    } catch (e: any) {
-      alert(e?.message ?? 'Failed to delete comment.');
+    if (!confirm('Delete this comment?')) return;
+    const { error } = await supabase
+      .from('post_comments')
+      .delete()
+      .eq('id', id)
+      .eq('profile_id', me);
+    if (error) {
+      alert(error.message);
+      return;
     }
+    setComments(prev => prev.filter(c => c.id !== id));
+    setCount(prev => Math.max(0, prev - 1));
   }
-
-  const authorHref = me && me === post.profile_id ? '/profile' : `/u/${post.profile_id}`;
 
   return (
     <article className="rounded border p-3">
@@ -146,9 +162,25 @@ export default function PostItem({ post, me, onDeleted }: Props) {
         </div>
 
         {me === post.profile_id && (
-          <button onClick={deletePost} className="text-xs underline">
-            Delete post
-          </button>
+          <div className="relative" ref={menuRef}>
+            <button
+              aria-label="Post actions"
+              className="rounded px-2 text-lg leading-none hover:bg-gray-100"
+              onClick={() => setMenuOpen(v => !v)}
+            >
+              ⋯
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 z-10 w-28 overflow-hidden rounded border bg-white shadow-md">
+                <button
+                  className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
+                  onClick={() => { setMenuOpen(false); void deletePost(); }}
+                >
+                  Delete
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -159,7 +191,7 @@ export default function PostItem({ post, me, onDeleted }: Props) {
           className="text-xs underline"
           onClick={() => setOpen(v => !v)}
         >
-          {open ? 'Hide comments' : `Show comments (${comments.length})`}
+          {open ? 'Hide comments' : `Show comments (${count})`}
         </button>
       </div>
 
@@ -194,11 +226,17 @@ export default function PostItem({ post, me, onDeleted }: Props) {
             </ul>
           )}
 
-          {/* Composer */}
+          {/* Comment composer */}
           <div className="mt-2 flex gap-2">
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void addComment();
+                }
+              }}
               placeholder={me ? 'Write a comment…' : 'Sign in to comment'}
               disabled={!me || busy}
               className="flex-1 rounded border px-3 py-2 text-sm disabled:opacity-60"
