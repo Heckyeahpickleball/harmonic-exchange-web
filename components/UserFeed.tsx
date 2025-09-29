@@ -1,4 +1,3 @@
-// /components/UserFeed.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -8,67 +7,58 @@ import PostItem from './PostItem';
 type PostRow = {
   id: string;
   profile_id: string;
-  body: string;
+  body: string | null;
   created_at: string;
-  profiles?: { display_name?: string | null } | null;
+  images?: string[] | null;
+  profiles?: { display_name: string | null } | null;
 };
 
-type Props = {
-  profileId: string;
-};
-
-export default function UserFeed({ profileId }: Props) {
-  const [me, setMe] = useState<string | null>(null);
+export default function UserFeed({ profileId }: { profileId: string }) {
   const [posts, setPosts] = useState<PostRow[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
 
-  async function load() {
-    setLoading(true);
-    setErr('');
-    try {
-      const { data: auth } = await supabase.auth.getUser();
-      setMe(auth?.user?.id ?? null);
-
-      const { data, error } = await supabase
-        .from('posts')
-        .select('id, profile_id, body, created_at, profiles(display_name)')
-        .eq('profile_id', profileId)
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      if (error) throw error;
-      setPosts((data || []) as any);
-    } catch (e: any) {
-      setErr(e?.message ?? 'Could not load posts.');
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [me, setMe] = useState<string | null>(null);
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    (async () => {
+      setLoading(true);
+      setErr('');
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        setMe(auth.user?.id ?? null);
+
+        const { data, error } = await supabase
+          .from('posts')
+          .select('id,profile_id,body,created_at,images,profiles(display_name)')
+          .eq('profile_id', profileId)
+          .order('created_at', { ascending: false })
+          .limit(200);
+        if (error) throw error;
+        setPosts((data || []) as PostRow[]);
+      } catch (e: any) {
+        setErr(e?.message ?? 'Failed to load posts.');
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [profileId]);
 
   return (
     <div className="space-y-3">
-      {/* NOTE: Composer intentionally NOT rendered here to avoid duplicates.
-          The page decides if/where to show a composer. */}
-
       {loading && <p className="text-sm text-gray-600">Loading…</p>}
       {err && <p className="text-sm text-amber-700">{err}</p>}
 
-      {posts.map((post) => (
+      {posts.map((p) => (
         <PostItem
-          key={post.id}
-          post={post}
+          key={p.id}
+          post={p}
           me={me}
-          onDeleted={() =>
-            setPosts((prev) => prev.filter((p) => p.id !== post.id))
-          }
+          onDeleted={() => setPosts((prev) => prev.filter((x) => x.id !== p.id))}
         />
       ))}
+
+      {!loading && posts.length === 0 && <p className="text-sm text-gray-600">No posts yet.</p>}
     </div>
   );
 }
