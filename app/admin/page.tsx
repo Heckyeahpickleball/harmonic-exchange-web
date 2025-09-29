@@ -1,4 +1,7 @@
 /* HX v0.9 — Admin panel with emails + delete + owner labels + offer title search
+   Tightened permissions:
+   - Audit tab visible to admins only
+   - Moderators cannot act on admin-owned offers (UI + client guard)
    File: app/admin/page.tsx
 */
 'use client';
@@ -30,7 +33,7 @@ type AdminAction = {
   id: string;
   admin_profile_id: string;
   action: string;
-  target_type: string;
+  target_type: 'profile' | 'offer';
   target_id: string;
   reason: string | null;
   created_at: string;
@@ -42,7 +45,6 @@ type EmailRow = { id: string; email: string | null; display_name?: string };
 
 type Tab = 'users' | 'offers' | 'audit';
 
-/** Wrapper for Suspense requirement around useSearchParams */
 export default function Page() {
   return (
     <Suspense fallback={<div className="p-4 text-sm text-gray-600">Loading…</div>}>
@@ -53,31 +55,30 @@ export default function Page() {
 
 function AdminContent() {
   const sp = useSearchParams();
-  const urlTab = (sp.get('tab') as Tab | null) || null;
+  const initialUrlTab = (sp.get('tab') as Tab | null) || null;
   const urlPendingOnly = sp.get('pending') === '1';
   const urlFocusOffer = sp.get('offer');
 
   const [me, setMe] = useState<Profile | null>(null);
-  const [tab, setTab] = useState<Tab>(urlTab ?? 'users');
+  const [tab, setTab] = useState<Tab>(initialUrlTab ?? 'users');
   const [pendingOnly, setPendingOnly] = useState<boolean>(urlPendingOnly);
 
-  // quick title search (offers tab)
   const [offerQ, setOfferQ] = useState('');
 
   const [users, setUsers] = useState<Profile[]>([]);
   const [userEmails, setUserEmails] = useState<Record<string, string | null>>({});
+
   const [offers, setOffers] = useState<OfferRow[]>([]);
-  const [ownerInfo, setOwnerInfo] = useState<Record<string, { name: string; email: string | null }>>({});
+  const ownerRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+
+  // include owner ROLE so we can gate moderator actions on admin-owned offers
+  const [ownerInfo, setOwnerInfo] = useState<
+    Record<string, { name: string; email: string | null; role: Role | undefined }>
+  >({});
+
   const [audit, setAudit] = useState<AdminAction[]>([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
-
-  const offerRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
-
-  useEffect(() => {
-    if (urlTab && urlTab !== tab) setTab(urlTab);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlTab]);
 
   // Load current user
   useEffect(() => {
@@ -86,6 +87,8 @@ function AdminContent() {
       const uid = auth.user?.id;
       if (!uid) {
         setMe(null);
+        // force to users tab for safety
+        if (tab !== 'users') setTab('users');
         return;
       }
       const { data } = await supabase
@@ -93,25 +96,41 @@ function AdminContent() {
         .select('id,display_name,role,status,created_at')
         .eq('id', uid)
         .single();
-      setMe((data || null) as Profile | null);
+      const meRow = (data || null) as Profile | null;
+      setMe(meRow);
+
+      // if a moderator tries to open ?tab=audit, snap back to users
+      if (meRow && meRow.role !== 'admin' && (initialUrlTab === 'audit' || tab === 'audit')) {
+        setTab('users');
+      }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const canViewAdmin = me?.role === 'admin' || me?.role === 'moderator';
   const isAdmin = me?.role === 'admin';
+  const canViewAdmin = !!me && (me.role === 'admin' || me.role === 'moderator');
 
-  // ——— helpers for permissions (client guard) ———
-  const canChangeStatus = (actor: Profile | null, target: Profile) => {
+  // client guard for user status changes
+  const canChangeUserStatus = (actor: Profile | null, target: Profile) => {
     if (!actor) return false;
     if (actor.id === target.id) return false; // never self
     if (actor.role === 'admin') return true;  // admins can change anyone
-    // moderators: only user accounts (not mods/admins)
     return actor.role === 'moderator' && target.role === 'user';
+  };
+
+  // client guard for offer actions
+  const canActOnOffer = (actor: Profile | null, ownerRole: Role | undefined) => {
+    if (!actor) return false;
+    if (actor.role === 'admin') return true;
+    // moderators may NOT act on admin-owned offers
+    if (actor.role === 'moderator') return ownerRole !== 'admin';
+    return false;
   };
 
   // Fetch tab data
   useEffect(() => {
     if (!canViewAdmin) return;
+
     (async () => {
       setLoading(true);
       setMsg('');
@@ -122,44 +141,52 @@ function AdminContent() {
             .select('id,display_name,role,status,created_at')
             .order('created_at', { ascending: false })
             .limit(200);
+
           const rows = (data || []) as Profile[];
           setUsers(rows);
 
-          // fetch emails via RPC (best-effort)
           const ids = rows.map((u) => u.id);
-          if (ids.length) {
-            const emails = await fetchEmails(ids);
-            setUserEmails(emails);
-          } else {
-            setUserEmails({});
-          }
-        } else if (tab === 'offers') {
+          setUserEmails(ids.length ? await fetchEmails(ids) : {});
+        }
+
+        if (tab === 'offers') {
           const { data } = await supabase
             .from('offers')
             .select('id,title,owner_id,status,created_at')
             .order('created_at', { ascending: false })
             .limit(500);
+
           const rows = (data || []) as OfferRow[];
           setOffers(rows);
 
-          // owner labels (name + email)
           const ownerIds = Array.from(new Set(rows.map((o) => o.owner_id)));
           if (ownerIds.length) {
-            const [namesRes, emailsMap] = await Promise.all([
-              supabase.from('profiles').select('id,display_name').in('id', ownerIds),
+            const [profilesRes, emailsMap] = await Promise.all([
+              supabase.from('profiles').select('id,display_name,role').in('id', ownerIds),
               fetchEmails(ownerIds),
             ]);
-            const nameMap: Record<string, string> = {};
-            for (const p of ((namesRes.data || []) as Profile[])) nameMap[p.id] = p.display_name;
-            const combined: Record<string, { name: string; email: string | null }> = {};
+
+            const combined: Record<string, { name: string; email: string | null; role: Role | undefined }> = {};
+            for (const p of ((profilesRes.data || []) as Array<{ id: string; display_name: string; role: Role }>)) {
+              combined[p.id] = { name: p.display_name, email: emailsMap[p.id] ?? null, role: p.role };
+            }
+            // ensure every id has an entry
             for (const id of ownerIds) {
-              combined[id] = { name: nameMap[id] ?? id, email: emailsMap[id] ?? null };
+              if (!combined[id]) combined[id] = { name: id, email: emailsMap[id] ?? null, role: undefined };
             }
             setOwnerInfo(combined);
           } else {
             setOwnerInfo({});
           }
-        } else if (tab === 'audit') {
+        }
+
+        if (tab === 'audit') {
+          if (!isAdmin) {
+            // double-guard: mods can’t load audit even if they somehow land here
+            setTab('users');
+            return;
+          }
+
           const { data: rows } = await supabase
             .from('admin_actions')
             .select('id,admin_profile_id,action,target_type,target_id,reason,created_at')
@@ -167,8 +194,8 @@ function AdminContent() {
             .limit(200);
 
           const acts = (rows || []) as AdminAction[];
-
           const adminIds = Array.from(new Set(acts.map((a) => a.admin_profile_id)));
+
           const adminMap = new Map<string, string>();
           if (adminIds.length) {
             const { data: admins } = await supabase
@@ -213,9 +240,9 @@ function AdminContent() {
         setLoading(false);
       }
     })();
-  }, [canViewAdmin, tab]);
+  }, [canViewAdmin, tab, isAdmin]);
 
-  // helper — best-effort email RPC (supports either param name)
+  // helper — best-effort email RPC
   async function fetchEmails(ids: string[]) {
     try {
       // Try common param names one by one
@@ -245,13 +272,9 @@ function AdminContent() {
   const usersVisible = useMemo(() => users, [users]);
 
   // ===== Actions =====
-  async function setUserStatus(
-    id: string,
-    targetRole: Role,
-    next: Status
-  ) {
+  async function setUserStatus(id: string, targetRole: Role, next: Status) {
     if (!me) return;
-    // client-side guard: moderators may only change status for regular users
+
     if (!isAdmin && (me.role === 'moderator') && targetRole !== 'user') {
       setMsg('Only admins can change status for moderators and admins.');
       return;
@@ -316,6 +339,16 @@ function AdminContent() {
   }
 
   async function setOfferStatus(id: string, next: OfferRow['status']) {
+    if (!me) return;
+
+    // find owner role for this offer
+    const ownerRole = ownerInfo[offers.find((o) => o.id === id)?.owner_id || '']?.role;
+
+    if (!canActOnOffer(me, ownerRole)) {
+      setMsg('Only admins can act on offers owned by admins.');
+      return;
+    }
+
     setMsg('');
     const reason = prompt(`Reason for setting offer status to ${next}? (optional)`) || null;
     try {
@@ -330,7 +363,7 @@ function AdminContent() {
   // Scroll/highlight ?offer=<id>
   useEffect(() => {
     if (tab !== 'offers' || !urlFocusOffer) return;
-    const el = offerRowRefs.current.get(urlFocusOffer);
+    const el = ownerRowRefs.current.get(urlFocusOffer);
     if (!el) return;
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     el.classList.add('bg-amber-50');
@@ -359,7 +392,7 @@ function AdminContent() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Admin</h2>
         <div className="flex gap-2">
-          {(['users', 'offers', 'audit'] as Tab[]).map((t) => (
+          {(['users', 'offers'] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -368,12 +401,21 @@ function AdminContent() {
               {t[0].toUpperCase() + t.slice(1)}
             </button>
           ))}
+          {isAdmin && (
+            <button
+              onClick={() => setTab('audit')}
+              className={`rounded border px-3 py-1 text-sm ${tab === 'audit' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'}`}
+            >
+              Audit
+            </button>
+          )}
         </div>
       </div>
 
       {msg && <p className="text-sm text-amber-700">{msg}</p>}
       {loading && <p className="text-sm text-gray-600">Loading…</p>}
 
+      {/* USERS TAB */}
       {tab === 'users' && (
         <div className="overflow-auto rounded border">
           <table className="min-w-full text-sm">
@@ -389,7 +431,7 @@ function AdminContent() {
             </thead>
             <tbody>
               {usersVisible.map((u) => {
-                const canStatus = canChangeStatus(me, u);
+                const canStatus = canChangeUserStatus(me, u);
                 const commonBtn =
                   'rounded border px-2 py-1 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed';
                 const tooltip =
@@ -470,6 +512,7 @@ function AdminContent() {
         </div>
       )}
 
+      {/* OFFERS TAB */}
       {tab === 'offers' && (
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-3">
@@ -510,77 +553,103 @@ function AdminContent() {
               <tbody>
                 {offersVisible.map((o) => {
                   const owner = ownerInfo[o.owner_id];
+                  const ownerRole = owner?.role;
+                  const allow = canActOnOffer(me, ownerRole);
+                  const btn =
+                    'rounded border px-2 py-1 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed';
+
                   return (
                     <tr
                       key={o.id}
                       ref={(el) => {
-                        if (el) offerRowRefs.current.set(o.id, el);
-                        else offerRowRefs.current.delete(o.id);
+                        if (el) ownerRowRefs.current.set(o.id, el);
+                        else ownerRowRefs.current.delete(o.id);
                       }}
                       className={`border-t ${urlFocusOffer === o.id ? 'bg-amber-50' : ''}`}
                     >
                       <td className="px-3 py-2">{o.title}</td>
                       <td className="px-3 py-2">
-                        <div>{owner?.email ? `${owner.name} — ${owner.email}` : owner?.name ?? o.owner_id}</div>
-                        {!owner?.email && <div className="text-xs text-gray-500">—</div>}
+                        <div>
+                          {owner?.email ? `${owner.name} — ${owner.email}` : owner?.name ?? o.owner_id}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {ownerRole ? `role: ${ownerRole}` : 'role: —'}
+                        </div>
                       </td>
                       <td className="px-3 py-2">{o.status}</td>
                       <td className="px-3 py-2">{new Date(o.created_at).toLocaleDateString()}</td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap gap-2">
+                          {/* Action buttons are disabled when moderator targets admin-owned offer */}
                           {o.status === 'pending' && (
                             <>
                               <button
+                                disabled={!allow}
+                                title={!allow ? 'Only admins can act on admin-owned offers.' : undefined}
                                 onClick={() => setOfferStatus(o.id, 'active')}
-                                className="rounded border px-2 py-1 hover:bg-gray-50"
-                                title="Approve (set Active)"
+                                className={btn}
                               >
                                 Approve
                               </button>
                               <button
+                                disabled={!allow}
+                                title={!allow ? 'Only admins can act on admin-owned offers.' : undefined}
                                 onClick={() => setOfferStatus(o.id, 'archived')}
-                                className="rounded border px-2 py-1 hover:bg-gray-50"
-                                title="Reject (archive)"
+                                className={btn}
                               >
                                 Reject
                               </button>
                             </>
                           )}
+
                           {o.status !== 'blocked' ? (
                             <button
+                              disabled={!allow}
+                              title={!allow ? 'Only admins can act on admin-owned offers.' : undefined}
                               onClick={() => setOfferStatus(o.id, 'blocked')}
-                              className="rounded border px-2 py-1 hover:bg-gray-50"
+                              className={btn}
                             >
                               Block
                             </button>
                           ) : (
                             <button
+                              disabled={!allow}
+                              title={!allow ? 'Only admins can act on admin-owned offers.' : undefined}
                               onClick={() => setOfferStatus(o.id, 'active')}
-                              className="rounded border px-2 py-1 hover:bg-gray-50"
+                              className={btn}
                             >
                               Unblock
                             </button>
                           )}
+
                           {o.status !== 'paused' && (
                             <button
+                              disabled={!allow}
+                              title={!allow ? 'Only admins can act on admin-owned offers.' : undefined}
                               onClick={() => setOfferStatus(o.id, 'paused')}
-                              className="rounded border px-2 py-1 hover:bg-gray-50"
+                              className={btn}
                             >
                               Pause
                             </button>
                           )}
+
                           {o.status !== 'archived' && (
                             <button
+                              disabled={!allow}
+                              title={!allow ? 'Only admins can act on admin-owned offers.' : undefined}
                               onClick={() => setOfferStatus(o.id, 'archived')}
-                              className="rounded border px-2 py-1 hover:bg-gray-50"
+                              className={btn}
                             >
                               Archive
                             </button>
                           )}
+
                           {o.status !== 'active' && (
                             <button
+                              disabled={!allow}
+                              title={!allow ? 'Only admins can act on admin-owned offers.' : undefined}
                               onClick={() => setOfferStatus(o.id, 'active')}
-                              className="rounded border px-2 py-1 hover:bg-gray-50"
+                              className={btn}
                             >
                               Set Active
                             </button>
@@ -603,7 +672,8 @@ function AdminContent() {
         </div>
       )}
 
-      {tab === 'audit' && (
+      {/* AUDIT TAB — admins only */}
+      {tab === 'audit' && isAdmin && (
         <ul className="space-y-3">
           {audit.map((a) => (
             <li key={a.id} className="rounded border p-3 text-sm">
