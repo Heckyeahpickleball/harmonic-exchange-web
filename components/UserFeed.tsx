@@ -38,7 +38,16 @@ export default function UserFeed({ profileId }: { profileId: string }) {
           .limit(200);
 
         if (error) throw error;
-        if (!cancelled) setPosts((data || []) as PostRow[]);
+        if (!cancelled) {
+          setPosts(
+            (data || []).map((row: any) => ({
+              ...row,
+              profiles: Array.isArray(row.profiles)
+                ? row.profiles[0] || null
+                : row.profiles ?? null,
+            })) as PostRow[]
+          );
+        }
       } catch (e: any) {
         if (!cancelled) setErr(e?.message ?? 'Failed to load posts.');
       } finally {
@@ -61,7 +70,13 @@ export default function UserFeed({ profileId }: { profileId: string }) {
         .eq('id', id)
         .maybeSingle();
       if (error) return null;
-      return (data as PostRow) ?? null;
+      if (!data) return null;
+      return {
+        ...data,
+        profiles: Array.isArray(data.profiles)
+          ? data.profiles[0] || null
+          : data.profiles ?? null,
+      } as PostRow;
     }
 
     const channel = supabase

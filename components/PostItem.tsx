@@ -33,7 +33,6 @@ export default function PostItem({
   onDeleted: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [commentText, setCommentText] = useState('');
@@ -45,11 +44,10 @@ export default function PostItem({
   const [previews, setPreviews] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // accurate count regardless of whether comments are loaded
+  // count that stays correct even if list hasn’t been opened yet
   const [commentCount, setCommentCount] = useState<number>(0);
 
   useEffect(() => {
-    // initial count
     (async () => {
       const { count, error } = await supabase
         .from('post_comments')
@@ -60,13 +58,8 @@ export default function PostItem({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [post.id]);
 
-  function normalizeProfile<T extends { profiles?: any }>(row: T) {
-    const p = row.profiles;
-    return {
-      ...row,
-      profiles: Array.isArray(p) ? (p[0] ?? null) : p ?? null,
-    };
-  }
+  const normProfile = (p: any) =>
+    Array.isArray(p) ? (p[0] ?? null) : p ?? null;
 
   async function toggleComments() {
     const open = !commentsOpen;
@@ -76,9 +69,7 @@ export default function PostItem({
     if (open && comments.length === 0) {
       const { data, error } = await supabase
         .from('post_comments')
-        .select(
-          'id, post_id, profile_id, body, created_at, images, profiles(display_name)'
-        )
+        .select('id, post_id, profile_id, body, created_at, images, profiles(display_name)')
         .eq('post_id', post.id)
         .order('created_at', { ascending: true })
         .limit(200);
@@ -86,9 +77,10 @@ export default function PostItem({
       if (error) {
         setErr(error.message);
       } else {
-        const normalized: CommentRow[] = (data || []).map((r: any) =>
-          normalizeProfile(r)
-        );
+        const normalized = (data || []).map((r: any) => ({
+          ...r,
+          profiles: normProfile(r.profiles),
+        })) as CommentRow[];
         setComments(normalized);
       }
     }
@@ -155,16 +147,16 @@ export default function PostItem({
         .insert({
           post_id: post.id,
           profile_id: uid,
-          body: body || ' ', // allow image-only comments
-          images: imageUrls,
+          body: body || ' ', // allow image-only comments (DB constraint handles it)
+          images: imageUrls.length ? imageUrls : null,
         })
         .select('id, post_id, profile_id, body, created_at, images, profiles(display_name)')
         .single();
 
       if (error) throw error;
 
-      const normalized = normalizeProfile(data);
-      setComments((prev) => [...prev, normalized as CommentRow]);
+      const normalized = { ...data, profiles: normProfile(data.profiles) } as CommentRow;
+      setComments((prev) => [...prev, normalized]);
       setCommentCount((c) => c + 1);
       setCommentText('');
       previews.forEach((u) => URL.revokeObjectURL(u));
@@ -194,9 +186,8 @@ export default function PostItem({
   }
 
   const ownerName = post.profiles?.display_name || 'Someone';
-  const images = Array.isArray(post.images) ? post.images : [];
-  const colClass =
-    images.length >= 3 ? 'grid-cols-3' : images.length === 2 ? 'grid-cols-2' : 'grid-cols-1';
+  const imgs = Array.isArray(post.images) ? post.images : [];
+  const colClass = imgs.length >= 3 ? 'grid-cols-3' : imgs.length === 2 ? 'grid-cols-2' : 'grid-cols-1';
 
   return (
     <article className="rounded border p-3">
@@ -234,9 +225,9 @@ export default function PostItem({
 
       {post.body && <p className="mt-2 whitespace-pre-wrap">{post.body}</p>}
 
-      {images.length > 0 && (
+      {imgs.length > 0 && (
         <div className={`mt-2 grid ${colClass} gap-2`}>
-          {images.map((src, i) => (
+          {imgs.map((src, i) => (
             <div key={i} className="overflow-hidden rounded border">
               <img src={src} alt="" className="h-40 w-full object-cover" />
             </div>
@@ -244,14 +235,12 @@ export default function PostItem({
         </div>
       )}
 
-      {/* comments toggle */}
       <div className="mt-3 text-xs">
         <button className="underline" onClick={toggleComments}>
           {commentsOpen ? 'Hide comments' : `Show comments (${commentCount})`}
         </button>
       </div>
 
-      {/* comments list */}
       {commentsOpen && (
         <div className="mt-2 space-y-2">
           {comments.map((c) => (
@@ -261,19 +250,13 @@ export default function PostItem({
                   <span className="font-medium">{c.profiles?.display_name || 'Someone'}</span>{' '}
                   <span className="text-xs text-gray-500">• {new Date(c.created_at).toLocaleString()}</span>
                 </div>
-
-                {/* comment 3-dot menu, only owner can delete */}
                 {me === c.profile_id && <CommentMenu onDelete={() => deleteComment(c.id)} />}
               </div>
 
               {c.body && <p className="mt-1 whitespace-pre-wrap">{c.body}</p>}
 
               {Array.isArray(c.images) && c.images.length > 0 && (
-                <div
-                  className={`mt-2 grid ${
-                    c.images.length >= 3 ? 'grid-cols-3' : c.images.length === 2 ? 'grid-cols-2' : 'grid-cols-1'
-                  } gap-2`}
-                >
+                <div className={`mt-2 grid ${c.images.length >= 3 ? 'grid-cols-3' : c.images.length === 2 ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
                   {c.images.map((src, i) => (
                     <div key={i} className="overflow-hidden rounded border">
                       <img src={src} alt="" className="h-28 w-full object-cover" />
@@ -284,7 +267,6 @@ export default function PostItem({
             </div>
           ))}
 
-          {/* add comment */}
           <div className="rounded border p-2">
             <textarea
               value={commentText}
@@ -296,7 +278,6 @@ export default function PostItem({
               placeholder="Write a comment…"
             />
 
-            {/* comment image previews */}
             {previews.length > 0 && (
               <div className="mt-2 grid grid-cols-4 gap-2">
                 {previews.map((u, i) => (
@@ -356,7 +337,6 @@ export default function PostItem({
   );
 }
 
-/** small inline menu for comment delete */
 function CommentMenu({ onDelete }: { onDelete: () => void }) {
   const [open, setOpen] = useState(false);
   return (

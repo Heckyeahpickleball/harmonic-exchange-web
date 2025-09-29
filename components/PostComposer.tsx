@@ -1,15 +1,14 @@
 // components/PostComposer.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
 
 type Props = {
   profileId: string;
-  // Optional callback so parent can optimistically prepend the post
-  onPost?: (row: PostRow) => void;
-  limit?: number; // character limit (default 600)
+  onPost?: (row: PostRow) => void; // let parent optimistically add
+  limit?: number; // default 600
 };
 
 export type PostRow = {
@@ -22,61 +21,56 @@ export type PostRow = {
 };
 
 function normalizePostRow(data: any): PostRow {
-  const base: PostRow = {
+  const p = data?.profiles;
+  const profiles = Array.isArray(p)
+    ? (p[0] ? { display_name: p[0].display_name ?? null } : null)
+    : p
+    ? { display_name: p.display_name ?? null }
+    : null;
+
+  return {
     id: String(data.id),
     profile_id: String(data.profile_id),
     body: data.body ?? null,
     images: Array.isArray(data.images) ? data.images : data.images ? [data.images] : null,
     created_at: data.created_at ?? new Date().toISOString(),
-    profiles: null,
+    profiles,
   };
-  // Supabase sometimes returns 1:1 joins as arrays during insert-select.
-  const p = (data as any)?.profiles;
-  if (p && Array.isArray(p)) {
-    base.profiles = p[0] ? { display_name: p[0].display_name ?? null } : null;
-  } else if (p && typeof p === 'object') {
-    base.profiles = { display_name: (p as any).display_name ?? null };
-  }
-  return base;
 }
 
 export default function PostComposer({ profileId, onPost, limit = 600 }: Props) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-
-  // local attachments (data URLs after upload)
   const [images, setImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const remaining = useMemo(() => limit - text.length, [limit, text.length]);
   const disabled = busy || (!text.trim() && images.length === 0) || remaining < 0;
 
-  // upload a single file to `post-media/{uid}/{timestamp}_{name}`
   async function uploadToPostMedia(file: File): Promise<string> {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth.user?.id;
     if (!uid) throw new Error('Not signed in');
 
     const path = `${uid}/${Date.now()}_${file.name}`;
-    const { error: upErr } = await supabase.storage
+    const { error } = await supabase
+      .storage
       .from('post-media')
       .upload(path, file, { cacheControl: '3600', upsert: true, contentType: file.type });
-    if (upErr) throw upErr;
+    if (error) throw error;
 
-    const { data } = supabase.storage.from('post-media').getPublicUrl(path);
-    return data.publicUrl;
+    return supabase.storage.from('post-media').getPublicUrl(path).data.publicUrl;
   }
 
   async function handleFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
+    if (!files?.length) return;
     setErr('');
     setBusy(true);
     try {
       const urls: string[] = [];
       for (const f of Array.from(files).slice(0, 6 - images.length)) {
-        const url = await uploadToPostMedia(f);
-        urls.push(url);
+        urls.push(await uploadToPostMedia(f));
       }
       setImages((prev) => [...prev, ...urls].slice(0, 6));
     } catch (e: any) {
@@ -90,12 +84,10 @@ export default function PostComposer({ profileId, onPost, limit = 600 }: Props) 
     if (disabled) return;
     setBusy(true);
     setErr('');
-
     try {
-      // RLS requires the row to belong to the current user
       const payload = {
         profile_id: profileId,
-        body: text.trim() || null,
+        body: text.trim() || null,        // allow empty when images exist
         images: images.length ? images : null,
       };
 
@@ -107,12 +99,7 @@ export default function PostComposer({ profileId, onPost, limit = 600 }: Props) 
 
       if (error) throw error;
 
-      // Optimistically add to UI (type-safe normalize to avoid Vercel TS error)
-      if (data && onPost) {
-        onPost(normalizePostRow(data));
-      }
-
-      // Clear composer
+      if (data && onPost) onPost(normalizePostRow(data)); // optimistic
       setText('');
       setImages([]);
     } catch (e: any) {
@@ -123,12 +110,11 @@ export default function PostComposer({ profileId, onPost, limit = 600 }: Props) 
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    // Enter to post; Shift+Enter for newline (do NOT submit)
+    // Enter = post, Shift+Enter = newline
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       submit();
     }
-    // if Shift+Enter, let it pass through (newline)
   }
 
   return (
@@ -143,7 +129,6 @@ export default function PostComposer({ profileId, onPost, limit = 600 }: Props) 
         placeholder="What's on your mind?"
       />
 
-      {/* Attachments preview */}
       {images.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-2">
           {images.map((src, i) => (
