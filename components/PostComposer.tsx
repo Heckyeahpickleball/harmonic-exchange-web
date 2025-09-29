@@ -1,76 +1,46 @@
-// /components/PostComposer.tsx
+// components/PostComposer.tsx
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 type Props = {
-  /** Preferred: current user's profile id for direct insert */
-  profileId?: string;
-  /** Optional: notify parent after a successful create (direct mode) */
-  onCreated?: (postId: string) => void;
-  /**
-   * Back-compat: legacy callback mode. If provided, composer will call this
-   * instead of inserting to Supabase itself.
-   */
-  onPost?: (text: string) => Promise<void> | void;
+  /** ID of the profile we're posting as */
+  profileId: string;
+  /** Called after a successful post so the parent can refresh */
+  onPost?: () => void;
+  /** Optional character limit (default 600) */
+  limit?: number;
 };
 
-const MAX_LEN = 600;
-
-export default function PostComposer({ profileId, onCreated, onPost }: Props) {
+export default function PostComposer({ profileId, onPost, limit = 600 }: Props) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string>('');
+  const [err, setErr] = useState('');
 
-  const body = text.trim();
-  const remaining = MAX_LEN - body.length;
-  const disabled = busy || body.length === 0 || body.length > MAX_LEN;
+  const remaining = useMemo(() => Math.max(0, limit - text.length), [text, limit]);
+  const disabled = busy || !text.trim() || text.length > limit;
+
+  useEffect(() => setErr(''), [text]);
 
   async function submit() {
     if (disabled) return;
-    setBusy(true);
-    setErr('');
-
     try {
-      if (onPost) {
-        // Legacy callback mode
-        await onPost(body);
-        setText('');
-        try {
-          window.dispatchEvent(new CustomEvent('hx:post-created', { detail: { profile_id: profileId } }));
-        } catch {}
-        return;
-      }
+      setBusy(true);
+      setErr('');
 
-      // Direct insert mode
-      if (!profileId) {
-        setErr('Not signed in.');
-        return;
-      }
-
-      const { data, error } = await supabase
+      const body = text.trim();
+      const { error } = await supabase
         .from('posts')
         .insert({ profile_id: profileId, body })
         .select('id')
         .single();
 
       if (error) throw error;
-
       setText('');
-
-      try {
-        window.dispatchEvent(
-          new CustomEvent('hx:post-created', {
-            detail: { post_id: data?.id, profile_id: profileId },
-          })
-        );
-      } catch {}
-
-      onCreated?.(data?.id as string);
+      onPost?.();
     } catch (e: any) {
-      const msg = typeof e?.message === 'string' ? e.message : String(e);
-      setErr(msg);
+      setErr(e?.message ?? 'Could not publish post.');
     } finally {
       setBusy(false);
     }
@@ -78,18 +48,28 @@ export default function PostComposer({ profileId, onCreated, onPost }: Props) {
 
   return (
     <div className="rounded border p-3">
-      <label className="mb-1 block text-sm font-medium">Share an update</label>
+      <div className="text-sm font-medium">Share an update</div>
+
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter posts, Shift+Enter inserts a newline.
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            submit();
+          }
+        }}
+        className="mt-1 w-full resize-none rounded border px-3 py-2 text-sm"
         rows={3}
-        className="w-full resize-none rounded border px-3 py-2 text-sm"
-        placeholder="What’s on your mind?"
+        placeholder="What's on your mind?"
       />
-      <div className="mt-1 flex items-center justify-between text-xs text-gray-600">
+
+      <div className="mt-1 flex items-center justify-between text-xs">
         <span>{remaining} characters left</span>
-        {err && <span className="text-red-600">{err}</span>}
+        {err && <span className="text-rose-600">{err}</span>}
       </div>
+
       <div className="mt-2 text-right">
         <button
           onClick={submit}

@@ -13,7 +13,6 @@ type ProfileRow = {
   id: string;
   display_name: string | null;
   bio?: string | null;
-  // optional fields (safe if not in your schema)
   area_city?: string | null;
   area_country?: string | null;
   role?: 'user' | 'moderator' | 'admin' | null;
@@ -42,12 +41,10 @@ function ProfileContent() {
       setMsg('');
 
       try {
-        // who am I?
         const { data: auth } = await supabase.auth.getUser();
         const uid = auth?.user?.id ?? null;
         if (!cancelled) setMe(uid);
 
-        // profile row (conservative selection)
         const { data: p, error: pErr } = await supabase
           .from('profiles')
           .select(
@@ -58,7 +55,6 @@ function ProfileContent() {
         if (pErr) throw pErr;
         if (!cancelled) setProfile(p as ProfileRow);
 
-        // owner’s ACTIVE offers
         const { data: o, error: oErr } = await supabase
           .from('offers')
           .select('id, title, offer_type, is_online, city, country, images, status, created_at')
@@ -79,7 +75,6 @@ function ProfileContent() {
           status: row.status,
           images: row.images ?? [],
           owner_name: ownerName,
-          // OfferCard doesn’t *need* owner_id, but harmless if you want to keep it:
           owner_id: String(profileId),
         })) as any;
 
@@ -104,7 +99,6 @@ function ProfileContent() {
 
   return (
     <section className="space-y-4">
-      {/* Header */}
       <ProfileHeader
         displayName={profile?.display_name || 'Profile'}
         city={cityLine}
@@ -116,14 +110,11 @@ function ProfileContent() {
         onEdit={() => (window.location.href = '/profile')}
       />
 
-      {/* Bio */}
       {profile?.bio && (
         <p className="max-w-2xl whitespace-pre-wrap text-sm text-gray-700">{profile.bio}</p>
       )}
 
-      {/* Layout: left = offers, right = feed */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Left: offers */}
         <div className="lg:col-span-1">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-lg font-semibold">Active Offers</h2>
@@ -148,9 +139,7 @@ function ProfileContent() {
           )}
         </div>
 
-        {/* Right: feed */}
         <div className="lg:col-span-2">
-          {/* IMPORTANT: no composer here, and no extra props */}
           <UserFeed profileId={profileId} />
         </div>
       </div>
