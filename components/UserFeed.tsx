@@ -1,3 +1,4 @@
+// components/UserFeed.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -17,16 +18,17 @@ export default function UserFeed({ profileId }: { profileId: string }) {
   const [posts, setPosts] = useState<PostRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
-
   const [me, setMe] = useState<string | null>(null);
 
+  // Initial load
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       setLoading(true);
       setErr('');
       try {
         const { data: auth } = await supabase.auth.getUser();
-        setMe(auth.user?.id ?? null);
+        if (!cancelled) setMe(auth.user?.id ?? null);
 
         const { data, error } = await supabase
           .from('posts')
@@ -34,14 +36,61 @@ export default function UserFeed({ profileId }: { profileId: string }) {
           .eq('profile_id', profileId)
           .order('created_at', { ascending: false })
           .limit(200);
+
         if (error) throw error;
-        setPosts((data || []) as PostRow[]);
+        if (!cancelled) setPosts((data || []) as PostRow[]);
       } catch (e: any) {
-        setErr(e?.message ?? 'Failed to load posts.');
+        if (!cancelled) setErr(e?.message ?? 'Failed to load posts.');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profileId]);
+
+  // Realtime: prepend INSERTs and remove on DELETE
+  useEffect(() => {
+    if (!profileId) return;
+
+    async function fetchOne(id: string): Promise<PostRow | null> {
+      const { data, error } = await supabase
+        .from('posts')
+        .select('id,profile_id,body,created_at,images,profiles(display_name)')
+        .eq('id', id)
+        .maybeSingle();
+      if (error) return null;
+      return (data as PostRow) ?? null;
+    }
+
+    const channel = supabase
+      .channel(`posts:profile:${profileId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'posts', filter: `profile_id=eq.${profileId}` },
+        async (payload) => {
+          const id = (payload.new as any)?.id as string | undefined;
+          if (!id) return;
+          const row = await fetchOne(id);
+          if (!row) return;
+          setPosts((prev) => (prev.some((p) => p.id === row.id) ? prev : [row, ...prev]));
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'posts', filter: `profile_id=eq.${profileId}` },
+        (payload) => {
+          const id = (payload.old as any)?.id as string | undefined;
+          if (!id) return;
+          setPosts((prev) => prev.filter((p) => p.id !== id));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [profileId]);
 
   return (
@@ -58,7 +107,9 @@ export default function UserFeed({ profileId }: { profileId: string }) {
         />
       ))}
 
-      {!loading && posts.length === 0 && <p className="text-sm text-gray-600">No posts yet.</p>}
+      {!loading && posts.length === 0 && (
+        <p className="text-sm text-gray-600">No posts yet.</p>
+      )}
     </div>
   );
 }
