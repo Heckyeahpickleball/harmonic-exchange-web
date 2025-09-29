@@ -116,7 +116,11 @@ export default function UserFeed({ profileId }: { profileId: string }) {
       {posts.map((p) => (
         <PostItem
           key={p.id}
-          post={p}
+          post={{
+            ...p,
+            images: p.images ?? null,
+            author_name: p.profiles?.display_name ?? null,
+          }}
           me={me}
           onDeleted={() => setPosts((prev) => prev.filter((x) => x.id !== p.id))}
         />
