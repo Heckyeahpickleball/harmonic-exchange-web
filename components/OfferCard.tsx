@@ -18,9 +18,8 @@ export type OfferRow = {
   country: string | null;
   status: 'pending' | 'active' | 'paused' | 'archived' | 'blocked';
   images?: string[] | null;
-  /** Added for Browse / profile pages: owner display name (optional). */
+  /** Added for Browse: owner display name + id (optional). */
   owner_name?: string;
-  /** NEW (optional): owner id so we can link to /u/[id]. */
   owner_id?: string;
 };
 
@@ -107,17 +106,16 @@ export function OfferCardImpl({ offer, mine = false, onDeleted }: Props) {
             <div className="mt-0.5 text-xs text-gray-600">
               {offer.offer_type} • {location || '—'}
             </div>
-            {/* Owner line (link to /u/[id] when we have the id) */}
-            {offer.owner_name && (
+            {/* Owner line (links to unified profile at /u/[id]) */}
+            {offer.owner_name && offer.owner_id && (
               <div className="mt-0.5 text-xs text-gray-500">
                 by{' '}
-                {offer.owner_id ? (
-                  <Link href={`/u/${offer.owner_id}`} className="underline">
-                    {offer.owner_name}
-                  </Link>
-                ) : (
-                  <>{offer.owner_name}</>
-                )}
+                <Link
+                  href={`/u/${offer.owner_id}`}
+                  className="underline hover:no-underline"
+                >
+                  {offer.owner_name}
+                </Link>
               </div>
             )}
           </div>
