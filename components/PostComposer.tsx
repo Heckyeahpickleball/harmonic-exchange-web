@@ -1,72 +1,74 @@
-// components/PostComposer.tsx
+// /components/PostComposer.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 type Props = {
-  profileId: string;            // author profile id (required)
-  onPost?: () => void;          // optional: parent can refresh after a post
-  limit?: number;               // max chars (default 600)
+  profileId: string;
+  onCreated?: () => void;
+  onPost?: (body: string) => void;
+  limit?: number; // char limit
 };
 
-export default function PostComposer({ profileId, onPost, limit = 600 }: Props) {
-  const [me, setMe] = useState<string | null>(null);
+export default function PostComposer({ profileId, onCreated, onPost, limit = 600 }: Props) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const remaining = useMemo(() => Math.max(0, limit - text.length), [text, limit]);
-  const disabled = !me || !text.trim() || busy;
+  const [err, setErr] = useState('');
 
-  useEffect(() => {
-    let cancel = false;
-    (async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!cancel) setMe(data.user?.id ?? null);
-    })();
-    return () => { cancel = true; };
-  }, []);
-
-  async function submit() {
+  // submit
+  const submit = useCallback(async () => {
     const body = text.trim();
-    if (!body || !me) return;
+    if (!body || busy) return;
     setBusy(true);
+    setErr('');
     try {
       const { error } = await supabase.from('posts').insert({
-        profile_id: profileId,   // write to the profile’s feed
+        profile_id: profileId,
         body,
       });
       if (error) throw error;
       setText('');
-      onPost?.();
+      onCreated?.();
+      onPost?.(body);
     } catch (e: any) {
-      alert(e?.message ?? 'Could not post.');
+      setErr(e?.message ?? 'Could not post.');
     } finally {
       setBusy(false);
     }
+  }, [text, busy, profileId, onCreated, onPost]);
+
+  // keyboard behavior
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Ctrl/Cmd+Enter always posts
+    const ctrlOrCmd = e.ctrlKey || e.metaKey;
+    if (e.key === 'Enter' && (ctrlOrCmd || !e.shiftKey)) {
+      // Enter submits; Shift+Enter is newline
+      e.preventDefault();
+      submit();
+    }
+    // otherwise allow Shift+Enter for newline (default)
   }
+
+  const remaining = limit - text.length;
+  const disabled = busy || text.trim().length === 0 || remaining < 0;
 
   return (
     <div className="rounded border p-3">
       <label className="text-sm font-medium">Share an update</label>
       <textarea
         value={text}
-        onChange={(e) => {
-          const v = e.target.value;
-          setText(v.length > limit ? v.slice(0, limit) : v);
-        }}
-        onKeyDown={(e) => {
-          // Enter -> post; Shift+Enter -> newline
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            void submit();
-          }
-        }}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={onKeyDown}
         rows={3}
-        placeholder="What’s on your mind?"
-        className="mt-1 w-full resize-none rounded border px-3 py-2"
+        className="mt-1 w-full resize-none rounded border px-3 py-2 text-sm"
+        placeholder="What's on your mind?"
       />
-      <div className="mt-2 flex items-center justify-between text-xs text-gray-600">
+      <div className="mt-1 flex items-center justify-between text-xs text-gray-600">
         <span>{remaining} characters left</span>
+        {err && <span className="text-red-600">{err}</span>}
+      </div>
+      <div className="mt-2 text-right">
         <button
           onClick={submit}
           disabled={disabled}

@@ -57,7 +57,9 @@ function ProfileContent() {
 
         const { data: o, error: oErr } = await supabase
           .from('offers')
-          .select('id, title, offer_type, is_online, city, country, images, status, created_at')
+          .select(
+            'id, title, offer_type, is_online, city, country, images, status, created_at'
+          )
           .eq('owner_id', profileId)
           .eq('status', 'active')
           .order('created_at', { ascending: false })
@@ -75,8 +77,10 @@ function ProfileContent() {
           status: row.status,
           images: row.images ?? [],
           owner_name: ownerName,
+          // OfferCard supports this (harmless if unused)
+          // @ts-ignore
           owner_id: String(profileId),
-        })) as any;
+        }));
 
         if (!cancelled) setOffers(list);
       } catch (e: any) {
@@ -114,12 +118,14 @@ function ProfileContent() {
         <p className="max-w-2xl whitespace-pre-wrap text-sm text-gray-700">{profile.bio}</p>
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-1">
+      {/* Match the /profile layout exactly so Vercel renders 2 columns the same */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+        {/* Offers (left) */}
+        <div className="md:col-span-5">
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Active Offers</h2>
+            <h2 className="text-base font-semibold">Active Offers</h2>
             {me === profile?.id && (
-              <Link href="/offers/new" className="text-sm underline">
+              <Link href="/offers/new" className="text-xs underline">
                 New offer
               </Link>
             )}
@@ -139,7 +145,8 @@ function ProfileContent() {
           )}
         </div>
 
-        <div className="lg:col-span-2">
+        {/* Posts (right) */}
+        <div className="md:col-span-7">
           <UserFeed profileId={profileId} />
         </div>
       </div>

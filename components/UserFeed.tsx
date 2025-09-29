@@ -1,9 +1,10 @@
-// components/UserFeed.tsx
+// /components/UserFeed.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import PostItem from './PostItem';
+import PostComposer from './PostComposer';
 
 type PostRow = {
   id: string;
@@ -13,55 +14,55 @@ type PostRow = {
   profiles?: { display_name?: string | null } | null;
 };
 
-type Props = { profileId: string };
+type Props = {
+  profileId: string;
+};
 
 export default function UserFeed({ profileId }: Props) {
   const [me, setMe] = useState<string | null>(null);
   const [posts, setPosts] = useState<PostRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string>('');
-
-  useEffect(() => {
-    let cancel = false;
-    (async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!cancel) setMe(data.user?.id ?? null);
-    })();
-    return () => { cancel = true; };
-  }, []);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
 
   async function load() {
     setLoading(true);
     setErr('');
     try {
+      const { data: auth } = await supabase.auth.getUser();
+      setMe(auth?.user?.id ?? null);
+
       const { data, error } = await supabase
         .from('posts')
         .select('id, profile_id, body, created_at, profiles(display_name)')
         .eq('profile_id', profileId)
-        .order('created_at', { ascending: false });
-
+        .order('created_at', { ascending: false })
+        .limit(50);
       if (error) throw error;
-      setPosts((data as PostRow[]) ?? []);
+      setPosts((data || []) as any);
     } catch (e: any) {
-      setErr(e?.message ?? 'Failed to load posts.');
-      setPosts([]);
+      setErr(e?.message ?? 'Could not load posts.');
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    if (!profileId) return;
-    void load();
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId]);
 
   return (
     <div className="space-y-3">
+      {/* Composer only if you're viewing your own feed */}
+      {me === profileId && (
+        <PostComposer
+          profileId={profileId}
+          onCreated={load}
+        />
+      )}
+
       {loading && <p className="text-sm text-gray-600">Loading…</p>}
       {err && <p className="text-sm text-amber-700">{err}</p>}
-      {!loading && posts.length === 0 && (
-        <p className="text-sm text-gray-600">No posts yet.</p>
-      )}
 
       {posts.map((post) => (
         <PostItem

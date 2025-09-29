@@ -2,60 +2,45 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
-type Post = {
+type PostRow = {
   id: string;
   profile_id: string;
   body: string;
   created_at: string;
-  profiles?: any; // parent may join; read defensively
+  profiles?: { display_name?: string | null } | null;
 };
 
-type Props = {
-  post: Post;
-  me: string | null;
-  onDeleted?: () => void;
-};
-
-type CommentItem = {
+type CommentRow = {
   id: string;
   post_id: string;
   profile_id: string;
   body: string;
   created_at: string;
-  author_name: string;
+  profiles?: { display_name?: string | null } | null;
+};
+
+type Props = {
+  post: PostRow;
+  me: string | null;
+  onDeleted?: () => void;
 };
 
 export default function PostItem({ post, me, onDeleted }: Props) {
-  const [comments, setComments] = useState<CommentItem[]>([]);
-  const [count, setCount] = useState<number>(0);          // true count (even before opening)
-  const [draft, setDraft] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [comments, setComments] = useState<CommentRow[]>([]);
+  const [count, setCount] = useState<number>(0);
+  const [loadingC, setLoadingC] = useState(false);
+  const [err, setErr] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
 
-  const authorName = useMemo(() => {
-    const p = Array.isArray(post.profiles) ? post.profiles?.[0] : post.profiles;
-    return p?.display_name || 'Someone';
-  }, [post]);
+  // comment composer
+  const [cText, setCText] = useState('');
+  const [cBusy, setCBusy] = useState(false);
+  const cRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const authorHref = me && me === post.profile_id ? '/profile' : `/u/${post.profile_id}`;
-
-  // Click-away for ⋯ menu
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (!menuRef.current) return;
-      if (!menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    }
-    if (menuOpen) document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, [menuOpen]);
-
-  // Fetch comment COUNT up-front so the link isn’t “(0)”
+  // load count initially (cheap HEAD count)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -63,194 +48,242 @@ export default function PostItem({ post, me, onDeleted }: Props) {
         .from('post_comments')
         .select('id', { count: 'exact', head: true })
         .eq('post_id', post.id);
-      if (!cancelled && !error && typeof c === 'number') setCount(c);
+      if (!cancelled) {
+        if (!error && typeof c === 'number') setCount(c);
+      }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [post.id]);
 
-  async function loadComments() {
+  // open/close comments
+  async function toggleComments() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    if (comments.length) return; // already loaded
+    setLoadingC(true);
+    setErr('');
     try {
-      setErr(null);
       const { data, error } = await supabase
         .from('post_comments')
         .select('id, post_id, profile_id, body, created_at, profiles(display_name)')
         .eq('post_id', post.id)
         .order('created_at', { ascending: true });
-
       if (error) throw error;
-
-      const mapped: CommentItem[] = (data ?? []).map((row: any) => {
-        const p = Array.isArray(row.profiles) ? row.profiles?.[0] : row.profiles;
-        return {
-          id: String(row.id),
-          post_id: String(row.post_id),
-          profile_id: String(row.profile_id),
-          body: String(row.body ?? ''),
-          created_at: String(row.created_at),
-          author_name: p?.display_name || 'Someone',
-        };
-      });
-
-      setComments(mapped);
-      setCount(mapped.length); // keep count in sync once loaded
+      setComments((data || []) as any);
+      setCount(data?.length ?? 0); // sync to exact once loaded
     } catch (e: any) {
-      const msg = String(e?.message ?? '');
-      if (!msg.toLowerCase().includes('does not exist')) setErr(msg || 'Failed to load comments.');
-      setComments([]);
-    }
-  }
-
-  useEffect(() => {
-    if (open) void loadComments();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, post.id]);
-
-  async function addComment() {
-    const text = draft.trim();
-    if (!text || !me) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      const { error } = await supabase.from('post_comments').insert({
-        post_id: post.id,
-        profile_id: me,
-        body: text,
-      });
-      if (error) throw error;
-      setDraft('');
-      await loadComments();
-    } catch (e: any) {
-      setErr(e?.message ?? 'Could not add comment.');
+      setErr(e?.message ?? 'Could not load comments.');
     } finally {
-      setBusy(false);
+      setLoadingC(false);
     }
   }
 
-  async function deletePost() {
-    if (!me || me !== post.profile_id) return;
-    if (!confirm('Delete this post? This cannot be undone.')) return;
-    const { error } = await supabase.from('posts').delete().eq('id', post.id);
-    if (error) {
-      alert(error.message);
-      return;
+  // post a comment
+  async function submitComment() {
+    const body = cText.trim();
+    if (!me || !body || cBusy) return;
+    setCBusy(true);
+    setErr('');
+    try {
+      const { data, error } = await supabase
+        .from('post_comments')
+        .insert({ post_id: post.id, profile_id: me, body })
+        .select('id, post_id, profile_id, body, created_at, profiles(display_name)')
+        .single();
+      if (error) throw error;
+      setCText('');
+      setComments((prev) => [...prev, data as any]);
+      setCount((n) => n + 1);
+      // keep focus for fast threading
+      cRef.current?.focus();
+    } catch (e: any) {
+      setErr(e?.message ?? 'Could not comment.');
+    } finally {
+      setCBusy(false);
     }
-    onDeleted?.();
   }
 
+  function onCommentKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    const ctrlOrCmd = e.ctrlKey || e.metaKey;
+    if (e.key === 'Enter' && (ctrlOrCmd || !e.shiftKey)) {
+      e.preventDefault();
+      submitComment();
+    }
+  }
+
+  // delete a comment (via menu + confirm)
   async function deleteComment(id: string) {
-    if (!me) return;
     if (!confirm('Delete this comment?')) return;
-    const { error } = await supabase
-      .from('post_comments')
-      .delete()
-      .eq('id', id)
-      .eq('profile_id', me);
-    if (error) {
-      alert(error.message);
-      return;
+    const { error } = await supabase.from('post_comments').delete().eq('id', id);
+    if (!error) {
+      setComments((prev) => prev.filter((c) => c.id !== id));
+      setCount((n) => Math.max(0, n - 1));
     }
-    setComments(prev => prev.filter(c => c.id !== id));
-    setCount(prev => Math.max(0, prev - 1));
   }
+
+  // delete post (menu)
+  async function deletePost() {
+    if (!confirm('Delete this post?')) return;
+    const { error } = await supabase.from('posts').delete().eq('id', post.id);
+    if (!error) onDeleted?.();
+  }
+
+  const myPost = me === post.profile_id;
+  const author = post.profiles?.display_name || 'Someone';
 
   return (
     <article className="rounded border p-3">
-      <div className="mb-1 flex items-center justify-between">
-        <div className="text-sm text-gray-700">
-          <Link href={authorHref} className="underline">{authorName}</Link>{' '}
-          <span className="text-gray-500">• {new Date(post.created_at).toLocaleString()}</span>
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-sm">
+          <div className="font-medium">{author}</div>
+          <div className="text-xs text-gray-600">
+            {new Date(post.created_at).toLocaleString()}
+          </div>
         </div>
 
-        {me === post.profile_id && (
-          <div className="relative" ref={menuRef}>
-            <button
-              aria-label="Post actions"
-              className="rounded px-2 text-lg leading-none hover:bg-gray-100"
-              onClick={() => setMenuOpen(v => !v)}
-            >
-              ⋯
-            </button>
-            {menuOpen && (
-              <div className="absolute right-0 z-10 w-28 overflow-hidden rounded border bg-white shadow-md">
+        {/* post menu */}
+        <div className="relative">
+          <button
+            className="rounded px-2 py-1 text-xl leading-none"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="Post actions"
+          >
+            …
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 z-10 w-32 rounded border bg-white p-1 text-sm shadow">
+              {myPost && (
                 <button
-                  className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
-                  onClick={() => { setMenuOpen(false); void deletePost(); }}
+                  className="w-full rounded px-2 py-1 text-left hover:bg-gray-50"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    deletePost();
+                  }}
                 >
-                  Delete
+                  Delete post
                 </button>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+              <button
+                className="w-full rounded px-2 py-1 text-left hover:bg-gray-50"
+                onClick={() => setMenuOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="whitespace-pre-wrap">{post.body}</div>
+      <p className="mt-2 whitespace-pre-wrap text-sm">{post.body}</p>
 
-      <div className="mt-3">
+      {/* comments toggle */}
+      <div className="mt-2">
         <button
           className="text-xs underline"
-          onClick={() => setOpen(v => !v)}
+          onClick={toggleComments}
         >
           {open ? 'Hide comments' : `Show comments (${count})`}
         </button>
       </div>
 
+      {/* comments list */}
       {open && (
-        <div className="mt-2 space-y-2">
-          {err && <div className="text-xs text-red-600">{err}</div>}
+        <div className="mt-2 space-y-2 rounded border bg-gray-50 p-2">
+          {loadingC && <p className="text-xs text-gray-600">Loading…</p>}
+          {err && <p className="text-xs text-amber-700">{err}</p>}
 
-          {comments.length === 0 ? (
-            <div className="text-sm text-gray-600">No comments yet.</div>
-          ) : (
-            <ul className="space-y-2">
-              {comments.map(c => {
-                const canDel = me === c.profile_id;
-                const whoHref = me && me === c.profile_id ? '/profile' : `/u/${c.profile_id}`;
-                return (
-                  <li key={c.id} className="rounded bg-gray-50 p-2">
-                    <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
-                      <div>
-                        <Link href={whoHref} className="underline">{c.author_name}</Link>{' '}
-                        • {new Date(c.created_at).toLocaleString()}
-                      </div>
-                      {canDel && (
-                        <button className="underline" onClick={() => deleteComment(c.id)}>
-                          Delete
-                        </button>
-                      )}
+          {comments.map((c) => {
+            const mine = me === c.profile_id;
+            return (
+              <div
+                key={c.id}
+                className="relative rounded bg-white p-2 text-sm"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-medium">
+                      {c.profiles?.display_name || 'Someone'}
                     </div>
-                    <div className="whitespace-pre-wrap text-sm text-gray-800">{c.body}</div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+                    <div className="text-xs text-gray-600">
+                      {new Date(c.created_at).toLocaleString()}
+                    </div>
+                  </div>
 
-          {/* Comment composer */}
-          <div className="mt-2 flex gap-2">
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  void addComment();
-                }
-              }}
-              placeholder={me ? 'Write a comment…' : 'Sign in to comment'}
-              disabled={!me || busy}
-              className="flex-1 rounded border px-3 py-2 text-sm disabled:opacity-60"
+                  {/* comment menu */}
+                  <div className="relative">
+                    <CommentKebab
+                      canDelete={mine}
+                      onDelete={() => deleteComment(c.id)}
+                    />
+                  </div>
+                </div>
+                <p className="mt-1 whitespace-pre-wrap">{c.body}</p>
+              </div>
+            );
+          })}
+
+          {/* comment composer */}
+          <div className="mt-2 flex items-end gap-2">
+            <textarea
+              ref={cRef}
+              value={cText}
+              onChange={(e) => setCText(e.target.value)}
+              onKeyDown={onCommentKeyDown}
+              rows={2}
+              className="w-full resize-none rounded border px-2 py-1 text-sm"
+              placeholder="Write a comment…"
             />
             <button
-              onClick={addComment}
-              disabled={!me || busy || !draft.trim()}
-              className="rounded border px-3 py-2 text-sm disabled:opacity-60"
+              onClick={submitComment}
+              disabled={!me || cBusy || !cText.trim()}
+              className="rounded bg-black px-3 py-2 text-sm text-white disabled:opacity-50"
             >
-              {busy ? 'Posting…' : 'Post'}
+              {cBusy ? 'Posting…' : 'Post'}
             </button>
           </div>
         </div>
       )}
     </article>
+  );
+}
+
+function CommentKebab({ canDelete, onDelete }: { canDelete: boolean; onDelete: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        className="rounded px-2 py-1 text-xl leading-none"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Comment actions"
+      >
+        …
+      </button>
+      {open && (
+        <div className="absolute right-0 z-10 w-32 rounded border bg-white p-1 text-sm shadow">
+          {canDelete && (
+            <button
+              className="w-full rounded px-2 py-1 text-left hover:bg-gray-50"
+              onClick={() => {
+                setOpen(false);
+                onDelete();
+              }}
+            >
+              Delete comment
+            </button>
+          )}
+          <button
+            className="w-full rounded px-2 py-1 text-left hover:bg-gray-50"
+            onClick={() => setOpen(false)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
