@@ -13,7 +13,7 @@ type ProfileRow = {
   id: string;
   display_name: string | null;
   bio?: string | null;
-  // optional fields (won’t crash if not present in your schema)
+  // optional fields (safe if not in your schema)
   area_city?: string | null;
   area_country?: string | null;
   role?: 'user' | 'moderator' | 'admin' | null;
@@ -50,7 +50,9 @@ function ProfileContent() {
         // profile row (conservative selection)
         const { data: p, error: pErr } = await supabase
           .from('profiles')
-          .select('id, display_name, bio, area_city, area_country, role, created_at, avatar_url, cover_url')
+          .select(
+            'id, display_name, bio, area_city, area_country, role, created_at, avatar_url, cover_url'
+          )
           .eq('id', profileId)
           .single();
         if (pErr) throw pErr;
@@ -59,7 +61,7 @@ function ProfileContent() {
         // owner’s ACTIVE offers
         const { data: o, error: oErr } = await supabase
           .from('offers')
-          .select('id, title, offer_type, is_online, city, country, images, status')
+          .select('id, title, offer_type, is_online, city, country, images, status, created_at')
           .eq('owner_id', profileId)
           .eq('status', 'active')
           .order('created_at', { ascending: false })
@@ -77,8 +79,9 @@ function ProfileContent() {
           status: row.status,
           images: row.images ?? [],
           owner_name: ownerName,
+          // OfferCard doesn’t *need* owner_id, but harmless if you want to keep it:
           owner_id: String(profileId),
-        }));
+        })) as any;
 
         if (!cancelled) setOffers(list);
       } catch (e: any) {
@@ -147,7 +150,8 @@ function ProfileContent() {
 
         {/* Right: feed */}
         <div className="lg:col-span-2">
-          <UserFeed profileId={profileId} me={me} />
+          {/* IMPORTANT: no composer here, and no extra props */}
+          <UserFeed profileId={profileId} />
         </div>
       </div>
     </section>
