@@ -13,10 +13,7 @@ type PostRow = {
   profiles?: { display_name?: string | null } | null;
 };
 
-type Props = {
-  /** Whose feed to show */
-  profileId: string;
-};
+type Props = { profileId: string };
 
 export default function UserFeed({ profileId }: Props) {
   const [me, setMe] = useState<string | null>(null);
@@ -24,16 +21,13 @@ export default function UserFeed({ profileId }: Props) {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string>('');
 
-  // Get the current user id (used by PostItem to show delete when me === post.profile_id)
   useEffect(() => {
-    let cancelled = false;
+    let cancel = false;
     (async () => {
       const { data } = await supabase.auth.getUser();
-      if (!cancelled) setMe(data.user?.id ?? null);
+      if (!cancel) setMe(data.user?.id ?? null);
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancel = true; };
   }, []);
 
   async function load() {
@@ -58,21 +52,15 @@ export default function UserFeed({ profileId }: Props) {
 
   useEffect(() => {
     if (!profileId) return;
-    let cancelled = false;
-    (async () => {
-      await load();
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancel = false;
+    (async () => { await load(); })();
+    return () => { cancel = true; };
   }, [profileId]);
 
   return (
     <div className="space-y-3">
       {loading && <p className="text-sm text-gray-600">Loading…</p>}
       {err && <p className="text-sm text-amber-700">{err}</p>}
-
       {!loading && posts.length === 0 && (
         <p className="text-sm text-gray-600">No posts yet.</p>
       )}

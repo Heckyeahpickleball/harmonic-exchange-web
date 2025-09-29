@@ -158,7 +158,7 @@ export default function ProfilePage() {
             country: r.country,
             status: r.status,
             images: r.images ?? [],
-            owner_name: undefined,
+            owner_name: undefined, // not shown on my own profile
           })) ?? [];
 
         if (!cancelled) setOffers(shaped);
@@ -224,7 +224,7 @@ export default function ProfilePage() {
         area_city: form.area_city.trim() || null,
         area_country: form.area_country.trim() || null,
         bio: form.bio.trim() || null,
-        skills,
+        skills, // text[]
         avatar_url: form.avatar_url,
         cover_url: form.cover_url,
       })
@@ -408,6 +408,7 @@ export default function ProfilePage() {
               }}
               className="grid gap-4 md:grid-cols-2"
             >
+              {/* left column */}
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium">Display name *</label>
@@ -463,6 +464,7 @@ export default function ProfilePage() {
                 </div>
               </div>
 
+              {/* right column */}
               <div className="space-y-4">
                 {/* Cover uploader */}
                 <div className="space-y-2">
@@ -492,7 +494,7 @@ export default function ProfilePage() {
                         const src = URL.createObjectURL(file);
                         setCropper({
                           src,
-                          aspect: 3,
+                          aspect: 3,          // 3:1 banner
                           targetWidth: 1200,
                           targetHeight: 400,
                           kind: 'cover',
@@ -534,7 +536,7 @@ export default function ProfilePage() {
                         const src = URL.createObjectURL(file);
                         setCropper({
                           src,
-                          aspect: 1,
+                          aspect: 1,          // square avatar
                           targetWidth: 512,
                           targetHeight: 512,
                           kind: 'avatar',
