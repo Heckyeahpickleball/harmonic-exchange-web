@@ -1,6 +1,7 @@
+// components/PostItem.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 type PostRow = {
@@ -32,6 +33,7 @@ export default function PostItem({
   onDeleted: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [commentText, setCommentText] = useState('');
@@ -58,6 +60,14 @@ export default function PostItem({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [post.id]);
 
+  function normalizeProfile<T extends { profiles?: any }>(row: T) {
+    const p = row.profiles;
+    return {
+      ...row,
+      profiles: Array.isArray(p) ? (p[0] ?? null) : p ?? null,
+    };
+  }
+
   async function toggleComments() {
     const open = !commentsOpen;
     setCommentsOpen(open);
@@ -66,12 +76,21 @@ export default function PostItem({
     if (open && comments.length === 0) {
       const { data, error } = await supabase
         .from('post_comments')
-        .select('id,post_id,profile_id,body,created_at,images,profiles(display_name)')
+        .select(
+          'id, post_id, profile_id, body, created_at, images, profiles(display_name)'
+        )
         .eq('post_id', post.id)
         .order('created_at', { ascending: true })
         .limit(200);
-      if (error) setErr(error.message);
-      else setComments((data || []) as CommentRow[]);
+
+      if (error) {
+        setErr(error.message);
+      } else {
+        const normalized: CommentRow[] = (data || []).map((r: any) =>
+          normalizeProfile(r)
+        );
+        setComments(normalized);
+      }
     }
   }
 
@@ -128,16 +147,24 @@ export default function PostItem({
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth.user?.id;
       if (!uid) throw new Error('Not signed in');
+
       const imageUrls = await uploadAllImages(uid, files);
 
       const { data, error } = await supabase
         .from('post_comments')
-        .insert({ post_id: post.id, profile_id: uid, body: body || ' ', images: imageUrls })
-        .select('id,post_id,profile_id,body,created_at,images,profiles(display_name)')
+        .insert({
+          post_id: post.id,
+          profile_id: uid,
+          body: body || ' ', // allow image-only comments
+          images: imageUrls,
+        })
+        .select('id, post_id, profile_id, body, created_at, images, profiles(display_name)')
         .single();
 
       if (error) throw error;
-      setComments((prev) => [...prev, data as CommentRow]);
+
+      const normalized = normalizeProfile(data);
+      setComments((prev) => [...prev, normalized as CommentRow]);
       setCommentCount((c) => c + 1);
       setCommentText('');
       previews.forEach((u) => URL.revokeObjectURL(u));
@@ -167,9 +194,9 @@ export default function PostItem({
   }
 
   const ownerName = post.profiles?.display_name || 'Someone';
-
   const images = Array.isArray(post.images) ? post.images : [];
-  const colClass = images.length >= 3 ? 'grid-cols-3' : images.length === 2 ? 'grid-cols-2' : 'grid-cols-1';
+  const colClass =
+    images.length >= 3 ? 'grid-cols-3' : images.length === 2 ? 'grid-cols-2' : 'grid-cols-1';
 
   return (
     <article className="rounded border p-3">
@@ -232,21 +259,21 @@ export default function PostItem({
               <div className="flex items-start justify-between">
                 <div className="text-sm">
                   <span className="font-medium">{c.profiles?.display_name || 'Someone'}</span>{' '}
-                  <span className="text-xs text-gray-500">
-                    • {new Date(c.created_at).toLocaleString()}
-                  </span>
+                  <span className="text-xs text-gray-500">• {new Date(c.created_at).toLocaleString()}</span>
                 </div>
 
                 {/* comment 3-dot menu, only owner can delete */}
-                {me === c.profile_id && (
-                  <CommentMenu onDelete={() => deleteComment(c.id)} />
-                )}
+                {me === c.profile_id && <CommentMenu onDelete={() => deleteComment(c.id)} />}
               </div>
 
               {c.body && <p className="mt-1 whitespace-pre-wrap">{c.body}</p>}
 
               {Array.isArray(c.images) && c.images.length > 0 && (
-                <div className={`mt-2 grid ${c.images.length >= 3 ? 'grid-cols-3' : c.images.length === 2 ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
+                <div
+                  className={`mt-2 grid ${
+                    c.images.length >= 3 ? 'grid-cols-3' : c.images.length === 2 ? 'grid-cols-2' : 'grid-cols-1'
+                  } gap-2`}
+                >
                   {c.images.map((src, i) => (
                     <div key={i} className="overflow-hidden rounded border">
                       <img src={src} alt="" className="h-28 w-full object-cover" />
@@ -308,7 +335,9 @@ export default function PostItem({
                   className="hidden"
                   onChange={onCommentFiles}
                 />
-                <span className="text-xs text-gray-500">Enter = Comment · Shift+Enter = newline · Up to 4 images</span>
+                <span className="text-xs text-gray-500">
+                  Enter = Comment · Shift+Enter = newline · Up to 4 images
+                </span>
               </div>
               <button
                 onClick={addComment}
