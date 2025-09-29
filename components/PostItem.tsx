@@ -1,26 +1,25 @@
+// components/PostItem.tsx
 'use client';
-
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-type ProfileLite = { display_name: string | null };
-export type PostRow = {
+type PostRow = {
   id: string;
   profile_id: string;
-  body: string | null;
-  images: string[]; // stored as jsonb[] of URLs
+  body: string;
+  images: string[];
   created_at: string;
-  profiles?: ProfileLite | null;
+  profiles?: { display_name: string | null } | null;
 };
 
 type CommentRow = {
   id: string;
   post_id: string;
   profile_id: string;
-  body: string | null;
-  images: string[];            // jsonb array of strings (urls)
+  body: string;
+  images: string[]; // text[]
   created_at: string;
-  profiles?: ProfileLite | null;
+  profiles?: { display_name: string | null } | null;
 };
 
 export default function PostItem({
@@ -33,345 +32,276 @@ export default function PostItem({
   onDeleted?: () => void;
 }) {
   const [comments, setComments] = useState<CommentRow[]>([]);
-  const [err, setErr] = useState<string>('');
   const [open, setOpen] = useState(false);
-  const [busyDelete, setBusyDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-  // comment composer
-  const [cText, setCText] = useState('');
-  const [cImages, setCImages] = useState<File[]>([]);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const subRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
-  // ---- helpers
-
-  function fmt(ts: string) {
-    const d = new Date(ts);
-    return d.toLocaleString();
-  }
-
-  async function uploadToPostMedia(file: File): Promise<string> {
-    if (!me) throw new Error('Not signed in');
-    const path = `${me}/${Date.now()}_${file.name}`;
-    const up = await supabase.storage.from('post-media').upload(path, file, {
-      cacheControl: '3600',
-      upsert: false,
-      contentType: file.type,
-    });
-    if (up.error) throw up.error;
-    const pub = supabase.storage.from('post-media').getPublicUrl(path);
-    return pub.data.publicUrl;
-  }
-
-  // ---- load comments once (when opened)
   useEffect(() => {
-    let cancelled = false;
     if (!open) return;
+
+    let cancelled = false;
 
     (async () => {
       const { data, error } = await supabase
         .from('post_comments')
-        .select(
-          `
+        .select(`
           id, post_id, profile_id, body, images, created_at,
-          profiles:profiles!post_comments_profile_id_fkey ( display_name )
-        `
-        )
+          profiles:profiles!post_comments_profile_id_fkey(display_name)
+        `)
         .eq('post_id', post.id)
-        .order('created_at', { ascending: false })
+        .order('created_at', { ascending: true })
         .limit(200);
 
-      if (error) {
-        if (!cancelled) setErr(error.message);
-      } else {
-        // normalize: images -> string[], profiles -> object
-        const rows = (data || []).map((r: any) => ({
-          ...r,
-          images: Array.isArray(r.images)
-            ? r.images
-            : r.images && typeof r.images === 'object'
-            ? r.images
-            : [],
+      if (error) setErr(error.message);
+      else if (!cancelled) {
+        const normalized = (data ?? []).map((c: any): CommentRow => ({
+          id: c.id,
+          post_id: c.post_id,
+          profile_id: c.profile_id,
+          body: c.body ?? '',
+          images: (c.images ?? []) as string[],
+          created_at: c.created_at,
           profiles:
-            r.profiles && !Array.isArray(r.profiles) ? r.profiles : null,
-        })) as CommentRow[];
-        if (!cancelled) setComments(rows);
+            c.profiles && !Array.isArray(c.profiles)
+              ? { display_name: c.profiles.display_name ?? null }
+              : { display_name: null },
+        }));
+        setComments(normalized);
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [open, post.id]);
-
-  // ---- realtime for this post's comments
-  useEffect(() => {
-    if (!open) return;
-    const channel = supabase
-      .channel(`comments:${post.id}`)
+    // realtime for comments on this post
+    const ch = supabase
+      .channel(`post_comments:${post.id}`)
       .on(
         'postgres_changes',
-        { schema: 'public', table: 'post_comments', event: 'INSERT', filter: `post_id=eq.${post.id}` },
+        { event: 'INSERT', schema: 'public', table: 'post_comments', filter: `post_id=eq.${post.id}` },
         (payload) => {
-          const r: any = payload.new;
+          const c: any = payload.new;
           const row: CommentRow = {
-            ...r,
-            images: Array.isArray(r.images) ? r.images : [],
-            profiles: (r.profiles && !Array.isArray(r.profiles)) ? r.profiles : null,
+            id: c.id,
+            post_id: c.post_id,
+            profile_id: c.profile_id,
+            body: c.body ?? '',
+            images: (c.images ?? []) as string[],
+            created_at: c.created_at,
+            profiles: { display_name: null }, // small optimistic default
           };
-          setComments((prev) => {
-            // if the exact id already exists, skip
-            if (prev.some((c) => c.id === row.id)) return prev;
-            return [row, ...prev];
-          });
-        }
-      )
-      .on(
-        'postgres_changes',
-        { schema: 'public', table: 'post_comments', event: 'DELETE', filter: `post_id=eq.${post.id}` },
-        (payload) => {
-          const r: any = payload.old;
-          setComments((prev) => prev.filter((c) => c.id !== r.id));
+          setComments((prev) => [...prev, row]);
         }
       )
       .subscribe();
+    subRef.current = ch;
 
     return () => {
-      supabase.removeChannel(channel);
+      cancelled = true;
+      if (subRef.current) {
+        supabase.removeChannel(subRef.current);
+        subRef.current = null;
+      }
     };
   }, [open, post.id]);
 
-  // ---- comment submit
-  const canPostComment = useMemo(
-    () => (cText.trim().length > 0) || cImages.length > 0,
-    [cText, cImages]
+  async function deletePost() {
+    if (!confirm('Delete this post?')) return;
+    const { error } = await supabase.from('posts').delete().eq('id', post.id);
+    if (!error) onDeleted?.();
+  }
+
+  return (
+    <article className="rounded border p-3">
+      <header className="mb-2 text-sm text-gray-600 flex items-center justify-between">
+        <div>
+          <span className="font-medium">{post.profiles?.display_name ?? 'Someone'}</span>
+          <span className="mx-1">•</span>
+          <time dateTime={post.created_at}>{new Date(post.created_at).toLocaleString()}</time>
+        </div>
+        {me === post.profile_id && (
+          <button className="px-2 py-1 text-sm border rounded" onClick={deletePost}>
+            …
+          </button>
+        )}
+      </header>
+
+      {post.body && <p className="mb-2 whitespace-pre-wrap">{post.body}</p>}
+
+      {post.images?.length ? (
+        <div className="mb-2 space-y-2">
+          {post.images.map((src) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img key={src} src={src} alt="" className="rounded w-full object-cover" />
+          ))}
+        </div>
+      ) : null}
+
+      <button className="text-sm underline" onClick={() => setOpen((v) => !v)}>
+        {open ? 'Hide comments' : `Show comments (${comments.length})`}
+      </button>
+
+      {open && (
+        <CommentComposer
+          postId={post.id}
+          onAdd={(c) => setComments((prev) => [...prev, c])}
+          me={me}
+        />
+      )}
+
+      {open && (
+        <div className="mt-2 space-y-2">
+          {comments.map((c) => (
+            <div key={c.id} className="rounded border p-2">
+              <div className="text-xs text-gray-600 mb-1">
+                <span className="font-medium">{c.profiles?.display_name ?? 'Someone'}</span>
+                <span className="mx-1">•</span>
+                <time dateTime={c.created_at}>
+                  {new Date(c.created_at).toLocaleString()}
+                </time>
+              </div>
+              {c.body && <p className="whitespace-pre-wrap">{c.body}</p>}
+              {c.images?.length ? (
+                <div className="mt-2 space-y-2">
+                  {c.images.map((src) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img key={src} src={src} alt="" className="rounded w-full object-cover" />
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ))}
+          {err && <p className="text-sm text-amber-700">{err}</p>}
+        </div>
+      )}
+    </article>
   );
+}
 
-  async function handleCommentSubmit() {
+function CommentComposer({
+  postId,
+  me,
+  onAdd,
+}: {
+  postId: string;
+  me: string | null;
+  onAdd: (c: CommentRow) => void;
+}) {
+  const [text, setText] = useState('');
+  const [images, setImages] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function upload(files: FileList) {
+    const next: string[] = [];
+    const owner = me ?? 'anon';
+    for (const f of Array.from(files)) {
+      const key = `${owner}/c-${Date.now()}-${f.name}`;
+      const { error } = await supabase.storage.from('post-media').upload(key, f);
+      if (error) throw error;
+      const { data: pub } = supabase.storage.from('post-media').getPublicUrl(key);
+      next.push(pub.publicUrl);
+    }
+    setImages((p) => [...p, ...next].slice(0, 6));
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submit();
+    }
+  }
+
+  async function submit() {
+    if (busy || !me) return;
+    setBusy(true);
+    setErr(null);
     try {
-      setErr('');
-      if (!me) throw new Error('Please sign in');
-      if (!canPostComment) return;
-
-      // upload all images first
-      let urls: string[] = [];
-      if (cImages.length) {
-        urls = await Promise.all(cImages.map(uploadToPostMedia));
-      }
-
-      const bodyVal = cText.trim().length ? cText.trim() : null;
+      const bodyClean = text.trim() ? text : '';
 
       const { data, error } = await supabase
         .from('post_comments')
         .insert({
-          post_id: post.id,
+          post_id: postId,
           profile_id: me,
-          body: bodyVal,
-          images: urls, // jsonb text[] in db
+          body: bodyClean,     // never null
+          images,              // text[]
         })
-        .select(
-          `
+        .select(`
           id, post_id, profile_id, body, images, created_at,
-          profiles:profiles!post_comments_profile_id_fkey ( display_name )
-        `
-        )
+          profiles:profiles!post_comments_profile_id_fkey(display_name)
+        `)
         .single();
 
       if (error) throw error;
 
-      const added: CommentRow = {
-        ...data,
-        images: Array.isArray(data.images) ? data.images : [],
+      const c: CommentRow = {
+        id: data.id,
+        post_id: data.post_id,
+        profile_id: data.profile_id,
+        body: data.body ?? '',
+        images: (data.images ?? []) as string[],
+        created_at: data.created_at,
         profiles:
-          data.profiles && !Array.isArray(data.profiles) ? data.profiles : null,
+          data.profiles && !Array.isArray(data.profiles)
+            ? { display_name: data.profiles.display_name ?? null }
+            : { display_name: null },
       };
 
-      // optimistic (in case realtime is a tick late)
-      setComments((prev) => [added, ...prev]);
-      setCText('');
-      setCImages([]);
+      onAdd(c);
+      setText('');
+      setImages([]);
     } catch (e: any) {
-      setErr(e?.message ?? String(e));
-    }
-  }
-
-  // ---- delete post (owner only UI assumed above)
-  async function handleDeletePost() {
-    if (!confirm('Delete this post?')) return;
-    try {
-      setBusyDelete(true);
-      const { error } = await supabase.from('posts').delete().eq('id', post.id);
-      if (error) throw error;
-      onDeleted?.();
-    } catch (e: any) {
-      alert(e?.message ?? 'Failed to delete post.');
+      setErr(e?.message ?? 'Failed to comment.');
     } finally {
-      setBusyDelete(false);
+      setBusy(false);
     }
   }
 
   return (
-    <article className="rounded-xl border">
-      {/* header */}
-      <div className="flex items-center justify-between px-4 py-2">
-        <div className="text-sm">
-          <div className="font-medium">
-            {post.profiles?.display_name || 'Someone'}
-          </div>
-          <div className="text-gray-500">{fmt(post.created_at)}</div>
+    <div className="mt-2 space-y-2">
+      <div className="flex items-start gap-2">
+        <textarea
+          className="flex-1 rounded border p-2"
+          rows={2}
+          placeholder="Write a comment…"
+          value={text}
+          disabled={busy}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+        />
+        <div className="flex flex-col gap-2 items-end">
+          <label className="inline-flex items-center gap-2">
+            <span className="px-2 py-1 border rounded cursor-pointer">Add image</span>
+            <input type="file" accept="image/*" hidden onChange={(e) => e.target.files && upload(e.target.files)} />
+          </label>
+          <button className="px-3 py-1 rounded bg-black text-white disabled:opacity-60" disabled={busy} onClick={submit}>
+            {busy ? 'Posting…' : 'Post'}
+          </button>
         </div>
-
-        {/* post menu */}
-        {me === post.profile_id && (
-          <div className="relative">
-            <button
-              className="rounded border px-2 py-1 text-xs"
-              onClick={handleDeletePost}
-              disabled={busyDelete}
-              title="Delete post"
-            >
-              …
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* body */}
-      {post.body && <p className="px-4 pb-2 whitespace-pre-wrap">{post.body}</p>}
-
-      {/* images */}
-      {Array.isArray(post.images) && post.images.length > 0 && (
-        <div className="space-y-2 px-4 pb-2">
-          {post.images.map((url, i) => (
-            <img
-              key={i}
-              src={url}
-              alt=""
-              className="max-h-[420px] w-full rounded-lg object-cover"
-              loading="lazy"
-            />
+      {images.length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          {images.map((src) => (
+            <div key={src} className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={src} alt="" className="h-16 w-24 object-cover rounded" />
+              <button
+                type="button"
+                className="absolute -top-2 -right-2 text-xs bg-black/70 text-white rounded-full px-1"
+                onClick={() => setImages((prev) => prev.filter((x) => x !== src))}
+              >
+                ×
+              </button>
+            </div>
           ))}
         </div>
       )}
 
-      {/* comments toggle */}
-      <div className="border-t px-4 py-2">
-        <button
-          className="text-sm underline"
-          onClick={() => setOpen((v) => !v)}
-        >
-          {open ? 'Hide comments' : `Show comments (${comments.length})`}
-        </button>
+      <div className="text-xs text-gray-500">
+        Enter = Post • Shift+Enter = newline • Up to 6 images
       </div>
-
-      {/* comments list + composer */}
-      {open && (
-        <div className="space-y-2 border-t px-4 py-3">
-          {/* comment thumbnails */}
-          {cImages.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-2">
-              {cImages.map((f, idx) => (
-                <div key={idx} className="relative">
-                  <img
-                    src={URL.createObjectURL(f)}
-                    alt=""
-                    className="h-16 w-16 rounded object-cover"
-                  />
-                  <button
-                    className="absolute -right-2 -top-2 rounded-full border bg-white px-1 text-xs"
-                    onClick={() =>
-                      setCImages((prev) => prev.filter((_, i) => i !== idx))
-                    }
-                    aria-label="Remove image"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* composer */}
-          <div className="flex items-end gap-2">
-            <textarea
-              className="w-full rounded border p-2 text-sm"
-              placeholder="Write a comment…"
-              rows={2}
-              value={cText}
-              onChange={(e) => setCText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  if (canPostComment) void handleCommentSubmit();
-                }
-              }}
-            />
-            <div className="flex flex-col items-end gap-2">
-              <button
-                className="rounded border px-2 py-1 text-xs"
-                type="button"
-                onClick={() => fileRef.current?.click()}
-              >
-                Add image
-              </button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                multiple
-                hidden
-                onChange={(e) => {
-                  const files = Array.from(e.currentTarget.files || []);
-                  if (files.length) {
-                    setCImages((prev) => {
-                      const next = [...prev, ...files].slice(0, 6);
-                      return next;
-                    });
-                  }
-                  e.currentTarget.value = '';
-                }}
-              />
-              <button
-                className="rounded bg-black px-3 py-1 text-xs text-white disabled:opacity-50"
-                disabled={!canPostComment}
-                onClick={handleCommentSubmit}
-              >
-                Post
-              </button>
-              <div className="text-[11px] text-gray-500">
-                Enter = Post · Shift+Enter = newline · Up to 6 images
-              </div>
-            </div>
-          </div>
-
-          {err && <p className="text-sm text-amber-700">{err}</p>}
-
-          {/* list */}
-          <div className="space-y-2 pt-1">
-            {comments.map((c) => (
-              <div key={c.id} className="rounded border p-2">
-                <div className="mb-1 text-xs text-gray-600">
-                  {c.profiles?.display_name || 'Someone'} •{' '}
-                  {new Date(c.created_at).toLocaleString()}
-                </div>
-                {c.body && <p className="whitespace-pre-wrap">{c.body}</p>}
-                {Array.isArray(c.images) && c.images.length > 0 && (
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    {c.images.map((u, i) => (
-                      <img
-                        key={i}
-                        src={u}
-                        alt=""
-                        className="max-h-52 w-full rounded object-cover"
-                        loading="lazy"
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </article>
+      {err && <p className="text-sm text-red-600">{err}</p>}
+    </div>
   );
 }
