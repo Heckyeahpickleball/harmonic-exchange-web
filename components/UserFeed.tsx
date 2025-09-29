@@ -24,7 +24,7 @@ export default function UserFeed({ profileId }: Props) {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string>('');
 
-  // get current user id (for delete button logic in PostItem)
+  // Get the current user id (used by PostItem to show delete when me === post.profile_id)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -36,7 +36,6 @@ export default function UserFeed({ profileId }: Props) {
     };
   }, []);
 
-  // load posts for this profile
   async function load() {
     setLoading(true);
     setErr('');
@@ -83,7 +82,7 @@ export default function UserFeed({ profileId }: Props) {
           key={post.id}
           post={post}
           me={me}
-          onDelete={() => setPosts((prev) => prev.filter((p) => p.id !== post.id))}
+          onDeleted={() => setPosts((prev) => prev.filter((p) => p.id !== post.id))}
         />
       ))}
     </div>
