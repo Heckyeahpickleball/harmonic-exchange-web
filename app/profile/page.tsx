@@ -246,30 +246,6 @@ export default function ProfilePage() {
     }
   }
 
-  // ---- NEW: hook up PostComposer(onPost) ----
-  async function handlePost(text: string) {
-    if (!userId) return;
-    const body = text.trim();
-    if (!body) return;
-
-    try {
-      setStatus('Posting…');
-      const { error } = await supabase
-        .from('posts')
-        .insert({ profile_id: userId, body })
-        .select('id')
-        .single();
-      if (error) throw error;
-      setStatus('Posted! ✅');
-      // UserFeed will pick this up via its own fetch/realtime.
-    } catch (e: any) {
-      setStatus(e?.message ?? 'Failed to post.');
-    } finally {
-      // clear the hint after a moment
-      setTimeout(() => setStatus(''), 1200);
-    }
-  }
-
   if (loading) return <p className="p-4">Loading...</p>;
 
   if (!userEmail) {
@@ -407,11 +383,11 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        {/* Posts column */}
+        {/* Posts column (SINGLE composer lives here) */}
         <section className="md:col-span-7 space-y-2">
           <h2 className="text-base font-semibold">Posts</h2>
-          {userId && <PostComposer onPost={handlePost} />}
-          {userId && <UserFeed profileId={userId} me={userId} />}
+          {userId && <PostComposer profileId={userId} />}
+          {userId && <UserFeed profileId={userId} />}
         </section>
       </div>
 

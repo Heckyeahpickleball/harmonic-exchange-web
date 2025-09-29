@@ -1,113 +1,74 @@
 // /components/UserFeed.tsx
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import PostComposer from './PostComposer';
-import PostItem from './PostItem';
+import PostItem from '@/components/PostItem';
 
 type PostRow = {
   id: string;
   profile_id: string;
   body: string;
   created_at: string;
+  profiles?: { display_name: string | null } | null;
 };
 
-export default function UserFeed({
-  profileId,
-  me,
-}: {
+type Props = {
+  /** Whose feed to show */
   profileId: string;
-  me?: string | null; // <- optional so callers can omit it
-}) {
-  const meNorm = me ?? null;
+};
 
+export default function UserFeed({ profileId }: Props) {
   const [posts, setPosts] = useState<PostRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string>('');
-  const [unsupported, setUnsupported] = useState(false);
 
-  const canCompose = useMemo(() => !!meNorm && meNorm === profileId, [meNorm, profileId]);
-
-  const load = useCallback(async () => {
+  async function load() {
     setLoading(true);
     setErr('');
-    setUnsupported(false);
-
     try {
       const { data, error } = await supabase
         .from('posts')
-        .select('id, profile_id, body, created_at')
+        .select(
+          `
+          id,
+          profile_id,
+          body,
+          created_at,
+          profiles:profiles!inner ( display_name )
+        `
+        )
         .eq('profile_id', profileId)
-        .order('created_at', { ascending: false })
-        .limit(50);
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setPosts((data || []) as PostRow[]);
+      setPosts((data as unknown as PostRow[]) ?? []);
     } catch (e: any) {
-      const msg = typeof e?.message === 'string' ? e.message : '';
-      if (msg.toLowerCase().includes('does not exist')) {
-        // Table not present in some envs — don’t break the page.
-        setUnsupported(true);
-        setPosts([]);
-      } else {
-        setErr(msg || 'Failed to load feed.');
-        setPosts([]);
-      }
+      setErr(e?.message ?? 'Failed to load posts.');
+      setPosts([]);
     } finally {
       setLoading(false);
     }
-  }, [profileId]);
+  }
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileId]);
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-lg font-semibold">Posts</h2>
+    <div className="space-y-3">
+      {loading && <p className="text-sm text-gray-600">Loading…</p>}
+      {err && <p className="text-sm text-amber-700">{err}</p>}
+      {!loading && posts.length === 0 && <p className="text-sm text-gray-600">No posts yet.</p>}
 
-      {unsupported && (
-        <div className="rounded border p-3 text-sm text-gray-600">Feed coming soon.</div>
-      )}
-
-      {!unsupported && canCompose && (
-        <PostComposer
-          onPost={async (text) => {
-            const { data, error } = await supabase
-              .from('posts')
-              .insert({ profile_id: profileId, body: text.trim() })
-              .select('id, profile_id, body, created_at')
-              .single();
-            if (error) throw error;
-            setPosts((prev) => [data as PostRow, ...prev]);
-          }}
+      {posts.map((p) => (
+        <PostItem
+          key={p.id}
+          post={p}
+          onDeleted={() => setPosts((prev) => prev.filter((x) => x.id !== p.id))}
         />
-      )}
-
-      {!unsupported && (
-        <>
-          {loading ? (
-            <p className="text-sm text-gray-600">Loading…</p>
-          ) : err ? (
-            <p className="text-sm text-amber-700">{err}</p>
-          ) : posts.length === 0 ? (
-            <p className="text-sm text-gray-600">No posts yet.</p>
-          ) : (
-            <ul className="space-y-3">
-              {posts.map((p) => (
-                <li key={p.id}>
-                  <PostItem
-                    post={p}
-                    me={meNorm}
-                    onDeleted={() => setPosts((prev) => prev.filter((x) => x.id !== p.id))}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
-    </section>
+      ))}
+    </div>
   );
 }
