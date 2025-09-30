@@ -3,7 +3,13 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-export default function AskWindowUsage({ profileId }: { profileId: string }) {
+export default function AskWindowUsage({
+  profileId,
+  refreshToken = 0, // bump this number to force a refetch
+}: {
+  profileId: string;
+  refreshToken?: number;
+}) {
   const [count, setCount] = useState<number | null>(null);
   const [err, setErr] = useState('');
 
@@ -23,12 +29,15 @@ export default function AskWindowUsage({ profileId }: { profileId: string }) {
 
   useEffect(() => {
     load();
-  }, [profileId]);
-
-  // expose a way to refetch after a reset
-  (AskWindowUsage as any)._reload = load;
+    // we intentionally only depend on profileId + refreshToken
+  }, [profileId, refreshToken]);
 
   if (err) return <span className="text-xs text-red-600">window err</span>;
   if (count === null) return <span className="text-xs text-gray-500">…</span>;
-  return <span className="text-xs text-gray-700">Asks used (30d): <b>{count}/3</b></span>;
+
+  return (
+    <span className="text-xs text-gray-700">
+      Asks used (30d): <b>{count}/3</b>
+    </span>
+  );
 }
