@@ -7,9 +7,9 @@ import { supabase } from '@/lib/supabaseClient';
 /* ---------- Types ---------- */
 type PostRow = {
   id: string;
-  profile_id: string;
-  body: string;
-  images: string[]; // text[]
+  profile_id: string; // post owner
+  body: string | null;
+  images?: string[] | null;
   created_at: string;
   profiles?: { display_name: string | null } | null;
 };
@@ -18,20 +18,13 @@ type CommentRow = {
   id: string;
   post_id: string;
   profile_id: string;
-  body: string;
-  images: string[];
+  body: string | null;
+  images?: string[] | null;
   created_at: string;
   profiles?: { display_name: string | null } | null;
 };
 
-/* ---------- Utils ---------- */
-function dedupeById<T extends { id: string }>(arr: T[]): T[] {
-  const map = new Map<string, T>();
-  for (const x of arr) map.set(x.id, x);
-  return Array.from(map.values());
-}
-
-/* ---------- Simple Kebab Menu + Confirm ---------- */
+/* ---------- Small UI helpers ---------- */
 function Kebab({
   items,
   onClose,
@@ -89,6 +82,15 @@ function ConfirmInline({
   );
 }
 
+/* ---------- Utils ---------- */
+function normalizeProfile<T extends { profiles?: any }>(row: T) {
+  const p = row.profiles;
+  return {
+    ...row,
+    profiles: Array.isArray(p) ? (p[0] ?? null) : p ?? null,
+  };
+}
+
 /* ---------- Component ---------- */
 export default function PostItem({
   post,
@@ -97,197 +99,159 @@ export default function PostItem({
 }: {
   post: PostRow;
   me: string | null;
-  onDeleted?: () => void;
+  onDeleted: () => void;
 }) {
-  const [comments, setComments] = useState<CommentRow[]>([]);
-  const [commentCount, setCommentCount] = useState<number>(0); // <— live count
-  const [open, setOpen] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  // post-level menu & confirm state
   const [menuOpen, setMenuOpen] = useState(false);
-  const [confirmDeletePost, setConfirmDeletePost] = useState(false);
-  const [deletingPost, setDeletingPost] = useState(false);
 
-  const listChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-  const countChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [comments, setComments] = useState<CommentRow[]>([]);
+  const [commentText, setCommentText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
 
-  // Track IDs we've already inserted optimistically to avoid double-increment
-  const optimisticIdsRef = useRef<Set<string>>(new Set());
+  // comment images
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  /* ---------- 1) Load initial count ---------- */
+  // accurate count regardless of whether comments are loaded
+  const [commentCount, setCommentCount] = useState<number>(0);
+
   useEffect(() => {
-    let cancelled = false;
+    // initial count
     (async () => {
       const { count, error } = await supabase
         .from('post_comments')
-        .select('id', { count: 'exact', head: true })
+        .select('id', { head: true, count: 'exact' })
         .eq('post_id', post.id);
-
-      if (!cancelled) {
-        if (error) setErr(error.message);
-        setCommentCount(count ?? 0);
-      }
+      if (!error) setCommentCount(count || 0);
     })();
-    return () => {
-      cancelled = true;
-    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [post.id]);
 
-  /* ---------- 2) Realtime count updates (always on) ---------- */
-  useEffect(() => {
-    // Clean any existing channel
-    if (countChannelRef.current) {
-      supabase.removeChannel(countChannelRef.current);
-      countChannelRef.current = null;
-    }
+  async function toggleComments() {
+    const open = !commentsOpen;
+    setCommentsOpen(open);
+    setErr('');
 
-    const ch = supabase
-      .channel(`post_comments_count:${post.id}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'post_comments', filter: `post_id=eq.${post.id}` },
-        (payload) => {
-          const id = (payload.new as any)?.id as string | undefined;
-          // Skip if we already optimistically added this id
-          if (id && optimisticIdsRef.current.has(id)) return;
-          setCommentCount((n) => n + 1);
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'post_comments', filter: `post_id=eq.${post.id}` },
-        (payload) => {
-          const id = (payload.old as any)?.id as string | undefined;
-          if (id && optimisticIdsRef.current.has(id)) {
-            // If we optimistically added it earlier, also remove it from the set
-            optimisticIdsRef.current.delete(id);
-          }
-          setCommentCount((n) => Math.max(0, n - 1));
-        }
-      )
-      .subscribe();
-
-    countChannelRef.current = ch;
-
-    return () => {
-      if (countChannelRef.current) {
-        supabase.removeChannel(countChannelRef.current);
-        countChannelRef.current = null;
-      }
-    };
-  }, [post.id]);
-
-  /* ---------- 3) Load + realtime list when open ---------- */
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-
-    (async () => {
+    if (open && comments.length === 0) {
       const { data, error } = await supabase
         .from('post_comments')
-        .select(`
-          id, post_id, profile_id, body, images, created_at,
-          profiles:profiles!post_comments_profile_id_fkey(display_name)
-        `)
+        .select('id, post_id, profile_id, body, created_at, images, profiles(display_name)')
         .eq('post_id', post.id)
         .order('created_at', { ascending: true })
         .limit(200);
 
       if (error) {
-        if (!cancelled) setErr(error.message);
-        return;
-      }
-
-      if (!cancelled) {
-        const normalized = (data ?? []).map((c: any): CommentRow => ({
-          id: c.id,
-          post_id: c.post_id,
-          profile_id: c.profile_id,
-          body: c.body ?? '',
-          images: (c.images ?? []) as string[],
-          created_at: c.created_at,
-          profiles:
-            c.profiles && !Array.isArray(c.profiles)
-              ? { display_name: c.profiles.display_name ?? null }
-              : { display_name: null },
-        }));
+        setErr(error.message);
+      } else {
+        const normalized: CommentRow[] = (data || []).map((r: any) => normalizeProfile(r));
         setComments(normalized);
-        setCommentCount(normalized.length); // keep count in sync
       }
-    })();
-
-    // live list for this post while open
-    if (listChannelRef.current) {
-      supabase.removeChannel(listChannelRef.current);
-      listChannelRef.current = null;
     }
+  }
 
-    const ch = supabase
-      .channel(`post_comments_list:${post.id}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'post_comments', filter: `post_id=eq.${post.id}` },
-        (payload) => {
-          const c: any = payload.new;
-          const incoming: CommentRow = {
-            id: c.id,
-            post_id: c.post_id,
-            profile_id: c.profile_id,
-            body: c.body ?? '',
-            images: (c.images ?? []) as string[],
-            created_at: c.created_at,
-            profiles: { display_name: null },
-          };
-          setComments((prev) => dedupeById([...prev, incoming]));
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'post_comments', filter: `post_id=eq.${post.id}` },
-        (payload) => {
-          const delId = (payload.old as any)?.id as string | undefined;
-          if (delId) setComments((prev) => prev.filter((c) => c.id !== delId));
-        }
-      )
-      .subscribe();
+  async function deletePost() {
+    if (!confirm('Delete this post?')) return;
+    const { error } = await supabase.from('posts').delete().eq('id', post.id);
+    if (!error) onDeleted();
+  }
 
-    listChannelRef.current = ch;
+  // ----- comment uploads -----
+  function onCommentPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const items = Array.from(e.clipboardData?.items || []);
+    const imgs = items
+      .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+      .map((it) => it.getAsFile())
+      .filter(Boolean) as File[];
+    if (!imgs.length) return;
+    const next = [...files, ...imgs].slice(0, 6);
+    setFiles(next);
+    setPreviews((prev) => [...prev, ...imgs.map((x) => URL.createObjectURL(x))].slice(0, 6));
+  }
 
-    return () => {
-      if (listChannelRef.current) {
-        supabase.removeChannel(listChannelRef.current);
-        listChannelRef.current = null;
-      }
-      cancelled = true;
-    };
-  }, [open, post.id]);
+  function onCommentFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = Array.from(e.currentTarget.files || []);
+    const next = [...files, ...f].slice(0, 6);
+    setFiles(next);
+    setPreviews((prev) => [...prev, ...f.map((x) => URL.createObjectURL(x))].slice(0, 6));
+    e.currentTarget.value = '';
+  }
 
-  // Delete post flow with confirm
-  async function reallyDeletePost() {
-    try {
-      setDeletingPost(true);
-      const { error } = await supabase.from('posts').delete().eq('id', post.id);
+  async function uploadAllImages(userId: string, imgs: File[]): Promise<string[]> {
+    if (!imgs.length) return [];
+    const bucket = supabase.storage.from('post-media');
+    const urls: string[] = [];
+    for (const f of imgs) {
+      const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}_${f.name}`;
+      const { error } = await bucket.upload(path, f, {
+        cacheControl: '3600',
+        upsert: true,
+        contentType: f.type || 'image/*',
+      });
       if (error) throw error;
-      onDeleted?.();
+      const { data } = bucket.getPublicUrl(path);
+      urls.push(data.publicUrl);
+    }
+    return urls;
+  }
+
+  async function addComment() {
+    const body = commentText.trim();
+    if (!body && files.length === 0) return;
+    setBusy(true);
+    setErr('');
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth.user?.id;
+      if (!uid) throw new Error('Not signed in');
+
+      const imageUrls = await uploadAllImages(uid, files);
+
+      const { data, error } = await supabase
+        .from('post_comments')
+        .insert({
+          post_id: post.id,
+          profile_id: uid,
+          body: body || ' ', // allow image-only comments
+          images: imageUrls,
+        })
+        .select('id, post_id, profile_id, body, created_at, images, profiles(display_name)')
+        .single();
+
+      if (error) throw error;
+
+      const normalized = normalizeProfile(data);
+      setComments((prev) => [...prev, normalized as CommentRow]);
+      setCommentCount((c) => c + 1);
+      setCommentText('');
+      previews.forEach((u) => URL.revokeObjectURL(u));
+      setFiles([]);
+      setPreviews([]);
     } catch (e: any) {
-      setErr(e?.message ?? 'Failed to delete.');
+      setErr(e?.message ?? 'Could not comment.');
     } finally {
-      setDeletingPost(false);
-      setConfirmDeletePost(false);
-      setMenuOpen(false);
+      setBusy(false);
+    }
+  }
+
+  async function deleteComment(id: string) {
+    if (!confirm('Delete this comment?')) return;
+    const { error } = await supabase.from('post_comments').delete().eq('id', id);
+    if (!error) {
+      setComments((prev) => prev.filter((c) => c.id !== id));
+      setCommentCount((c) => Math.max(0, c - 1));
     }
   }
 
   return (
-    <article className="rounded border p-3 relative">
+    <article className="rounded border p-3">
       <header className="mb-2 text-sm text-gray-600 flex items-center justify-between">
         <div>
           <span className="font-medium">{post.profiles?.display_name ?? 'Someone'}</span>
           <span className="mx-1">•</span>
           <time dateTime={post.created_at}>{new Date(post.created_at).toLocaleString()}</time>
         </div>
-
         {me === post.profile_id && (
           <div className="relative">
             <button
@@ -299,7 +263,12 @@ export default function PostItem({
             </button>
             {menuOpen && (
               <Kebab
-                items={[{ label: 'Delete post', action: () => setConfirmDeletePost(true) }]}
+                items={[
+                  {
+                    label: 'Delete post',
+                    action: deletePost,
+                  },
+                ]}
                 onClose={() => setMenuOpen(false)}
               />
             )}
@@ -318,44 +287,88 @@ export default function PostItem({
         </div>
       ) : null}
 
-      {confirmDeletePost && (
-        <ConfirmInline
-          text="Delete this post? This can’t be undone."
-          onConfirm={reallyDeletePost}
-          onCancel={() => setConfirmDeletePost(false)}
-          busy={deletingPost}
-        />
-      )}
-
-      <button className="mt-2 text-sm underline" onClick={() => setOpen((v) => !v)}>
-        {open ? 'Hide comments' : `Show comments (${commentCount})`}
+      <button className="text-sm underline" onClick={toggleComments}>
+        {commentsOpen ? `Hide comments (${commentCount})` : `Show comments (${commentCount})`}
       </button>
 
-      {open && (
+      {commentsOpen && (
         <>
-          <CommentComposer
-            postId={post.id}
-            onAdd={(c) => {
-              optimisticIdsRef.current.add(c.id);
-              setComments((prev) => dedupeById([...prev, c]));
-              setCommentCount((n) => n + 1);
-            }}
-            me={me}
-          />
-
+          {/* composer */}
           <div className="mt-2 space-y-2">
+            <div className="flex items-start gap-2">
+              <textarea
+                className="flex-1 rounded border p-2"
+                rows={2}
+                placeholder="Write a comment…"
+                value={commentText}
+                disabled={busy}
+                onChange={(e) => setCommentText(e.target.value)}
+                onPaste={onCommentPaste}
+              />
+              <div className="flex flex-col gap-2 items-end">
+                <label className="inline-flex items-center gap-2">
+                  <span className="px-2 py-1 border rounded cursor-pointer">Add image</span>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    multiple
+                    onChange={onCommentFiles}
+                  />
+                </label>
+                <button
+                  className="px-3 py-1 rounded bg-black text-white disabled:opacity-60"
+                  disabled={busy}
+                  onClick={addComment}
+                >
+                  {busy ? 'Posting…' : 'Post'}
+                </button>
+              </div>
+            </div>
+
+            {previews.length > 0 && (
+              <div className="flex gap-2 flex-wrap">
+                {previews.map((src) => (
+                  <div key={src} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={src} alt="" className="h-16 w-24 object-cover rounded" />
+                    <button
+                      type="button"
+                      className="absolute -top-2 -right-2 text-xs bg-black/70 text-white rounded-full px-1"
+                      onClick={() => {
+                        setPreviews((prev) => prev.filter((x) => x !== src));
+                        setFiles((prev) => prev.filter((_, i) => previews[i] !== src));
+                      }}
+                      aria-label="Remove image"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="text-xs text-gray-500">
+              Enter = Post • Shift+Enter = newline • Up to 6 images
+            </div>
+            {err && <p className="text-sm text-red-600">{err}</p>}
+          </div>
+
+          {/* list */}
+          <div className="mt-3 space-y-2">
             {comments.map((c) => (
               <CommentItem
                 key={c.id}
                 comment={c}
                 me={me}
+                ownerId={post.profile_id} // <— allow post owner to manage
                 onDeleted={() => {
                   setComments((prev) => prev.filter((x) => x.id !== c.id));
                   setCommentCount((n) => Math.max(0, n - 1));
                 }}
               />
             ))}
-            {err && <p className="text-sm text-amber-700">{err}</p>}
           </div>
         </>
       )}
@@ -367,16 +380,20 @@ export default function PostItem({
 function CommentItem({
   comment,
   me,
+  ownerId,
   onDeleted,
 }: {
   comment: CommentRow;
   me: string | null;
+  ownerId: string; // <— new
   onDeleted: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const canDelete = !!me && (me === comment.profile_id || me === ownerId);
 
   async function reallyDelete() {
     try {
@@ -404,7 +421,7 @@ function CommentItem({
           </time>
         </div>
 
-        {me === comment.profile_id && (
+        {canDelete && (
           <div className="relative">
             <button
               className="px-2 py-1 text-sm border rounded"
@@ -415,7 +432,12 @@ function CommentItem({
             </button>
             {menuOpen && (
               <Kebab
-                items={[{ label: 'Delete comment', action: () => setConfirmDel(true) }]}
+                items={[
+                  {
+                    label: 'Delete comment',
+                    action: () => setConfirmDel(true),
+                  },
+                ]}
                 onClose={() => setMenuOpen(false)}
               />
             )}
@@ -442,136 +464,7 @@ function CommentItem({
           busy={busy}
         />
       )}
-      {err && <p className="mt-1 text-sm text-amber-700">{err}</p>}
-    </div>
-  );
-}
-
-/* ---------- Comment Composer ---------- */
-function CommentComposer({
-  postId,
-  me,
-  onAdd,
-}: {
-  postId: string;
-  me: string | null;
-  onAdd: (c: CommentRow) => void;
-}) {
-  const [text, setText] = useState('');
-  const [images, setImages] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function upload(files: FileList) {
-    const next: string[] = [];
-    const owner = me ?? 'anon';
-    for (const f of Array.from(files)) {
-      const key = `${owner}/c-${Date.now()}-${f.name}`;
-      const { error } = await supabase.storage.from('post-media').upload(key, f);
-      if (error) throw error;
-      const { data: pub } = supabase.storage.from('post-media').getPublicUrl(key);
-      next.push(pub.publicUrl);
-    }
-    setImages((p) => [...p, ...next].slice(0, 6));
-  }
-
-  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      submit();
-    }
-  }
-
-  async function submit() {
-    if (busy || !me) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      const bodyClean = text.trim() ? text : '';
-
-      const { data, error } = await supabase
-        .from('post_comments')
-        .insert({
-          post_id: postId,
-          profile_id: me,
-          body: bodyClean, // never null
-          images,
-        })
-        .select(`
-          id, post_id, profile_id, body, images, created_at,
-          profiles:profiles!post_comments_profile_id_fkey(display_name)
-        `)
-        .single();
-
-      if (error) throw error;
-
-      const c: CommentRow = {
-        id: data.id,
-        post_id: data.post_id,
-        profile_id: data.profile_id,
-        body: data.body ?? '',
-        images: (data.images ?? []) as string[],
-        created_at: data.created_at,
-        profiles:
-          data.profiles && !Array.isArray(data.profiles)
-            ? { display_name: (data.profiles as { display_name: string | null }).display_name ?? null }
-            : { display_name: null },
-      };
-
-      onAdd(c); // optimistic add + local count bump (parent guards against double increment)
-      setText('');
-      setImages([]);
-    } catch (e: any) {
-      setErr(e?.message ?? 'Failed to comment.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="mt-2 space-y-2">
-      <div className="flex items-start gap-2">
-        <textarea
-          className="flex-1 rounded border p-2"
-          rows={2}
-          placeholder="Write a comment…"
-          value={text}
-          disabled={busy}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-        />
-        <div className="flex flex-col gap-2 items-end">
-          <label className="inline-flex items-center gap-2">
-            <span className="px-2 py-1 border rounded cursor-pointer">Add image</span>
-            <input type="file" accept="image/*" hidden onChange={(e) => e.target.files && upload(e.target.files)} />
-          </label>
-          <button className="px-3 py-1 rounded bg-black text-white disabled:opacity-60" disabled={busy} onClick={submit}>
-            {busy ? 'Posting…' : 'Post'}
-          </button>
-        </div>
-      </div>
-
-      {images.length > 0 && (
-        <div className="flex gap-2 flex-wrap">
-          {images.map((src) => (
-            <div key={src} className="relative">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={src} alt="" className="h-16 w-24 object-cover rounded" />
-              <button
-                type="button"
-                className="absolute -top-2 -right-2 text-xs bg-black/70 text-white rounded-full px-1"
-                onClick={() => setImages((prev) => prev.filter((x) => x !== src))}
-                aria-label="Remove image"
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="text-xs text-gray-500">Enter = Post • Shift+Enter = newline • Up to 6 images</div>
-      {err && <p className="text-sm text-red-600">{err}</p>}
+      {err && <p className="mt-1 text-sm text-red-600">{err}</p>}
     </div>
   );
 }
