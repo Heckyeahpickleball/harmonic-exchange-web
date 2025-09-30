@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
 
 /* ---------- Types ---------- */
@@ -33,11 +34,11 @@ function Kebab({
   onClose: () => void;
 }) {
   return (
-    <div className="absolute right-0 mt-1 w-36 rounded border bg-white shadow z-10">
+    <div className="absolute right-0 z-10 mt-1 w-36 rounded border bg-white shadow">
       {items.map((it, i) => (
         <button
           key={i}
-          className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+          className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
           onClick={() => {
             it.action();
             onClose();
@@ -50,7 +51,7 @@ function Kebab({
   );
 }
 
-/* ---------- Accessible inline confirm dialog (replacement) ---------- */
+/* ---------- Accessible inline confirm dialog ---------- */
 function ConfirmInline({
   text,
   confirmLabel = 'Delete',
@@ -72,14 +73,9 @@ function ConfirmInline({
 
   useEffect(() => {
     lastFocusedRef.current = (document.activeElement as HTMLElement) ?? null;
-
-    const t = setTimeout(() => {
-      confirmBtnRef.current?.focus();
-    }, 0);
-
+    const t = setTimeout(() => confirmBtnRef.current?.focus(), 0);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-
     return () => {
       clearTimeout(t);
       document.body.style.overflow = prevOverflow;
@@ -191,20 +187,17 @@ export default function PostItem({
         .eq('post_id', post.id);
       if (!error) setCommentCount(count || 0);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [post.id]);
 
   // subscribe to realtime when thread opens
   useEffect(() => {
     if (!commentsOpen) {
-      // tear down any previous channel when closed
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
       return;
     }
-    // create channel
     const ch = supabase
       .channel(`post_comments:${post.id}`)
       .on(
@@ -243,7 +236,6 @@ export default function PostItem({
       if (ch) supabase.removeChannel(ch);
       channelRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commentsOpen, post.id]);
 
   async function toggleComments() {
@@ -376,7 +368,7 @@ export default function PostItem({
 
   return (
     <article className="rounded border p-3">
-      <header className="mb-2 text-sm text-gray-600 flex items-center justify-between">
+      <header className="mb-2 flex items-center justify-between text-sm text-gray-600">
         <div>
           <span className="font-medium">{post.profiles?.display_name ?? 'Someone'}</span>
           <span className="mx-1">•</span>
@@ -385,7 +377,7 @@ export default function PostItem({
         {me === post.profile_id && (
           <div className="relative">
             <button
-              className="px-2 py-1 text-sm border rounded"
+              className="rounded border px-2 py-1 text-sm"
               aria-label="More actions"
               onClick={() => setMenuOpen((v) => !v)}
             >
@@ -409,15 +401,18 @@ export default function PostItem({
       {post.body && <p className="mb-2 whitespace-pre-wrap">{post.body}</p>}
 
       {post.images?.length ? (
-        <div className="mb-2 space-y-2">
+        <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
           {post.images.map((src) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={src}
-              src={src}
-              alt={post.body ? `Post image: ${post.body.slice(0, 80)}` : 'Post image'}
-              className="rounded w-full object-cover"
-            />
+            <div key={src} className="relative h-48 w-full overflow-hidden rounded">
+              <Image
+                src={src}
+                alt={post.body ? `Post image: ${post.body.slice(0, 80)}` : 'Post image'}
+                fill
+                className="object-cover"
+                sizes="(max-width: 640px) 100vw, 50vw"
+                priority={false}
+              />
+            </div>
           ))}
         </div>
       ) : null}
@@ -441,9 +436,9 @@ export default function PostItem({
                 onPaste={onCommentPaste}
                 onKeyDown={onComposerKeyDown}
               />
-              <div className="flex flex-col gap-2 items-end">
+              <div className="flex flex-col items-end gap-2">
                 <label className="inline-flex items-center gap-2">
-                  <span className="px-2 py-1 border rounded cursor-pointer">Add image</span>
+                  <span className="cursor-pointer rounded border px-2 py-1">Add image</span>
                   <input
                     ref={fileRef}
                     type="file"
@@ -454,7 +449,7 @@ export default function PostItem({
                   />
                 </label>
                 <button
-                  className="px-3 py-1 rounded bg-black text-white disabled:opacity-60"
+                  className="rounded bg-black px-3 py-1 text-white disabled:opacity-60"
                   disabled={busy}
                   onClick={addComment}
                 >
@@ -464,18 +459,17 @@ export default function PostItem({
             </div>
 
             {previews.length > 0 && (
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex flex-wrap gap-2">
                 {previews.map((src, idx) => (
                   <div key={src} className="relative">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={src} alt="" className="h-16 w-24 object-cover rounded" />
+                    {/* Using <img> for local blob previews is simplest and fast */}
+                    <img src={src} alt="" className="h-16 w-24 rounded object-cover" />
                     <button
                       type="button"
-                      className="absolute -top-2 -right-2 text-xs bg-black/70 text-white rounded-full px-1"
+                      className="absolute -right-2 -top-2 rounded-full bg-black/70 px-1 text-xs text-white"
                       onClick={() => {
                         URL.revokeObjectURL(src);
                         setPreviews((prev) => prev.filter((x) => x !== src));
-                        // remove corresponding File by index mapping
                         setFiles((prev) => prev.filter((_, i) => i !== idx));
                       }}
                       aria-label="Remove image"
@@ -500,7 +494,7 @@ export default function PostItem({
                 key={c.id}
                 comment={c}
                 me={me}
-                ownerId={post.profile_id} // <— allow post owner to manage
+                ownerId={post.profile_id}
                 onDeleted={() => {
                   setComments((prev) => prev.filter((x) => x.id !== c.id));
                   setCommentCount((n) => Math.max(0, n - 1));
@@ -524,7 +518,7 @@ function CommentItem({
 }: {
   comment: CommentRow;
   me: string | null;
-  ownerId: string; // <— new
+  ownerId: string;
   onDeleted: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -550,8 +544,8 @@ function CommentItem({
   }
 
   return (
-    <div className="rounded border p-2 relative">
-      <div className="text-xs text-gray-600 mb-1 flex items-center justify-between">
+    <div className="relative rounded border p-2">
+      <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
         <div>
           <span className="font-medium">{comment.profiles?.display_name ?? 'Someone'}</span>
           <span className="mx-1">•</span>
@@ -563,7 +557,7 @@ function CommentItem({
         {canDelete && (
           <div className="relative">
             <button
-              className="px-2 py-1 text-sm border rounded"
+              className="rounded border px-2 py-1 text-sm"
               aria-label="More actions"
               onClick={() => setMenuOpen((v) => !v)}
             >
@@ -587,10 +581,11 @@ function CommentItem({
       {comment.body && <p className="whitespace-pre-wrap">{comment.body}</p>}
 
       {comment.images?.length ? (
-        <div className="mt-2 space-y-2">
+        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
           {comment.images.map((src) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img key={src} src={src} alt="" className="rounded w-full object-cover" />
+            <div key={src} className="relative h-40 w-full overflow-hidden rounded">
+              <Image src={src} alt="" fill className="object-cover" sizes="(max-width: 640px) 100vw, 50vw" />
+            </div>
           ))}
         </div>
       ) : null}
