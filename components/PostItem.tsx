@@ -4,12 +4,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-// ---------- Types ----------
+/* ---------- Types ---------- */
 type PostRow = {
   id: string;
   profile_id: string;
   body: string;
-  images: string[];
+  images: string[]; // text[]
   created_at: string;
   profiles?: { display_name: string | null } | null;
 };
@@ -19,19 +19,77 @@ type CommentRow = {
   post_id: string;
   profile_id: string;
   body: string;
-  images: string[]; // text[]
+  images: string[];
   created_at: string;
   profiles?: { display_name: string | null } | null;
 };
 
-// Small helper: return a new array with unique ids (latest wins)
+/* ---------- Utils ---------- */
 function dedupeById<T extends { id: string }>(arr: T[]): T[] {
   const map = new Map<string, T>();
   for (const x of arr) map.set(x.id, x);
   return Array.from(map.values());
 }
 
-// ---------- Post Item ----------
+/* ---------- Simple Kebab Menu + Confirm ---------- */
+function Kebab({
+  items,
+  onClose,
+}: {
+  items: Array<{ label: string; action: () => void }>;
+  onClose: () => void;
+}) {
+  return (
+    <div className="absolute right-0 mt-1 w-36 rounded border bg-white shadow z-10">
+      {items.map((it, i) => (
+        <button
+          key={i}
+          className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+          onClick={() => {
+            it.action();
+            onClose();
+          }}
+        >
+          {it.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ConfirmInline({
+  text,
+  confirmLabel = 'Delete',
+  cancelLabel = 'Cancel',
+  onConfirm,
+  onCancel,
+  busy,
+}: {
+  text: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  busy?: boolean;
+}) {
+  return (
+    <div className="mt-2 flex items-center gap-2 text-sm">
+      <span>{text}</span>
+      <button
+        className="px-2 py-1 rounded bg-red-600 text-white disabled:opacity-60"
+        onClick={onConfirm}
+        disabled={busy}
+      >
+        {busy ? 'Working…' : confirmLabel}
+      </button>
+      <button className="px-2 py-1 rounded border" onClick={onCancel} disabled={busy}>
+        {cancelLabel}
+      </button>
+    </div>
+  );
+}
+
+/* ---------- Component ---------- */
 export default function PostItem({
   post,
   me,
@@ -44,12 +102,17 @@ export default function PostItem({
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [open, setOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // post-level menu & confirm state
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmDeletePost, setConfirmDeletePost] = useState(false);
+  const [deletingPost, setDeletingPost] = useState(false);
+
   const chRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
-  // Load comments when the drawer is opened
+  // Load + realtime comments
   useEffect(() => {
     if (!open) return;
-
     let cancelled = false;
 
     (async () => {
@@ -63,7 +126,7 @@ export default function PostItem({
         .order('created_at', { ascending: true })
         .limit(200);
 
-    if (error) {
+      if (error) {
         if (!cancelled) setErr(error.message);
         return;
       }
@@ -85,17 +148,11 @@ export default function PostItem({
       }
     })();
 
-    // Realtime INSERTS for this post's comments
     const ch = supabase
       .channel(`post_comments:${post.id}`)
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'post_comments',
-          filter: `post_id=eq.${post.id}`,
-        },
+        { event: 'INSERT', schema: 'public', table: 'post_comments', filter: `post_id=eq.${post.id}` },
         (payload) => {
           const c: any = payload.new;
           const incoming: CommentRow = {
@@ -107,43 +164,75 @@ export default function PostItem({
             created_at: c.created_at,
             profiles: { display_name: null },
           };
-
-          // **DEDUPLICATE**: if the optimistic add already put this id in state,
-          // keep only one copy.
           setComments((prev) => dedupeById([...prev, incoming]));
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'post_comments', filter: `post_id=eq.${post.id}` },
+        (payload) => {
+          const delId = (payload.old as any)?.id as string | undefined;
+          if (delId) setComments((prev) => prev.filter((c) => c.id !== delId));
         }
       )
       .subscribe();
 
     chRef.current = ch;
-
     return () => {
-      cancelled = true;
       if (chRef.current) {
         supabase.removeChannel(chRef.current);
         chRef.current = null;
       }
+      cancelled = true;
     };
   }, [open, post.id]);
 
-  async function deletePost() {
-    if (!confirm('Delete this post?')) return;
-    const { error } = await supabase.from('posts').delete().eq('id', post.id);
-    if (!error) onDeleted?.();
+  // Delete post flow with confirm
+  async function reallyDeletePost() {
+    try {
+      setDeletingPost(true);
+      const { error } = await supabase.from('posts').delete().eq('id', post.id);
+      if (error) throw error;
+      onDeleted?.();
+    } catch (e: any) {
+      setErr(e?.message ?? 'Failed to delete.');
+    } finally {
+      setDeletingPost(false);
+      setConfirmDeletePost(false);
+      setMenuOpen(false);
+    }
   }
 
   return (
-    <article className="rounded border p-3">
+    <article className="rounded border p-3 relative">
       <header className="mb-2 text-sm text-gray-600 flex items-center justify-between">
         <div>
           <span className="font-medium">{post.profiles?.display_name ?? 'Someone'}</span>
           <span className="mx-1">•</span>
           <time dateTime={post.created_at}>{new Date(post.created_at).toLocaleString()}</time>
         </div>
+
         {me === post.profile_id && (
-          <button className="px-2 py-1 text-sm border rounded" onClick={deletePost} aria-label="More">
-            …
-          </button>
+          <div className="relative">
+            <button
+              className="px-2 py-1 text-sm border rounded"
+              aria-label="Options"
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              …
+            </button>
+            {menuOpen && (
+              <Kebab
+                items={[
+                  {
+                    label: 'Delete post',
+                    action: () => setConfirmDeletePost(true),
+                  },
+                ]}
+                onClose={() => setMenuOpen(false)}
+              />
+            )}
+          </div>
         )}
       </header>
 
@@ -158,7 +247,16 @@ export default function PostItem({
         </div>
       ) : null}
 
-      <button className="text-sm underline" onClick={() => setOpen((v) => !v)}>
+      {confirmDeletePost && (
+        <ConfirmInline
+          text="Delete this post? This can’t be undone."
+          onConfirm={reallyDeletePost}
+          onCancel={() => setConfirmDeletePost(false)}
+          busy={deletingPost}
+        />
+      )}
+
+      <button className="mt-2 text-sm underline" onClick={() => setOpen((v) => !v)}>
         {open ? 'Hide comments' : `Show comments (${comments.length})`}
       </button>
 
@@ -166,31 +264,18 @@ export default function PostItem({
         <>
           <CommentComposer
             postId={post.id}
-            onAdd={(c) =>
-              // **DEDUPLICATE** the optimistic add vs realtime echo
-              setComments((prev) => dedupeById([...prev, c]))
-            }
+            onAdd={(c) => setComments((prev) => dedupeById([...prev, c]))}
             me={me}
           />
 
           <div className="mt-2 space-y-2">
             {comments.map((c) => (
-              <div key={c.id} className="rounded border p-2">
-                <div className="text-xs text-gray-600 mb-1">
-                  <span className="font-medium">{c.profiles?.display_name ?? 'Someone'}</span>
-                  <span className="mx-1">•</span>
-                  <time dateTime={c.created_at}>{new Date(c.created_at).toLocaleString()}</time>
-                </div>
-                {c.body && <p className="whitespace-pre-wrap">{c.body}</p>}
-                {c.images?.length ? (
-                  <div className="mt-2 space-y-2">
-                    {c.images.map((src) => (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img key={src} src={src} alt="" className="rounded w-full object-cover" />
-                    ))}
-                  </div>
-                ) : null}
-              </div>
+              <CommentItem
+                key={c.id}
+                comment={c}
+                me={me}
+                onDeleted={() => setComments((prev) => prev.filter((x) => x.id !== c.id))}
+              />
             ))}
             {err && <p className="text-sm text-amber-700">{err}</p>}
           </div>
@@ -200,7 +285,96 @@ export default function PostItem({
   );
 }
 
-// ---------- Comment Composer ----------
+/* ---------- Single Comment with kebab + confirm ---------- */
+function CommentItem({
+  comment,
+  me,
+  onDeleted,
+}: {
+  comment: CommentRow;
+  me: string | null;
+  onDeleted: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function reallyDelete() {
+    try {
+      setBusy(true);
+      const { error } = await supabase.from('post_comments').delete().eq('id', comment.id);
+      if (error) throw error;
+      onDeleted();
+    } catch (e: any) {
+      setErr(e?.message ?? 'Failed to delete comment.');
+    } finally {
+      setBusy(false);
+      setConfirmDel(false);
+      setMenuOpen(false);
+    }
+  }
+
+  return (
+    <div className="rounded border p-2 relative">
+      <div className="text-xs text-gray-600 mb-1 flex items-center justify-between">
+        <div>
+          <span className="font-medium">{comment.profiles?.display_name ?? 'Someone'}</span>
+          <span className="mx-1">•</span>
+          <time dateTime={comment.created_at}>
+            {new Date(comment.created_at).toLocaleString()}
+          </time>
+        </div>
+
+        {me === comment.profile_id && (
+          <div className="relative">
+            <button
+              className="px-2 py-1 text-sm border rounded"
+              aria-label="Options"
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              …
+            </button>
+            {menuOpen && (
+              <Kebab
+                items={[
+                  {
+                    label: 'Delete comment',
+                    action: () => setConfirmDel(true),
+                  },
+                ]}
+                onClose={() => setMenuOpen(false)}
+              />
+            )}
+          </div>
+        )}
+      </div>
+
+      {comment.body && <p className="whitespace-pre-wrap">{comment.body}</p>}
+
+      {comment.images?.length ? (
+        <div className="mt-2 space-y-2">
+          {comment.images.map((src) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img key={src} src={src} alt="" className="rounded w-full object-cover" />
+          ))}
+        </div>
+      ) : null}
+
+      {confirmDel && (
+        <ConfirmInline
+          text="Delete this comment? This can’t be undone."
+          onConfirm={reallyDelete}
+          onCancel={() => setConfirmDel(false)}
+          busy={busy}
+        />
+      )}
+      {err && <p className="mt-1 text-sm text-amber-700">{err}</p>}
+    </div>
+  );
+}
+
+/* ---------- Comment Composer ---------- */
 function CommentComposer({
   postId,
   me,
@@ -248,7 +422,7 @@ function CommentComposer({
           post_id: postId,
           profile_id: me,
           body: bodyClean, // never null
-          images,          // text[]
+          images,
         })
         .select(`
           id, post_id, profile_id, body, images, created_at,
@@ -258,7 +432,6 @@ function CommentComposer({
 
       if (error) throw error;
 
-      // Optimistic add (will be de-duped when the realtime echo arrives)
       const c: CommentRow = {
         id: data.id,
         post_id: data.post_id,
@@ -272,6 +445,7 @@ function CommentComposer({
             : { display_name: null },
       };
 
+      // Optimistic add – deduped vs realtime echo
       onAdd(c);
       setText('');
       setImages([]);
@@ -299,11 +473,7 @@ function CommentComposer({
             <span className="px-2 py-1 border rounded cursor-pointer">Add image</span>
             <input type="file" accept="image/*" hidden onChange={(e) => e.target.files && upload(e.target.files)} />
           </label>
-          <button
-            className="px-3 py-1 rounded bg-black text-white disabled:opacity-60"
-            disabled={busy}
-            onClick={submit}
-          >
+          <button className="px-3 py-1 rounded bg-black text-white disabled:opacity-60" disabled={busy} onClick={submit}>
             {busy ? 'Posting…' : 'Post'}
           </button>
         </div>
@@ -328,9 +498,7 @@ function CommentComposer({
         </div>
       )}
 
-      <div className="text-xs text-gray-500">
-        Enter = Post • Shift+Enter = newline • Up to 6 images
-      </div>
+      <div className="text-xs text-gray-500">Enter = Post • Shift+Enter = newline • Up to 6 images</div>
       {err && <p className="text-sm text-red-600">{err}</p>}
     </div>
   );
