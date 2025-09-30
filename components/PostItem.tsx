@@ -50,6 +50,7 @@ function Kebab({
   );
 }
 
+/* ---------- Accessible inline confirm dialog (replacement) ---------- */
 function ConfirmInline({
   text,
   confirmLabel = 'Delete',
@@ -61,23 +62,79 @@ function ConfirmInline({
   text: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   onCancel: () => void;
   busy?: boolean;
 }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const lastFocusedRef = useRef<HTMLElement | null>(null);
+  const confirmBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    lastFocusedRef.current = (document.activeElement as HTMLElement) ?? null;
+
+    const t = setTimeout(() => {
+      confirmBtnRef.current?.focus();
+    }, 0);
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      clearTimeout(t);
+      document.body.style.overflow = prevOverflow;
+      lastFocusedRef.current?.focus?.();
+    };
+  }, []);
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      e.preventDefault();
+      if (!busy) onCancel();
+      return;
+    }
+    if (e.key === 'Enter') {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag !== 'TEXTAREA') {
+        e.preventDefault();
+        if (!busy) onConfirm();
+      }
+    }
+  }
+
   return (
-    <div className="mt-2 flex items-center gap-2 text-sm">
-      <span>{text}</span>
-      <button
-        className="px-2 py-1 rounded bg-red-600 text-white disabled:opacity-60"
-        onClick={onConfirm}
-        disabled={busy}
-      >
-        {busy ? 'Working…' : confirmLabel}
-      </button>
-      <button className="px-2 py-1 rounded border" onClick={onCancel} disabled={busy}>
-        {cancelLabel}
-      </button>
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+      className="mt-2 rounded-lg border border-gray-200 bg-white p-3 shadow-sm"
+      onKeyDown={onKeyDown}
+    >
+      <h3 id="confirm-title" className="mb-2 text-sm font-semibold">
+        Confirm delete
+      </h3>
+      <p className="mb-3 text-sm text-gray-700">{text}</p>
+      <div className="flex items-center gap-2">
+        <button
+          ref={confirmBtnRef}
+          type="button"
+          className="inline-flex items-center rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+          onClick={onConfirm}
+          disabled={!!busy}
+        >
+          {busy ? 'Working…' : confirmLabel}
+        </button>
+        <button
+          type="button"
+          className="inline-flex items-center rounded border px-3 py-1.5 text-sm font-medium disabled:opacity-60"
+          onClick={onCancel}
+          disabled={!!busy}
+        >
+          {cancelLabel}
+        </button>
+      </div>
     </div>
   );
 }
@@ -89,6 +146,10 @@ function normalizeProfile<T extends { profiles?: any }>(row: T) {
     ...row,
     profiles: Array.isArray(p) ? (p[0] ?? null) : p ?? null,
   };
+}
+
+function byCreatedAtAsc<A extends { created_at: string }>(a: A, b: A) {
+  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
 }
 
 /* ---------- Component ---------- */
@@ -117,6 +178,10 @@ export default function PostItem({
   // accurate count regardless of whether comments are loaded
   const [commentCount, setCommentCount] = useState<number>(0);
 
+  // realtime dedupe + subscription handle
+  const commentIdsRef = useRef<Set<string>>(new Set());
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+
   useEffect(() => {
     // initial count
     (async () => {
@@ -128,6 +193,58 @@ export default function PostItem({
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [post.id]);
+
+  // subscribe to realtime when thread opens
+  useEffect(() => {
+    if (!commentsOpen) {
+      // tear down any previous channel when closed
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      return;
+    }
+    // create channel
+    const ch = supabase
+      .channel(`post_comments:${post.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'post_comments',
+          filter: `post_id=eq.${post.id}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const row = normalizeProfile(payload.new as CommentRow) as CommentRow;
+            if (!commentIdsRef.current.has(row.id)) {
+              commentIdsRef.current.add(row.id);
+              setComments((prev) => [...prev, row].sort(byCreatedAtAsc));
+              setCommentCount((c) => c + 1);
+            }
+          } else if (payload.eventType === 'DELETE') {
+            const oldRow = payload.old as { id: string };
+            if (commentIdsRef.current.has(oldRow.id)) {
+              commentIdsRef.current.delete(oldRow.id);
+            }
+            setComments((prev) => prev.filter((c) => c.id !== oldRow.id));
+            setCommentCount((c) => Math.max(0, c - 1));
+          } else if (payload.eventType === 'UPDATE') {
+            const row = normalizeProfile(payload.new as CommentRow) as CommentRow;
+            setComments((prev) => prev.map((c) => (c.id === row.id ? row : c)));
+          }
+        }
+      )
+      .subscribe();
+
+    channelRef.current = ch;
+    return () => {
+      if (ch) supabase.removeChannel(ch);
+      channelRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commentsOpen, post.id]);
 
   async function toggleComments() {
     const open = !commentsOpen;
@@ -147,6 +264,7 @@ export default function PostItem({
       } else {
         const normalized: CommentRow[] = (data || []).map((r: any) => normalizeProfile(r));
         setComments(normalized);
+        commentIdsRef.current = new Set((normalized || []).map((r) => r.id));
       }
     }
   }
@@ -221,9 +339,12 @@ export default function PostItem({
 
       if (error) throw error;
 
-      const normalized = normalizeProfile(data);
-      setComments((prev) => [...prev, normalized as CommentRow]);
+      const normalized = normalizeProfile(data) as CommentRow;
+
+      // Optimistic add; do NOT add to commentIdsRef so realtime INSERT can also arrive
+      setComments((prev) => [...prev, normalized].sort(byCreatedAtAsc));
       setCommentCount((c) => c + 1);
+
       setCommentText('');
       previews.forEach((u) => URL.revokeObjectURL(u));
       setFiles([]);
@@ -241,6 +362,15 @@ export default function PostItem({
     if (!error) {
       setComments((prev) => prev.filter((c) => c.id !== id));
       setCommentCount((c) => Math.max(0, c - 1));
+      if (commentIdsRef.current.has(id)) commentIdsRef.current.delete(id);
+    }
+  }
+
+  // Enter = submit, Shift+Enter = newline
+  function onComposerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (!busy) addComment();
     }
   }
 
@@ -256,7 +386,7 @@ export default function PostItem({
           <div className="relative">
             <button
               className="px-2 py-1 text-sm border rounded"
-              aria-label="Options"
+              aria-label="More actions"
               onClick={() => setMenuOpen((v) => !v)}
             >
               …
@@ -282,7 +412,12 @@ export default function PostItem({
         <div className="mb-2 space-y-2">
           {post.images.map((src) => (
             // eslint-disable-next-line @next/next/no-img-element
-            <img key={src} src={src} alt="" className="rounded w-full object-cover" />
+            <img
+              key={src}
+              src={src}
+              alt={post.body ? `Post image: ${post.body.slice(0, 80)}` : 'Post image'}
+              className="rounded w-full object-cover"
+            />
           ))}
         </div>
       ) : null}
@@ -304,6 +439,7 @@ export default function PostItem({
                 disabled={busy}
                 onChange={(e) => setCommentText(e.target.value)}
                 onPaste={onCommentPaste}
+                onKeyDown={onComposerKeyDown}
               />
               <div className="flex flex-col gap-2 items-end">
                 <label className="inline-flex items-center gap-2">
@@ -329,7 +465,7 @@ export default function PostItem({
 
             {previews.length > 0 && (
               <div className="flex gap-2 flex-wrap">
-                {previews.map((src) => (
+                {previews.map((src, idx) => (
                   <div key={src} className="relative">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={src} alt="" className="h-16 w-24 object-cover rounded" />
@@ -337,8 +473,10 @@ export default function PostItem({
                       type="button"
                       className="absolute -top-2 -right-2 text-xs bg-black/70 text-white rounded-full px-1"
                       onClick={() => {
+                        URL.revokeObjectURL(src);
                         setPreviews((prev) => prev.filter((x) => x !== src));
-                        setFiles((prev) => prev.filter((_, i) => previews[i] !== src));
+                        // remove corresponding File by index mapping
+                        setFiles((prev) => prev.filter((_, i) => i !== idx));
                       }}
                       aria-label="Remove image"
                     >
@@ -366,6 +504,7 @@ export default function PostItem({
                 onDeleted={() => {
                   setComments((prev) => prev.filter((x) => x.id !== c.id));
                   setCommentCount((n) => Math.max(0, n - 1));
+                  if (commentIdsRef.current.has(c.id)) commentIdsRef.current.delete(c.id);
                 }}
               />
             ))}
@@ -425,7 +564,7 @@ function CommentItem({
           <div className="relative">
             <button
               className="px-2 py-1 text-sm border rounded"
-              aria-label="Options"
+              aria-label="More actions"
               onClick={() => setMenuOpen((v) => !v)}
             >
               …
