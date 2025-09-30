@@ -9,7 +9,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import ResetQuotaButton from '@/components/ResetQuotaButton'; // ➜ NEW
+import ResetQuotaButton from '@/components/ResetQuotaButton';
 import AskWindowUsage from '@/components/AskWindowUsage';
 
 type Role = 'user' | 'moderator' | 'admin';
@@ -44,7 +44,6 @@ type AdminAction = {
 };
 
 type EmailRow = { id: string; email: string | null; display_name?: string };
-
 type Tab = 'users' | 'offers' | 'audit';
 
 export default function Page() {
@@ -85,6 +84,18 @@ function FulfilledCount({ profileId }: { profileId: string }) {
   return <span className="text-xs text-gray-700">Fulfilled received: <b>{count}</b></span>;
 }
 
+/** Row-level wrapper so each user row can refresh its 30d usage after a reset */
+function RowAskControls({ profileId }: { profileId: string }) {
+  const [refreshToken, setRefreshToken] = useState(0);
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <FulfilledCount profileId={profileId} />
+      <AskWindowUsage profileId={profileId} refreshToken={refreshToken} />
+      <ResetQuotaButton profileId={profileId} onSuccess={() => setRefreshToken((n) => n + 1)} />
+    </div>
+  );
+}
+
 function AdminContent() {
   const sp = useSearchParams();
   const initialUrlTab = (sp.get('tab') as Tab | null) || null;
@@ -119,7 +130,6 @@ function AdminContent() {
       const uid = auth.user?.id;
       if (!uid) {
         setMe(null);
-        // force to users tab for safety
         if (tab !== 'users') setTab('users');
         return;
       }
@@ -131,7 +141,6 @@ function AdminContent() {
       const meRow = (data || null) as Profile | null;
       setMe(meRow);
 
-      // if a moderator tries to open ?tab=audit, snap back to users
       if (meRow && meRow.role !== 'admin' && (initialUrlTab === 'audit' || tab === 'audit')) {
         setTab('users');
       }
@@ -142,19 +151,16 @@ function AdminContent() {
   const isAdmin = me?.role === 'admin';
   const canViewAdmin = !!me && (me.role === 'admin' || me.role === 'moderator');
 
-  // client guard for user status changes
   const canChangeUserStatus = (actor: Profile | null, target: Profile) => {
     if (!actor) return false;
-    if (actor.id === target.id) return false; // never self
-    if (actor.role === 'admin') return true;  // admins can change anyone
+    if (actor.id === target.id) return false;
+    if (actor.role === 'admin') return true;
     return actor.role === 'moderator' && target.role === 'user';
   };
 
-  // client guard for offer actions
   const canActOnOffer = (actor: Profile | null, ownerRole: Role | undefined) => {
     if (!actor) return false;
     if (actor.role === 'admin') return true;
-    // moderators may NOT act on admin-owned offers
     if (actor.role === 'moderator') return ownerRole !== 'admin';
     return false;
   };
@@ -202,7 +208,6 @@ function AdminContent() {
             for (const p of ((profilesRes.data || []) as Array<{ id: string; display_name: string; role: Role }>)) {
               combined[p.id] = { name: p.display_name, email: emailsMap[p.id] ?? null, role: p.role };
             }
-            // ensure every id has an entry
             for (const id of ownerIds) {
               if (!combined[id]) combined[id] = { name: id, email: emailsMap[id] ?? null, role: undefined };
             }
@@ -214,7 +219,6 @@ function AdminContent() {
 
         if (tab === 'audit') {
           if (!isAdmin) {
-            // double-guard: mods can’t load audit even if they somehow land here
             setTab('users');
             return;
           }
@@ -277,7 +281,6 @@ function AdminContent() {
   // helper — best-effort email RPC
   async function fetchEmails(ids: string[]) {
     try {
-      // Try common param names one by one
       let res = await supabase.rpc('admin_get_profile_emails', { p_profile_ids: ids });
       if (res.error) res = await supabase.rpc('admin_get_profile_emails', { ids });
       if (res.error) res = await supabase.rpc('admin_get_profile_emails', { p_ids: ids });
@@ -293,7 +296,6 @@ function AdminContent() {
     }
   }
 
-  // title search + pending filter
   const offersVisible = useMemo(() => {
     const base = pendingOnly ? offers.filter((o) => o.status === 'pending') : offers;
     const q = offerQ.trim().toLowerCase();
@@ -373,7 +375,6 @@ function AdminContent() {
   async function setOfferStatus(id: string, next: OfferRow['status']) {
     if (!me) return;
 
-    // find owner role for this offer
     const ownerRole = ownerInfo[offers.find((o) => o.id === id)?.owner_id || '']?.role;
 
     if (!canActOnOffer(me, ownerRole)) {
@@ -392,7 +393,6 @@ function AdminContent() {
     }
   }
 
-  // Scroll/highlight ?offer=<id>
   useEffect(() => {
     if (tab !== 'offers' || !urlFocusOffer) return;
     const el = ownerRowRefs.current.get(urlFocusOffer);
@@ -404,11 +404,7 @@ function AdminContent() {
   }, [tab, urlFocusOffer, offersVisible]);
 
   if (!me) {
-    return (
-      <section className="max-w-5xl">
-        <p>Loading…</p>
-      </section>
-    );
+    return <section className="max-w-5xl"><p>Loading…</p></section>;
   }
   if (!canViewAdmin) {
     return (
@@ -503,7 +499,6 @@ function AdminContent() {
                             </button>
                           )}
 
-                          {/* Role-change controls — admins only */}
                           {isAdmin && (
                             <>
                               {u.role !== 'user' && (
@@ -530,12 +525,8 @@ function AdminContent() {
                           )}
                         </div>
 
-                        {/* NEW: fulfillment counter + quota reset (no extra links, just this row) */}
-                        <div className="flex flex-wrap items-center gap-3">
-                          <FulfilledCount profileId={u.id} />
-                          {/* <AskWindowUsage profileId={u.id} /> */}
-                          <ResetQuotaButton profileId={u.id} />
-                        </div>
+                        {/* Counters + Reset (row-local refresh) */}
+                        <RowAskControls profileId={u.id} />
                       </div>
                     </td>
                   </tr>
@@ -621,7 +612,6 @@ function AdminContent() {
                       <td className="px-3 py-2">{new Date(o.created_at).toLocaleDateString()}</td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap gap-2">
-                          {/* Action buttons are disabled when moderator targets admin-owned offer */}
                           {o.status === 'pending' && (
                             <>
                               <button
