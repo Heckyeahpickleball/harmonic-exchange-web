@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import AskWindowUsage from '@/components/AskWindowUsage'; // import type access
 
 export default function ResetQuotaButton({ profileId }: { profileId: string }) {
   const [busy, setBusy] = useState(false);
@@ -19,6 +20,12 @@ export default function ResetQuotaButton({ profileId }: { profileId: string }) {
       const { error } = await supabase.rpc('reset_request_quota', { p_profile_id: profileId });
       if (error) throw error;
       alert('Quota reset. They can ask up to 3 times in the next 30 days.');
+
+      // refresh the usage counter if present on the page
+      const anyComp: any = AskWindowUsage as any;
+      if (anyComp && typeof anyComp._reload === 'function') {
+        anyComp._reload();
+      }
     } catch (e: any) {
       setErr(e?.message ?? 'Could not reset quota.');
     } finally {

@@ -10,6 +10,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import ResetQuotaButton from '@/components/ResetQuotaButton'; // ➜ NEW
+import AskWindowUsage from '@/components/AskWindowUsage';
 
 type Role = 'user' | 'moderator' | 'admin';
 type Status = 'active' | 'suspended';
@@ -532,6 +533,7 @@ function AdminContent() {
                         {/* NEW: fulfillment counter + quota reset (no extra links, just this row) */}
                         <div className="flex flex-wrap items-center gap-3">
                           <FulfilledCount profileId={u.id} />
+                          {/* <AskWindowUsage profileId={u.id} /> */}
                           <ResetQuotaButton profileId={u.id} />
                         </div>
                       </div>
