@@ -11,13 +11,13 @@ type Role = 'user' | 'moderator' | 'admin';
 export default function ClientHeaderNav() {
   const [uid, setUid] = useState<string | null>(null);
   const [role, setRole] = useState<Role>('user');
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
       const u = data?.user?.id ?? null;
       setUid(u);
-
       if (u) {
         const { data: p } = await supabase
           .from('profiles')
@@ -29,13 +29,24 @@ export default function ClientHeaderNav() {
     })();
   }, []);
 
+  async function signOut() {
+    try {
+      setBusy(true);
+      await supabase.auth.signOut();
+      // simple client redirect
+      window.location.href = '/';
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <nav className="flex items-center justify-between gap-3 py-2">
       <div className="flex flex-wrap items-center gap-3">
         <Link href="/" className="underline-offset-4 hover:underline">Home</Link>
         <Link href="/browse" className="underline-offset-4 hover:underline">Offerings</Link>
-        <Link href="/offers/new" className="underline-offset-4 hover:underline">Share a gift</Link>
-        <Link href="/offers/mine" className="underline-offset-4 hover:underline">My space</Link>
+        <Link href="/offers/new" className="underline-offset-4 hover:underline">Share My Value</Link>
+        <Link href="/offers/mine" className="underline-offset-4 hover:underline">My Offers</Link>
 
         <Link href="/messages" className="underline-offset-4 hover:underline">
           Inbox <MessagesUnreadBadge />
@@ -52,9 +63,18 @@ export default function ClientHeaderNav() {
         <NotificationsBell />
         {!uid ? (
           <Link href="/sign-in" className="rounded border px-2 py-1 text-sm hover:bg-gray-50">
-            Sign In
+            Sign in
           </Link>
-        ) : null}
+        ) : (
+          <button
+            onClick={signOut}
+            disabled={busy}
+            className="rounded border px-2 py-1 text-sm hover:bg-gray-50 disabled:opacity-50"
+            aria-label="Sign out"
+          >
+            {busy ? 'Signing out…' : 'Sign out'}
+          </button>
+        )}
       </div>
     </nav>
   );

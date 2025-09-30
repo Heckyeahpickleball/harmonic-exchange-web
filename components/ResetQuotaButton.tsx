@@ -10,7 +10,7 @@ export default function ResetQuotaButton({ profileId }: { profileId: string }) {
   async function onReset() {
     setErr('');
     const ok = confirm(
-      'Reset request quota?\n\nThis will set this member’s 30-day window to start now, allowing up to 3 new asks.\nProceed?'
+      'Reset request quota?\n\nThis sets this member’s 30-day window to start now, allowing up to 3 new asks.\nProceed?'
     );
     if (!ok) return;
 
@@ -32,11 +32,10 @@ export default function ResetQuotaButton({ profileId }: { profileId: string }) {
         onClick={onReset}
         disabled={busy}
         className="hx-btn hx-btn--ghost disabled:opacity-50"
-        aria-label="Reset monthly ask quota"
       >
         {busy ? 'Resetting…' : 'Reset ask quota'}
       </button>
-      {err && <span className="text-sm text-red-600">{err}</span>}
+      {err && <span className="text-xs text-red-600">{err}</span>}
     </div>
   );
 }

@@ -9,6 +9,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import ResetQuotaButton from '@/components/ResetQuotaButton'; // ➜ NEW
 
 type Role = 'user' | 'moderator' | 'admin';
 type Status = 'active' | 'suspended';
@@ -51,6 +52,36 @@ export default function Page() {
       <AdminContent />
     </Suspense>
   );
+}
+
+/** Tiny client component to read fulfilled count from the view (created in SQL) */
+function FulfilledCount({ profileId }: { profileId: string }) {
+  const [count, setCount] = useState<number | null>(null);
+  const [error, setError] = useState<string>('');
+
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profile_received_fulfillments')
+          .select('fulfilled_received')
+          .eq('profile_id', profileId)
+          .maybeSingle();
+        if (!cancel) {
+          if (error) throw error;
+          setCount((data?.fulfilled_received as number | undefined) ?? 0);
+        }
+      } catch (e: any) {
+        if (!cancel) setError(e?.message ?? 'err');
+      }
+    })();
+    return () => { cancel = true; };
+  }, [profileId]);
+
+  if (error) return <span className="text-xs text-red-600">count err</span>;
+  if (count === null) return <span className="text-xs text-gray-500">…</span>;
+  return <span className="text-xs text-gray-700">Fulfilled received: <b>{count}</b></span>;
 }
 
 function AdminContent() {
@@ -449,52 +480,60 @@ function AdminContent() {
                     <td className="px-3 py-2">{u.status}</td>
                     <td className="px-3 py-2">{new Date(u.created_at).toLocaleDateString()}</td>
                     <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-2">
-                        {u.status === 'active' ? (
-                          <button
-                            title={tooltip}
-                            disabled={!canStatus}
-                            onClick={() => setUserStatus(u.id, u.role, 'suspended')}
-                            className={commonBtn}
-                          >
-                            Suspend
-                          </button>
-                        ) : (
-                          <button
-                            title={tooltip}
-                            disabled={!canStatus}
-                            onClick={() => setUserStatus(u.id, u.role, 'active')}
-                            className={commonBtn}
-                          >
-                            Unsuspend
-                          </button>
-                        )}
+                      <div className="flex flex-col gap-2">
+                        <div className="flex flex-wrap gap-2">
+                          {u.status === 'active' ? (
+                            <button
+                              title={tooltip}
+                              disabled={!canStatus}
+                              onClick={() => setUserStatus(u.id, u.role, 'suspended')}
+                              className={commonBtn}
+                            >
+                              Suspend
+                            </button>
+                          ) : (
+                            <button
+                              title={tooltip}
+                              disabled={!canStatus}
+                              onClick={() => setUserStatus(u.id, u.role, 'active')}
+                              className={commonBtn}
+                            >
+                              Unsuspend
+                            </button>
+                          )}
 
-                        {/* Role-change controls — admins only */}
-                        {isAdmin && (
-                          <>
-                            {u.role !== 'user' && (
-                              <button onClick={() => setUserRole(u.id, 'user')} className={commonBtn}>
-                                Demote to user
-                              </button>
-                            )}
-                            {u.role !== 'moderator' && (
-                              <button onClick={() => setUserRole(u.id, 'moderator')} className={commonBtn}>
-                                Promote to mod
-                              </button>
-                            )}
-                            {u.role !== 'admin' && (
-                              <button onClick={() => setUserRole(u.id, 'admin')} className={commonBtn}>
-                                Promote to admin
-                              </button>
-                            )}
-                            {u.id !== me.id && (
-                              <button onClick={() => deleteUser(u.id)} className={commonBtn}>
-                                Delete
-                              </button>
-                            )}
-                          </>
-                        )}
+                          {/* Role-change controls — admins only */}
+                          {isAdmin && (
+                            <>
+                              {u.role !== 'user' && (
+                                <button onClick={() => setUserRole(u.id, 'user')} className={commonBtn}>
+                                  Demote to user
+                                </button>
+                              )}
+                              {u.role !== 'moderator' && (
+                                <button onClick={() => setUserRole(u.id, 'moderator')} className={commonBtn}>
+                                  Promote to mod
+                                </button>
+                              )}
+                              {u.role !== 'admin' && (
+                                <button onClick={() => setUserRole(u.id, 'admin')} className={commonBtn}>
+                                  Promote to admin
+                                </button>
+                              )}
+                              {u.id !== me.id && (
+                                <button onClick={() => deleteUser(u.id)} className={commonBtn}>
+                                  Delete
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+
+                        {/* NEW: fulfillment counter + quota reset (no extra links, just this row) */}
+                        <div className="flex flex-wrap items-center gap-3">
+                          <FulfilledCount profileId={u.id} />
+                          <ResetQuotaButton profileId={u.id} />
+                        </div>
                       </div>
                     </td>
                   </tr>
