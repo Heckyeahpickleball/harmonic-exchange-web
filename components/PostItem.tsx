@@ -333,7 +333,6 @@ export default function PostItem({
 
       const normalized = normalizeProfile(data) as CommentRow;
 
-      // Optimistic add; do NOT add to commentIdsRef so realtime INSERT can also arrive
       setComments((prev) => [...prev, normalized].sort(byCreatedAtAsc));
       setCommentCount((c) => c + 1);
 
@@ -358,7 +357,6 @@ export default function PostItem({
     }
   }
 
-  // Enter = submit, Shift+Enter = newline
   function onComposerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -367,7 +365,7 @@ export default function PostItem({
   }
 
   return (
-    <article className="rounded border p-3">
+    <article className="hx-card p-3">
       <header className="mb-2 flex items-center justify-between text-sm text-gray-600">
         <div>
           <span className="font-medium">{post.profiles?.display_name ?? 'Someone'}</span>
@@ -385,12 +383,7 @@ export default function PostItem({
             </button>
             {menuOpen && (
               <Kebab
-                items={[
-                  {
-                    label: 'Delete post',
-                    action: deletePost,
-                  },
-                ]}
+                items={[{ label: 'Delete post', action: deletePost }]}
                 onClose={() => setMenuOpen(false)}
               />
             )}
@@ -423,7 +416,6 @@ export default function PostItem({
 
       {commentsOpen && (
         <>
-          {/* composer */}
           <div className="mt-2 space-y-2">
             <div className="flex items-start gap-2">
               <textarea
@@ -462,7 +454,6 @@ export default function PostItem({
               <div className="flex flex-wrap gap-2">
                 {previews.map((src, idx) => (
                   <div key={src} className="relative">
-                    {/* Using <img> for local blob previews is simplest and fast */}
                     <img src={src} alt="" className="h-16 w-24 rounded object-cover" />
                     <button
                       type="button"
@@ -487,7 +478,6 @@ export default function PostItem({
             {err && <p className="text-sm text-red-600">{err}</p>}
           </div>
 
-          {/* list */}
           <div className="mt-3 space-y-2">
             {comments.map((c) => (
               <CommentItem
@@ -565,12 +555,7 @@ function CommentItem({
             </button>
             {menuOpen && (
               <Kebab
-                items={[
-                  {
-                    label: 'Delete comment',
-                    action: () => setConfirmDel(true),
-                  },
-                ]}
+                items={[{ label: 'Delete comment', action: () => setConfirmDel(true) }]}
                 onClose={() => setMenuOpen(false)}
               />
             )}

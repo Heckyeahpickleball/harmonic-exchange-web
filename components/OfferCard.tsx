@@ -1,4 +1,3 @@
-/* components/OfferCard.tsx */
 'use client';
 
 import Link from 'next/link';
@@ -99,7 +98,7 @@ export default function OfferCard({ offer, mine = false, onDeleted }: Props) {
 
         <div className="flex gap-2">
           <Link href={href} className="hx-btn hx-btn--ghost text-sm">View</Link>
-          {!mine && <Link href={href} className="hx-btn hx-btn--brand text-sm">Ask for support</Link>}
+          {!mine && <Link href={href} className="hx-btn hx-btn--brand text-sm">Ask to Receive</Link>}
           {mine && (
             <button
               onClick={handleDelete}

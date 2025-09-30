@@ -1,17 +1,18 @@
-// /components/RequestModal.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 
 export default function RequestModal({
-  title = 'Ask for support',
+  title = 'Ask to Receive',
   placeholder = 'Share context and what you’re hoping for…',
+  submitLabel = 'Ask to Receive',
   maxLength = 600,
   onCancel,
   onSubmit,
 }: {
   title?: string;
   placeholder?: string;
+  submitLabel?: string;
   maxLength?: number;
   onCancel: () => void;
   onSubmit: (
@@ -83,7 +84,7 @@ export default function RequestModal({
               onClick={() => onSubmit(note.trim(), setBusy, setErr)}
               className="hx-btn hx-btn--brand disabled:opacity-50"
             >
-              {busy ? 'Sending…' : 'Send ask'}
+              {busy ? 'Sending…' : submitLabel}
             </button>
           </div>
         </div>

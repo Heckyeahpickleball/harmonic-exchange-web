@@ -1,4 +1,4 @@
-// /app/offers/[id]/page.tsx
+// Offer detail with “Ask to Receive” CTA
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -89,7 +89,6 @@ export default function OfferDetailPage() {
 
     let requestId: string | null = null;
 
-    // RPC if present; else direct insert
     const { data: rpcData, error: rpcErr } = await supabase.rpc('create_request', {
       p_offer: offer.id,
       p_note: note.trim() || '—',
@@ -111,7 +110,7 @@ export default function OfferDetailPage() {
       requestId = ins!.id as string;
     }
 
-    // Seed a first message/notification (non-fatal if it fails)
+    // best-effort notifications
     if (requestId) {
       const payload = { request_id: requestId, offer_id: offer.id, sender_id: me, text: note.trim() || '—' };
       try {
@@ -125,9 +124,7 @@ export default function OfferDetailPage() {
     router.push(requestId ? `/messages?thread=${requestId}` : '/messages');
   }
 
-  if (loading) {
-    return <section className="max-w-3xl"><p>Loading…</p></section>;
-  }
+  if (loading) return <section className="max-w-3xl"><p>Loading…</p></section>;
   if (err) {
     return (
       <section className="max-w-3xl">
@@ -180,13 +177,13 @@ export default function OfferDetailPage() {
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div className="text-sm text-gray-700">
               {!me ? (
-                <>Please <Link href="/sign-in" className="hx-link">sign in</Link> to ask for support.</>
+                <>Please <Link href="/sign-in" className="hx-link">sign in</Link> to ask.</>
               ) : offer.status !== 'active' ? (
                 <>This offering isn’t active yet.</>
               ) : eligibleCount < 1 ? (
-                <>To keep the circle generous, share at least one <b>active</b> gift first. <Link href="/offers/new" className="hx-link">Share a gift</Link>.</>
+                <>To keep the circle generous, share at least one <b>active</b> gift first. <Link href="/offers/new" className="hx-link">Share Your Gifts</Link>.</>
               ) : (
-                <>Ready to ask for support?</>
+                <>Ready to ask?</>
               )}
             </div>
 
@@ -195,9 +192,9 @@ export default function OfferDetailPage() {
               disabled={!canAsk}
               onClick={() => setShowModal(true)}
               className="hx-btn hx-btn--brand disabled:opacity-50"
-              aria-label="Ask for support"
+              aria-label="Ask to Receive"
             >
-              Ask for support
+              Ask to Receive
             </button>
           </div>
         </div>
@@ -209,8 +206,9 @@ export default function OfferDetailPage() {
 
       {showModal && (
         <RequestModal
-          title="Ask for support"
+          title="Ask to Receive"
           placeholder="Share context and what you’re hoping for…"
+          submitLabel="Ask to Receive"
           onCancel={() => setShowModal(false)}
           onSubmit={async (note, setBusy, setError) => {
             setBusy(true);
