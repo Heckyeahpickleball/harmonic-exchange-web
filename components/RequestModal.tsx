@@ -4,8 +4,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 export default function RequestModal({
-  title = 'Send a request',
-  placeholder = 'Add a short note…',
+  title = 'Ask for support',
+  placeholder = 'Share context and what you’re hoping for…',
   maxLength = 600,
   onCancel,
   onSubmit,
@@ -40,14 +40,16 @@ export default function RequestModal({
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
       <div className="w-full max-w-xl rounded-xl bg-white p-4 shadow-xl">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3">
           <h3 className="text-lg font-semibold">{title}</h3>
-          {/* removed duplicate Cancel button from header */}
+          <p className="mt-1 text-sm text-gray-600">
+            Speak from the heart. Clear, kind words help others understand how to show up for you.
+          </p>
         </div>
 
         <div className="space-y-3">
           <div>
-            <label className="block text-sm font-medium">Note</label>
+            <label className="block text-sm font-medium">Your note</label>
             <textarea
               ref={taRef}
               value={note}
@@ -58,7 +60,7 @@ export default function RequestModal({
               className="mt-1 w-full resize-y rounded border p-2 text-sm"
             />
             <div className="mt-1 flex items-center justify-between text-xs text-gray-500">
-              <span>Tell the owner what you’re hoping for.</span>
+              <span>Gratitude goes a long way.</span>
               <span className={remaining < 0 ? 'text-red-600' : ''}>
                 {remaining} characters left
               </span>
@@ -71,7 +73,7 @@ export default function RequestModal({
             <button
               type="button"
               onClick={onCancel}
-              className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
+              className="hx-btn hx-btn--ghost"
             >
               Cancel
             </button>
@@ -79,9 +81,9 @@ export default function RequestModal({
               type="button"
               disabled={!canSend}
               onClick={() => onSubmit(note.trim(), setBusy, setErr)}
-              className="rounded bg-black px-4 py-2 text-sm text-white disabled:opacity-50"
+              className="hx-btn hx-btn--brand disabled:opacity-50"
             >
-              {busy ? 'Sending…' : 'Send request'}
+              {busy ? 'Sending…' : 'Send ask'}
             </button>
           </div>
         </div>

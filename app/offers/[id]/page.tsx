@@ -44,7 +44,6 @@ export default function OfferDetailPage() {
         const uid = auth.user?.id ?? null;
         if (!cancel) setMe(uid);
 
-        // NOTE: use offer_type and is_online (not type / online_only)
         const { data: o, error: oErr } = await supabase
           .from('offers')
           .select(
@@ -67,7 +66,7 @@ export default function OfferDetailPage() {
           if (!cancel) setEligibleCount(0);
         }
       } catch (e: any) {
-        if (!cancel) setErr(e?.message ?? 'Failed to load offer.');
+        if (!cancel) setErr(e?.message ?? 'Failed to load offering.');
       } finally {
         if (!cancel) setLoading(false);
       }
@@ -78,7 +77,7 @@ export default function OfferDetailPage() {
   }, [id]);
 
   const isOwner = useMemo(() => !!offer && me === offer?.owner_id, [offer, me]);
-  const canRequest = useMemo(() => {
+  const canAsk = useMemo(() => {
     if (!offer) return false;
     if (isOwner) return false;
     if (offer.status !== 'active') return false;
@@ -90,7 +89,7 @@ export default function OfferDetailPage() {
 
     let requestId: string | null = null;
 
-    // Try RPC first (if you have it), else fall back to direct insert.
+    // RPC if present; else direct insert
     const { data: rpcData, error: rpcErr } = await supabase.rpc('create_request', {
       p_offer: offer.id,
       p_note: note.trim() || '—',
@@ -112,7 +111,7 @@ export default function OfferDetailPage() {
       requestId = ins!.id as string;
     }
 
-    // Seed the per-request chat with the note as the first message.
+    // Seed a first message/notification (non-fatal if it fails)
     if (requestId) {
       const payload = { request_id: requestId, offer_id: offer.id, sender_id: me, text: note.trim() || '—' };
       try {
@@ -120,32 +119,28 @@ export default function OfferDetailPage() {
           { profile_id: me, type: 'message', data: payload, read_at: new Date().toISOString() },
           { profile_id: offer.owner_id, type: 'message_received', data: payload },
         ]);
-      } catch {
-        // non-fatal
-      }
+      } catch {}
     }
 
     router.push(requestId ? `/messages?thread=${requestId}` : '/messages');
   }
 
   if (loading) {
-    return (
-      <section className="max-w-3xl"><p>Loading…</p></section>
-    );
+    return <section className="max-w-3xl"><p>Loading…</p></section>;
   }
   if (err) {
     return (
       <section className="max-w-3xl">
         <p className="text-red-600">{err}</p>
-        <p className="mt-2"><Link href="/offers" className="underline">← Back to Browse</Link></p>
+        <p className="mt-2"><Link href="/offers" className="underline">← Back to Offerings</Link></p>
       </section>
     );
   }
   if (!offer) {
     return (
       <section className="max-w-3xl">
-        <p>Offer not found.</p>
-        <p className="mt-2"><Link href="/offers" className="underline">← Back to Browse</Link></p>
+        <p>Offering not found.</p>
+        <p className="mt-2"><Link href="/offers" className="underline">← Back to Offerings</Link></p>
       </section>
     );
   }
@@ -155,7 +150,7 @@ export default function OfferDetailPage() {
 
   return (
     <section className="max-w-3xl space-y-4">
-      <Link href="/offers" className="text-sm underline">← Back to Browse</Link>
+      <Link href="/offers" className="text-sm underline">← Back to Offerings</Link>
 
       <div className="flex items-start justify-between gap-3">
         <h1 className="text-2xl font-bold">{offer.title}</h1>
@@ -181,40 +176,41 @@ export default function OfferDetailPage() {
       {offer.description && <p className="whitespace-pre-wrap">{offer.description}</p>}
 
       {!isOwner && (
-        <div className="rounded border p-3">
+        <div className="hx-card p-3">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div className="text-sm text-gray-700">
               {!me ? (
-                <>Please <Link href="/sign-in" className="underline">sign in</Link> to request.</>
+                <>Please <Link href="/sign-in" className="hx-link">sign in</Link> to ask for support.</>
               ) : offer.status !== 'active' ? (
-                <>This offer isn’t active yet.</>
+                <>This offering isn’t active yet.</>
               ) : eligibleCount < 1 ? (
-                <>You need at least one <b>active</b> offer to request. <Link href="/offers/new" className="underline">Create an offer</Link>.</>
+                <>To keep the circle generous, share at least one <b>active</b> gift first. <Link href="/offers/new" className="hx-link">Share a gift</Link>.</>
               ) : (
-                <>Ready to send a request?</>
+                <>Ready to ask for support?</>
               )}
             </div>
 
             <button
               type="button"
-              disabled={!canRequest}
+              disabled={!canAsk}
               onClick={() => setShowModal(true)}
-              className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
+              className="hx-btn hx-btn--brand disabled:opacity-50"
+              aria-label="Ask for support"
             >
-              Request
+              Ask for support
             </button>
           </div>
         </div>
       )}
 
       {isOwner && (
-        <div className="rounded border p-3 text-sm text-gray-600">You are the owner of this offer.</div>
+        <div className="rounded border p-3 text-sm text-gray-600">You are the owner of this offering.</div>
       )}
 
       {showModal && (
         <RequestModal
-          title="Send a request"
-          placeholder="Add a short note for the owner…"
+          title="Ask for support"
+          placeholder="Share context and what you’re hoping for…"
           onCancel={() => setShowModal(false)}
           onSubmit={async (note, setBusy, setError) => {
             setBusy(true);
@@ -222,7 +218,7 @@ export default function OfferDetailPage() {
             try {
               await createRequest(note);
             } catch (e: any) {
-              setError(e?.message ?? 'Could not send request.');
+              setError(e?.message ?? 'Could not send your ask.');
               setBusy(false);
               return;
             }

@@ -1,6 +1,4 @@
-/* HX v0.9 — Offer card (browse + “my offers”), supports owner delete + owner name
-   File: components/OfferCard.tsx
-*/
+/* components/OfferCard.tsx */
 'use client';
 
 import Link from 'next/link';
@@ -8,7 +6,6 @@ import Image from 'next/image';
 import { useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-/** Minimal shape used by lists (what pages fetch). */
 export type OfferRow = {
   id: string;
   title: string;
@@ -18,16 +15,13 @@ export type OfferRow = {
   country: string | null;
   status: 'pending' | 'active' | 'paused' | 'archived' | 'blocked';
   images?: string[] | null;
-  /** Added for Browse: owner display name + id (optional). */
   owner_name?: string;
   owner_id?: string;
 };
 
 type Props = {
   offer: OfferRow;
-  /** Show owner controls (Delete). Use in /offers/mine only. */
   mine?: boolean;
-  /** Called after a successful delete so the parent list can remove the card. */
   onDeleted?: (id: string) => void;
 };
 
@@ -48,7 +42,7 @@ function StatusBadge({ status }: { status: OfferRow['status'] }) {
   );
 }
 
-export function OfferCardImpl({ offer, mine = false, onDeleted }: Props) {
+export default function OfferCard({ offer, mine = false, onDeleted }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -57,8 +51,7 @@ export function OfferCardImpl({ offer, mine = false, onDeleted }: Props) {
 
   async function handleDelete() {
     setErr(null);
-    if (!confirm('Delete this offer permanently? This cannot be undone.')) return;
-
+    if (!confirm('Delete this offering permanently? This cannot be undone.')) return;
     try {
       setDeleting(true);
       const { error } = await supabase.from('offers').delete().eq('id', offer.id);
@@ -72,27 +65,16 @@ export function OfferCardImpl({ offer, mine = false, onDeleted }: Props) {
   }
 
   const href = `/offers/${offer.id}`;
-  const location = offer.is_online
-    ? 'Online'
-    : [offer.city, offer.country].filter(Boolean).join(', ');
+  const location = offer.is_online ? 'Online' : [offer.city, offer.country].filter(Boolean).join(', ');
 
   return (
-    <article className="rounded border">
-      {/* Image (optional) */}
+    <article className="hx-card hover:shadow-md transition">
       <Link href={href} className="block">
         <div className="relative h-48 w-full overflow-hidden rounded-t bg-gray-100">
           {thumb ? (
-            <Image
-              src={thumb}
-              alt={offer.title}
-              fill
-              className="object-cover"
-              sizes="(max-width: 768px) 100vw, 50vw"
-            />
+            <Image src={thumb} alt={offer.title} fill className="object-cover" sizes="(max-width: 768px) 100vw, 50vw" />
           ) : (
-            <div className="flex h-full items-center justify-center text-xs text-gray-400">
-              No image
-            </div>
+            <div className="flex h-full items-center justify-center text-xs text-gray-400">No image</div>
           )}
         </div>
       </Link>
@@ -106,16 +88,9 @@ export function OfferCardImpl({ offer, mine = false, onDeleted }: Props) {
             <div className="mt-0.5 text-xs text-gray-600">
               {offer.offer_type} • {location || '—'}
             </div>
-            {/* Owner line (links to unified profile at /u/[id]) */}
             {offer.owner_name && offer.owner_id && (
               <div className="mt-0.5 text-xs text-gray-500">
-                by{' '}
-                <Link
-                  href={`/u/${offer.owner_id}`}
-                  className="underline hover:no-underline"
-                >
-                  {offer.owner_name}
-                </Link>
+                by <Link href={`/u/${offer.owner_id}`} className="hx-link">{offer.owner_name}</Link>
               </div>
             )}
           </div>
@@ -123,18 +98,13 @@ export function OfferCardImpl({ offer, mine = false, onDeleted }: Props) {
         </div>
 
         <div className="flex gap-2">
-          <Link
-            href={href}
-            className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
-          >
-            {mine ? 'View' : 'View & Request'}
-          </Link>
-
+          <Link href={href} className="hx-btn hx-btn--ghost text-sm">View</Link>
+          {!mine && <Link href={href} className="hx-btn hx-btn--brand text-sm">Ask for support</Link>}
           {mine && (
             <button
               onClick={handleDelete}
               disabled={deleting}
-              className="rounded border px-2 py-1 text-sm hover:bg-gray-50 disabled:opacity-60"
+              className="hx-btn hx-btn--ghost text-sm disabled:opacity-60"
               title="Delete permanently"
             >
               {deleting ? 'Deleting…' : 'Delete'}
@@ -147,7 +117,3 @@ export function OfferCardImpl({ offer, mine = false, onDeleted }: Props) {
     </article>
   );
 }
-
-/** Named + default export so either import style works. */
-export const OfferCard = OfferCardImpl;
-export default OfferCardImpl;

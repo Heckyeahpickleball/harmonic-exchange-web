@@ -33,12 +33,12 @@ export default function ClientHeaderNav() {
     <nav className="flex items-center justify-between gap-3 py-2">
       <div className="flex flex-wrap items-center gap-3">
         <Link href="/" className="underline-offset-4 hover:underline">Home</Link>
-        <Link href="/browse" className="underline-offset-4 hover:underline">Browse</Link>
-        <Link href="/offers/new" className="underline-offset-4 hover:underline">New Offer</Link>
-        <Link href="/offers/mine" className="underline-offset-4 hover:underline">My Offers</Link>
+        <Link href="/browse" className="underline-offset-4 hover:underline">Offerings</Link>
+        <Link href="/offers/new" className="underline-offset-4 hover:underline">Share a gift</Link>
+        <Link href="/offers/mine" className="underline-offset-4 hover:underline">My space</Link>
 
         <Link href="/messages" className="underline-offset-4 hover:underline">
-          Messages <MessagesUnreadBadge />
+          Inbox <MessagesUnreadBadge />
         </Link>
 
         <Link href="/exchanges" className="underline-offset-4 hover:underline">Exchanges</Link>
