@@ -1,4 +1,4 @@
-/* HX v0.6 — 2025-09-21 — My Offers selects images for thumbnails + owner actions
+/* HX v0.7 — My Offers: owner status controls with optimistic UI + rollback
    File: app/offers/mine/page.tsx
 */
 'use client';
@@ -74,13 +74,12 @@ export default function MyOffersPage() {
             .map((r: any) => ({ id: r?.tag_id as number, name: r?.tags?.name as string }))
             .filter((t: { id: number; name: string }) => t.id && t.name);
 
-          // Attach tags for display if needed
           (base as any).tags = rowTags;
           map.set(row.id, base);
         }
         setOffers(Array.from(map.values()));
       } catch (e: any) {
-        console.error(e);
+        console.error(e?.message ?? e);
         setMsg(e?.message ?? 'Failed to load your offers.');
       } finally {
         setLoading(false);
@@ -90,15 +89,19 @@ export default function MyOffersPage() {
 
   async function setStatus(id: string, next: Status) {
     setMsg('');
+    // Remember previous for rollback
+    const prev = offers.find((o) => o.id === id)?.status;
+
+    // Optimistic UI
+    setOffers((p) => p.map((o) => (o.id === id ? { ...o, status: next } : o)));
+
     try {
-      setOffers((prev) => prev.map((o) => (o.id === id ? { ...o, status: next } : o)));
-      const { error } = await supabase
-        .from('offers')
-        .update({ status: next })
-        .eq('id', id);
+      const { error } = await supabase.from('offers').update({ status: next }).eq('id', id);
       if (error) throw error;
     } catch (e: any) {
-      console.error(e);
+      // Roll back UI and show real error message
+      setOffers((p) => p.map((o) => (o.id === id && prev ? { ...o, status: prev } : o)));
+      console.error(e?.message ?? e);
       setMsg(e?.message ?? 'Failed to update status.');
     }
   }
@@ -126,6 +129,7 @@ export default function MyOffersPage() {
       </div>
 
       {msg && <p className="text-sm text-amber-700">{msg}</p>}
+
       {loading ? (
         <p>Loading…</p>
       ) : visible.length === 0 ? (
