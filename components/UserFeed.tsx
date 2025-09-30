@@ -111,22 +111,18 @@ export default function UserFeed({ profileId }: { profileId: string }) {
   return (
     <div className="space-y-3">
       {loading && <p className="text-sm text-gray-600">Loading…</p>}
-      {err && <p className="text-sm text-amber-700">{err}</p>}
+     <p className="text-sm text-amber-700">{err}</p>
 
-      {posts.map((p) => (
-        <PostItem
-          key={p.id}
-          post={{
-            ...p,
-            images: p.images ?? null,
-            author_name: p.profiles?.display_name ?? null,
-          }}
-          me={me}
-          onDeleted={() => setPosts((prev) => prev.filter((x) => x.id !== p.id))}
-        />
-      ))}
+        {posts.map((p) => (
+          <PostItem
+            key={p.id}
+            post={{ ...p, body: p.body ?? '', images: p.images ?? [] }}
+            me={me}
+            onDeleted={() => setPosts((prev) => prev.filter((x) => x.id !== p.id))}
+          />
+        ))}
 
-      {!loading && posts.length === 0 && (
+        {!loading && posts.length === 0 && (
         <p className="text-sm text-gray-600">No posts yet.</p>
       )}
     </div>

@@ -243,7 +243,7 @@ function CommentComposer({
         created_at: data.created_at,
         profiles:
           data.profiles && !Array.isArray(data.profiles)
-            ? { display_name: data.profiles.display_name ?? null }
+            ? { display_name: (data.profiles as { display_name: string | null }).display_name ?? null }
             : { display_name: null },
       };
 
