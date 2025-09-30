@@ -100,6 +100,7 @@ export default function PostItem({
   onDeleted?: () => void;
 }) {
   const [comments, setComments] = useState<CommentRow[]>([]);
+  const [commentCount, setCommentCount] = useState<number>(0); // <— live count
   const [open, setOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -108,9 +109,76 @@ export default function PostItem({
   const [confirmDeletePost, setConfirmDeletePost] = useState(false);
   const [deletingPost, setDeletingPost] = useState(false);
 
-  const chRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const listChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const countChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
-  // Load + realtime comments
+  // Track IDs we've already inserted optimistically to avoid double-increment
+  const optimisticIdsRef = useRef<Set<string>>(new Set());
+
+  /* ---------- 1) Load initial count ---------- */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { count, error } = await supabase
+        .from('post_comments')
+        .select('id', { count: 'exact', head: true })
+        .eq('post_id', post.id);
+
+      if (!cancelled) {
+        if (error) setErr(error.message);
+        setCommentCount(count ?? 0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [post.id]);
+
+  /* ---------- 2) Realtime count updates (always on) ---------- */
+  useEffect(() => {
+    // Clean any existing channel
+    if (countChannelRef.current) {
+      supabase.removeChannel(countChannelRef.current);
+      countChannelRef.current = null;
+    }
+
+    const ch = supabase
+      .channel(`post_comments_count:${post.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'post_comments', filter: `post_id=eq.${post.id}` },
+        (payload) => {
+          const id = (payload.new as any)?.id as string | undefined;
+          // Skip if we already optimistically added this id
+          if (id && optimisticIdsRef.current.has(id)) return;
+          setCommentCount((n) => n + 1);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'post_comments', filter: `post_id=eq.${post.id}` },
+        (payload) => {
+          const id = (payload.old as any)?.id as string | undefined;
+          if (id && optimisticIdsRef.current.has(id)) {
+            // If we optimistically added it earlier, also remove it from the set
+            optimisticIdsRef.current.delete(id);
+          }
+          setCommentCount((n) => Math.max(0, n - 1));
+        }
+      )
+      .subscribe();
+
+    countChannelRef.current = ch;
+
+    return () => {
+      if (countChannelRef.current) {
+        supabase.removeChannel(countChannelRef.current);
+        countChannelRef.current = null;
+      }
+    };
+  }, [post.id]);
+
+  /* ---------- 3) Load + realtime list when open ---------- */
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -145,11 +213,18 @@ export default function PostItem({
               : { display_name: null },
         }));
         setComments(normalized);
+        setCommentCount(normalized.length); // keep count in sync
       }
     })();
 
+    // live list for this post while open
+    if (listChannelRef.current) {
+      supabase.removeChannel(listChannelRef.current);
+      listChannelRef.current = null;
+    }
+
     const ch = supabase
-      .channel(`post_comments:${post.id}`)
+      .channel(`post_comments_list:${post.id}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'post_comments', filter: `post_id=eq.${post.id}` },
@@ -177,11 +252,12 @@ export default function PostItem({
       )
       .subscribe();
 
-    chRef.current = ch;
+    listChannelRef.current = ch;
+
     return () => {
-      if (chRef.current) {
-        supabase.removeChannel(chRef.current);
-        chRef.current = null;
+      if (listChannelRef.current) {
+        supabase.removeChannel(listChannelRef.current);
+        listChannelRef.current = null;
       }
       cancelled = true;
     };
@@ -223,12 +299,7 @@ export default function PostItem({
             </button>
             {menuOpen && (
               <Kebab
-                items={[
-                  {
-                    label: 'Delete post',
-                    action: () => setConfirmDeletePost(true),
-                  },
-                ]}
+                items={[{ label: 'Delete post', action: () => setConfirmDeletePost(true) }]}
                 onClose={() => setMenuOpen(false)}
               />
             )}
@@ -257,14 +328,18 @@ export default function PostItem({
       )}
 
       <button className="mt-2 text-sm underline" onClick={() => setOpen((v) => !v)}>
-        {open ? 'Hide comments' : `Show comments (${comments.length})`}
+        {open ? 'Hide comments' : `Show comments (${commentCount})`}
       </button>
 
       {open && (
         <>
           <CommentComposer
             postId={post.id}
-            onAdd={(c) => setComments((prev) => dedupeById([...prev, c]))}
+            onAdd={(c) => {
+              optimisticIdsRef.current.add(c.id);
+              setComments((prev) => dedupeById([...prev, c]));
+              setCommentCount((n) => n + 1);
+            }}
             me={me}
           />
 
@@ -274,7 +349,10 @@ export default function PostItem({
                 key={c.id}
                 comment={c}
                 me={me}
-                onDeleted={() => setComments((prev) => prev.filter((x) => x.id !== c.id))}
+                onDeleted={() => {
+                  setComments((prev) => prev.filter((x) => x.id !== c.id));
+                  setCommentCount((n) => Math.max(0, n - 1));
+                }}
               />
             ))}
             {err && <p className="text-sm text-amber-700">{err}</p>}
@@ -337,12 +415,7 @@ function CommentItem({
             </button>
             {menuOpen && (
               <Kebab
-                items={[
-                  {
-                    label: 'Delete comment',
-                    action: () => setConfirmDel(true),
-                  },
-                ]}
+                items={[{ label: 'Delete comment', action: () => setConfirmDel(true) }]}
                 onClose={() => setMenuOpen(false)}
               />
             )}
@@ -445,8 +518,7 @@ function CommentComposer({
             : { display_name: null },
       };
 
-      // Optimistic add – deduped vs realtime echo
-      onAdd(c);
+      onAdd(c); // optimistic add + local count bump (parent guards against double increment)
       setText('');
       setImages([]);
     } catch (e: any) {
