@@ -1,8 +1,10 @@
 // components/PostItem.tsx
 'use client';
+
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
+// ---------- Types ----------
 type PostRow = {
   id: string;
   profile_id: string;
@@ -22,6 +24,14 @@ type CommentRow = {
   profiles?: { display_name: string | null } | null;
 };
 
+// Small helper: return a new array with unique ids (latest wins)
+function dedupeById<T extends { id: string }>(arr: T[]): T[] {
+  const map = new Map<string, T>();
+  for (const x of arr) map.set(x.id, x);
+  return Array.from(map.values());
+}
+
+// ---------- Post Item ----------
 export default function PostItem({
   post,
   me,
@@ -33,11 +43,10 @@ export default function PostItem({
 }) {
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const chRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
-  const subRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-
+  // Load comments when the drawer is opened
   useEffect(() => {
     if (!open) return;
 
@@ -54,8 +63,12 @@ export default function PostItem({
         .order('created_at', { ascending: true })
         .limit(200);
 
-      if (error) setErr(error.message);
-      else if (!cancelled) {
+    if (error) {
+        if (!cancelled) setErr(error.message);
+        return;
+      }
+
+      if (!cancelled) {
         const normalized = (data ?? []).map((c: any): CommentRow => ({
           id: c.id,
           post_id: c.post_id,
@@ -72,34 +85,43 @@ export default function PostItem({
       }
     })();
 
-    // realtime for comments on this post
+    // Realtime INSERTS for this post's comments
     const ch = supabase
       .channel(`post_comments:${post.id}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'post_comments', filter: `post_id=eq.${post.id}` },
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'post_comments',
+          filter: `post_id=eq.${post.id}`,
+        },
         (payload) => {
           const c: any = payload.new;
-          const row: CommentRow = {
+          const incoming: CommentRow = {
             id: c.id,
             post_id: c.post_id,
             profile_id: c.profile_id,
             body: c.body ?? '',
             images: (c.images ?? []) as string[],
             created_at: c.created_at,
-            profiles: { display_name: null }, // small optimistic default
+            profiles: { display_name: null },
           };
-          setComments((prev) => [...prev, row]);
+
+          // **DEDUPLICATE**: if the optimistic add already put this id in state,
+          // keep only one copy.
+          setComments((prev) => dedupeById([...prev, incoming]));
         }
       )
       .subscribe();
-    subRef.current = ch;
+
+    chRef.current = ch;
 
     return () => {
       cancelled = true;
-      if (subRef.current) {
-        supabase.removeChannel(subRef.current);
-        subRef.current = null;
+      if (chRef.current) {
+        supabase.removeChannel(chRef.current);
+        chRef.current = null;
       }
     };
   }, [open, post.id]);
@@ -119,7 +141,7 @@ export default function PostItem({
           <time dateTime={post.created_at}>{new Date(post.created_at).toLocaleString()}</time>
         </div>
         {me === post.profile_id && (
-          <button className="px-2 py-1 text-sm border rounded" onClick={deletePost}>
+          <button className="px-2 py-1 text-sm border rounded" onClick={deletePost} aria-label="More">
             …
           </button>
         )}
@@ -141,42 +163,44 @@ export default function PostItem({
       </button>
 
       {open && (
-        <CommentComposer
-          postId={post.id}
-          onAdd={(c) => setComments((prev) => [...prev, c])}
-          me={me}
-        />
-      )}
+        <>
+          <CommentComposer
+            postId={post.id}
+            onAdd={(c) =>
+              // **DEDUPLICATE** the optimistic add vs realtime echo
+              setComments((prev) => dedupeById([...prev, c]))
+            }
+            me={me}
+          />
 
-      {open && (
-        <div className="mt-2 space-y-2">
-          {comments.map((c) => (
-            <div key={c.id} className="rounded border p-2">
-              <div className="text-xs text-gray-600 mb-1">
-                <span className="font-medium">{c.profiles?.display_name ?? 'Someone'}</span>
-                <span className="mx-1">•</span>
-                <time dateTime={c.created_at}>
-                  {new Date(c.created_at).toLocaleString()}
-                </time>
-              </div>
-              {c.body && <p className="whitespace-pre-wrap">{c.body}</p>}
-              {c.images?.length ? (
-                <div className="mt-2 space-y-2">
-                  {c.images.map((src) => (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img key={src} src={src} alt="" className="rounded w-full object-cover" />
-                  ))}
+          <div className="mt-2 space-y-2">
+            {comments.map((c) => (
+              <div key={c.id} className="rounded border p-2">
+                <div className="text-xs text-gray-600 mb-1">
+                  <span className="font-medium">{c.profiles?.display_name ?? 'Someone'}</span>
+                  <span className="mx-1">•</span>
+                  <time dateTime={c.created_at}>{new Date(c.created_at).toLocaleString()}</time>
                 </div>
-              ) : null}
-            </div>
-          ))}
-          {err && <p className="text-sm text-amber-700">{err}</p>}
-        </div>
+                {c.body && <p className="whitespace-pre-wrap">{c.body}</p>}
+                {c.images?.length ? (
+                  <div className="mt-2 space-y-2">
+                    {c.images.map((src) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img key={src} src={src} alt="" className="rounded w-full object-cover" />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+            {err && <p className="text-sm text-amber-700">{err}</p>}
+          </div>
+        </>
       )}
     </article>
   );
 }
 
+// ---------- Comment Composer ----------
 function CommentComposer({
   postId,
   me,
@@ -223,8 +247,8 @@ function CommentComposer({
         .insert({
           post_id: postId,
           profile_id: me,
-          body: bodyClean,     // never null
-          images,              // text[]
+          body: bodyClean, // never null
+          images,          // text[]
         })
         .select(`
           id, post_id, profile_id, body, images, created_at,
@@ -234,6 +258,7 @@ function CommentComposer({
 
       if (error) throw error;
 
+      // Optimistic add (will be de-duped when the realtime echo arrives)
       const c: CommentRow = {
         id: data.id,
         post_id: data.post_id,
@@ -274,7 +299,11 @@ function CommentComposer({
             <span className="px-2 py-1 border rounded cursor-pointer">Add image</span>
             <input type="file" accept="image/*" hidden onChange={(e) => e.target.files && upload(e.target.files)} />
           </label>
-          <button className="px-3 py-1 rounded bg-black text-white disabled:opacity-60" disabled={busy} onClick={submit}>
+          <button
+            className="px-3 py-1 rounded bg-black text-white disabled:opacity-60"
+            disabled={busy}
+            onClick={submit}
+          >
             {busy ? 'Posting…' : 'Post'}
           </button>
         </div>
@@ -290,6 +319,7 @@ function CommentComposer({
                 type="button"
                 className="absolute -top-2 -right-2 text-xs bg-black/70 text-white rounded-full px-1"
                 onClick={() => setImages((prev) => prev.filter((x) => x !== src))}
+                aria-label="Remove image"
               >
                 ×
               </button>
