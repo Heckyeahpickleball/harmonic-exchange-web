@@ -1,30 +1,27 @@
 @import "tailwindcss";
 
-/* === Harmonic Exchange design tokens === */
+/* === Harmonic Exchange tokens ===
+   Softer brand, neutral UI. */
 :root{
-  /* neutrals */
   --hx-bg: #ffffff;
-  --hx-surface: #f7fafc;       /* light surface for sections */
+  --hx-surface: #f6f8fb;       /* gentle light surface */
   --hx-ink: #0f172a;           /* slate-900 */
   --hx-muted: #475569;         /* slate-600 */
 
-  /* brand — aligned to cover (teal ↔ amber) */
-  --hx-brand: #0ea5a8;         /* teal-500-ish */
-  --hx-brand-strong: #0f766e;  /* teal-700 */
-  --hx-accent: #f59e0b;        /* amber-500 */
-  --hx-accent-strong: #d97706; /* amber-600 */
+  /* brand — calm teal with warm accent used sparingly */
+  --hx-brand: #0891b2;         /* cyan/teal 600 */
+  --hx-brand-strong: #0e7490;  /* cyan/teal 700 */
+  --hx-accent: #f59e0b;        /* amber 500 */
 
-  /* utility */
-  --hx-ring: 0 0 0 3px rgba(14,165,168,.28);
+  --hx-ring: 0 0 0 3px rgba(8,145,178,.28);
   --hx-card-border: rgba(2, 6, 23, 0.08);
   --hx-card-shadow: 0 1px 2px rgba(2, 6, 23, 0.06);
 
-  /* hero gradient over image */
-  --hx-hero-from: rgba(16, 185, 129, 0.65); /* emerald/teal glow */
-  --hx-hero-to: rgba(245, 158, 11, 0.72);   /* amber glow */
+  /* hero overlay toned way down so it doesn’t clash with the image */
+  --hx-hero-overlay: linear-gradient(0deg, rgba(255,255,255,0) 60%, rgba(255,255,255,0.0) 100%);
 }
 
-/* Use the system sans stack (original feel) */
+/* System font */
 html, body {
   background: var(--hx-bg);
   color: var(--hx-ink);
@@ -33,48 +30,78 @@ html, body {
                "Apple Color Emoji", "Segoe UI Emoji";
 }
 
-/* HERO with cover image */
+/* Sections spacing */
+section { scroll-margin-top: 80px; }
+
+/* HERO — image only, no busy overlays */
 .hx-hero{
   position: relative;
-  padding: clamp(72px, 10vw, 120px) 1rem;
+  min-height: clamp(260px, 36vw, 360px);
   background-image:
-    linear-gradient(90deg, var(--hx-hero-from), var(--hx-hero-to)),
+    var(--hx-hero-overlay),
     url('/harmonic-cover.jpg');
   background-size: cover;
   background-position: center;
   border-bottom: 1px solid var(--hx-card-border);
 }
 
-/* Buttons */
+/* CTA CARD just below hero */
+.hx-cta-card{
+  margin-top: -28px;                 /* slight overlap for polish */
+  margin-bottom: 24px;
+  background: #fff;
+  border: 1px solid var(--hx-card-border);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(2,6,23,0.06);
+  padding: 18px 20px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 640px){
+  .hx-cta-card{
+    padding: 22px 24px;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+  }
+}
+
+/* Cards */
+.hx-card{
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid var(--hx-card-border);
+  box-shadow: var(--hx-card-shadow);
+}
+
+/* Buttons: calm, consistent */
 .hx-btn{
-  border-radius: 1rem;
+  border-radius: 999px;
   padding: .625rem 1rem;
   font-weight: 600;
   line-height: 1;
   display: inline-flex;
   align-items: center;
   gap: .5rem;
-  box-shadow: 0 1px 0 rgba(0,0,0,.03);
   transition: filter .15s ease, box-shadow .15s ease, transform .05s ease;
 }
-.hx-btn--brand{
-  color: #fff;
-  background: linear-gradient(180deg, var(--hx-brand), var(--hx-brand-strong));
-}
-.hx-btn--brand:hover{ filter: brightness(1.03); }
-.hx-btn--ghost{
-  border: 1px solid var(--hx-card-border);
-  background: #fff;
-}
-.hx-btn--ghost:hover{ background: #f9fafb; }
 
-/* Cards */
-.hx-card{
-  border-radius: 1rem;
-  background: #fff;
-  border: 1px solid var(--hx-card-border);
-  box-shadow: var(--hx-card-shadow);
+/* primary */
+.hx-btn--primary{
+  color: #fff;
+  background: var(--hx-brand);
+  border: 1px solid transparent;
 }
+.hx-btn--primary:hover{ filter: brightness(1.02); }
+.hx-btn--primary:active{ transform: translateY(1px); }
+
+/* secondary (outline) */
+.hx-btn--secondary{
+  background: #fff;
+  color: var(--hx-ink);
+  border: 1px solid #e2e8f0; /* slate-200 */
+}
+.hx-btn--secondary:hover{ background: #f8fafc; }
 
 /* Links */
 .hx-link{
@@ -84,11 +111,11 @@ html, body {
 }
 .hx-link:hover{ text-decoration-color: #64748b; }
 
-/* Focus ring */
+/* Focus */
 :focus-visible{ outline: none; box-shadow: var(--hx-ring); }
 
 /* Click affordances */
 button,[role="button"],input[type="button"],input[type="submit"]{ cursor:pointer; }
 button{ transition: background-color .15s ease, box-shadow .15s ease, transform .05s ease; }
-button:hover{ box-shadow: inset 0 0 0 9999px rgba(0,0,0,0.03); }
+button:hover{ box-shadow: inset 0 0 0 9999px rgba(0,0,0,0.02); }
 button:active{ transform: translateY(1px); }
