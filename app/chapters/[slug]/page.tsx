@@ -1,8 +1,9 @@
-/* HX v1.3 — Chapter detail
-   + Anchors can Edit About (save to groups.about)
-   + Composer supports text and/or images (<=6)
-   + Robust post insert: retry on columns content|text|body
-   + Avoid selecting 'content' explicitly to dodge schema-cache errors
+/* HX v1.3.1 — Chapter detail
+   - Anchors can Edit About (save to groups.about)
+   - Composer supports text and/or images (<=6)
+   - Robust post insert: retry on columns content|text|body
+   - Avoid selecting 'content' explicitly to dodge schema-cache errors
+   - Renders image previews for posts (maps storage paths -> public URLs)
 */
 
 'use client';
@@ -49,8 +50,7 @@ type PostRow = {
   created_at: string;
   owner_id: string;
   images?: string[] | null;
-  // allow any text field name; we’ll read at runtime:
-  [key: string]: any;
+  [key: string]: any; // content|text|body at runtime
 };
 
 type PostPreview = {
@@ -59,7 +59,8 @@ type PostPreview = {
   created_at: string;
   owner_id: string;
   owner_name?: string | null;
-  image_count?: number;
+  image_paths?: string[] | null;
+  image_urls?: string[] | null;
 };
 
 type OfferPreview = {
@@ -107,6 +108,12 @@ export default function ChapterPage() {
   const [evOnline, setEvOnline] = useState(false);
   const [evLocation, setEvLocation] = useState('');
   const [creatingEvent, setCreatingEvent] = useState(false);
+
+  function pathsToPublicUrls(paths: string[] | null | undefined): string[] {
+    if (!paths || paths.length === 0) return [];
+    const bucket = supabase.storage.from('post-media');
+    return paths.map((p) => bucket.getPublicUrl(p).data.publicUrl);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -194,10 +201,10 @@ export default function ChapterPage() {
         }
         if (!cancelled) setEvents(listEvents);
 
-        // posts scoped by group — DO NOT explicitly select 'content' to avoid schema-cache errors
+        // posts scoped by group — select all; resolve text field and images
         const { data: pRows } = await supabase
           .from('posts')
-          .select('*') // we’ll read content|text|body at runtime
+          .select('*')
           .eq('group_id', gRow.id)
           .order('pinned', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false })
@@ -206,13 +213,14 @@ export default function ChapterPage() {
         let postList: PostPreview[] =
           (pRows || []).map((p: PostRow) => {
             const c = (p as any).content ?? (p as any).text ?? (p as any).body ?? null;
-            const imgs = Array.isArray(p.images) ? p.images : null;
+            const paths = Array.isArray(p.images) ? p.images : null;
             return {
               id: p.id,
               content: c,
               created_at: p.created_at,
               owner_id: p.owner_id,
-              image_count: imgs ? imgs.length : undefined,
+              image_paths: paths,
+              image_urls: pathsToPublicUrls(paths),
             };
           }) ?? [];
 
@@ -372,7 +380,7 @@ export default function ChapterPage() {
     }
   }
 
-  // Upload images to storage and return an array of storage paths
+  // Upload images to storage and return storage paths
   async function uploadImages(uid: string, files: File[]): Promise<string[]> {
     if (!files.length) return [];
     const up = supabase.storage.from('post-media');
@@ -381,9 +389,8 @@ export default function ChapterPage() {
       const f = files[i];
       const ext = f.name.includes('.') ? f.name.split('.').pop() : 'jpg';
       const key = `posts/${uid}/${Date.now()}_${i}.${ext}`;
-      const { error } = await up.upload(key, f, { upsert: false });
+      const { error } = await up.upload(key, f, { upsert: false, contentType: f.type || 'image/*' });
       if (error) throw error;
-      // We store the storage path (consistent with your existing posts.images)
       paths.push(key);
     }
     return paths;
@@ -427,7 +434,7 @@ export default function ChapterPage() {
           const { data, error } = await supabase
             .from('posts')
             .insert(payload)
-            .select('*') // don’t name columns; read content later
+            .select('*')
             .single();
           if (error) throw error;
           inserted = data;
@@ -435,7 +442,6 @@ export default function ChapterPage() {
           break;
         } catch (e: any) {
           lastErr = e;
-          // If it’s an undefined_column-like error, try next field; otherwise stop
           const msg: string = e?.message || '';
           if (!/column .* does not exist|undefined column|schema cache/i.test(msg)) break;
         }
@@ -445,7 +451,8 @@ export default function ChapterPage() {
 
       const p = inserted as PostRow;
       const textValue = (p as any).content ?? (p as any).text ?? (p as any).body ?? null;
-      const imgs = Array.isArray(p.images) ? p.images : null;
+      const paths = Array.isArray(p.images) ? p.images : null;
+      const image_urls = pathsToPublicUrls(paths || []);
 
       // Enrich with display name for immediate UI
       const { data: prof } = await supabase
@@ -462,7 +469,8 @@ export default function ChapterPage() {
           created_at: p.created_at,
           owner_id: p.owner_id,
           owner_name,
-          image_count: imgs ? imgs.length : undefined,
+          image_paths: paths,
+          image_urls,
         },
         ...prev,
       ]);
@@ -594,11 +602,11 @@ export default function ChapterPage() {
         </div>
 
         {/* Anchors */}
-        {anchors.length > 0 && (
+        {members.some((m) => m.role === 'anchor') && (
           <div className="mt-6">
             <h3 className="mb-2 text-sm font-semibold text-gray-700">Anchors</h3>
             <div className="flex flex-wrap gap-2">
-              {anchors.map((a) => (
+              {members.filter((m) => m.role === 'anchor').map((a) => (
                 <span key={a.profile_id} className="rounded-full border px-3 py-1 text-sm">
                   {a.display_name || a.profile_id.slice(0, 8)}
                 </span>
@@ -722,12 +730,11 @@ export default function ChapterPage() {
                 className="mt-1"
               />
               {postImages.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="mt-2 grid grid-cols-6 gap-2">
                   {postImages.map((f, i) => (
                     <div key={i} className="rounded border p-1">
-                      {/* preview */}
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img alt={f.name} src={URL.createObjectURL(f)} className="h-16 w-16 object-cover rounded" />
+                      <img alt={f.name} src={URL.createObjectURL(f)} className="h-16 w-full object-cover rounded" />
                     </div>
                   ))}
                 </div>
@@ -752,7 +759,14 @@ export default function ChapterPage() {
                   {p.owner_name || p.owner_id.slice(0, 8)} • {new Date(p.created_at).toLocaleString()}
                 </div>
                 {p.content && <p className="mt-2 whitespace-pre-wrap">{p.content}</p>}
-                {!!p.image_count && <div className="mt-2 text-xs text-gray-600">{p.image_count} image{p.image_count > 1 ? 's' : ''}</div>}
+                {p.image_urls && p.image_urls.length > 0 && (
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    {p.image_urls.map((url, idx) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img key={idx} src={url} alt="" className="aspect-square w-full rounded object-cover" />
+                    ))}
+                  </div>
+                )}
                 <div className="mt-3">
                   <Link href={`/post/${p.id}`} className="hx-btn hx-btn--outline-primary">Open thread</Link>
                 </div>
