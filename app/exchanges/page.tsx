@@ -19,7 +19,7 @@ type ReqRow = {
   requester?: { id: string; display_name: string | null };
 };
 
-type Tab = 'received' | 'sent';
+type Tab = 'received' | 'sent' | 'fulfilled';
 
 type ChatMsg = {
   id: string;
@@ -48,7 +48,6 @@ function MessageThread({
   tab: Tab;
   autoOpen?: boolean;
 }) {
-  // ... (leave your MessageThread code here unchanged)
   const [open, setOpen] = useState<boolean>(!!autoOpen);
   const [loading, setLoading] = useState(false);
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -311,11 +310,12 @@ function ExchangesContent() {
             requester:profiles ( id, display_name )
           `)
           .eq('offers.owner_id', uid)
+          .neq('status', 'fulfilled')          // ACTIVE ONLY
           .order('created_at', { ascending: false });
 
         if (error) throw error;
         setItems((data || []) as unknown as ReqRow[]);
-      } else {
+      } else if (tab === 'sent') {
         const { data, error } = await supabase
           .from('requests')
           .select(`
@@ -324,10 +324,47 @@ function ExchangesContent() {
             requester:profiles ( id, display_name )
           `)
           .eq('requester_profile_id', uid)
+          .neq('status', 'fulfilled')          // ACTIVE ONLY
           .order('created_at', { ascending: false });
 
         if (error) throw error;
         setItems((data || []) as unknown as ReqRow[]);
+      } else {
+        // FULFILLED: union of both sides where status is fulfilled
+        const [rx, sx] = await Promise.all([
+          supabase
+            .from('requests')
+            .select(`
+              id, offer_id, requester_profile_id, note, status, created_at, updated_at,
+              offers!inner ( id, title, owner_id ),
+              requester:profiles ( id, display_name )
+            `)
+            .eq('offers.owner_id', uid)
+            .eq('status', 'fulfilled')
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('requests')
+            .select(`
+              id, offer_id, requester_profile_id, note, status, created_at, updated_at,
+              offers ( id, title, owner_id ),
+              requester:profiles ( id, display_name )
+            `)
+            .eq('requester_profile_id', uid)
+            .eq('status', 'fulfilled')
+            .order('created_at', { ascending: false }),
+        ]);
+
+        const rxRows = (rx.data || []) as unknown as ReqRow[];
+        const sxRows = (sx.data || []) as unknown as ReqRow[];
+        // de-dupe and sort newest first
+        const seen = new Set<string>();
+        const merged = [...rxRows, ...sxRows].filter((r) => {
+          if (seen.has(r.id)) return false;
+          seen.add(r.id);
+          return true;
+        });
+        merged.sort((a, b) => (a.created_at > b.created_at ? -1 : 1));
+        setItems(merged);
       }
     } catch (e: any) {
       console.error(e);
@@ -344,6 +381,7 @@ function ExchangesContent() {
 
   const received = useMemo(() => (tab === 'received' ? items : []), [tab, items]);
   const sent = useMemo(() => (tab === 'sent' ? items : []), [tab, items]);
+  const fulfilled = useMemo(() => (tab === 'fulfilled' ? items : []), [tab, items]);
 
   async function notify(
     profileId: string,
@@ -395,6 +433,12 @@ function ExchangesContent() {
             offer_id: req.offer_id,
           });
       }
+
+      // If the user marks something fulfilled while on the active tabs,
+      // move it out of view naturally by reloading.
+      if (next === 'fulfilled') {
+        await load();
+      }
     } catch (e: any) {
       console.error(e);
       setMsg(e?.message ?? 'Update failed.');
@@ -422,6 +466,14 @@ function ExchangesContent() {
             }`}
           >
             Sent
+          </button>
+          <button
+            onClick={() => setTab('fulfilled')}
+            className={`rounded border px-3 py-1 text-sm ${
+              tab === 'fulfilled' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'
+            }`}
+          >
+            Fulfilled
           </button>
         </div>
       </div>
@@ -487,7 +539,7 @@ function ExchangesContent() {
             </li>
           ))}
           {!loading && received.length === 0 && (
-            <p className="text-sm text-gray-600">No requests yet.</p>
+            <p className="text-sm text-gray-600">No active requests you’re providing.</p>
           )}
         </ul>
       )}
@@ -534,7 +586,44 @@ function ExchangesContent() {
             </li>
           ))}
           {!loading && sent.length === 0 && (
-            <p className="text-sm text-gray-600">No sent requests.</p>
+            <p className="text-sm text-gray-600">No active requests you’ve sent.</p>
+          )}
+        </ul>
+      )}
+
+      {tab === 'fulfilled' && me && (
+        <ul className="space-y-3">
+          {fulfilled.map((r) => (
+            <li key={r.id} className="rounded border p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm text-gray-600">
+                    {new Date(r.created_at).toLocaleString()}
+                  </div>
+                  <div className="mt-1">
+                    <Link href={`/offers/${r.offer_id}`} className="underline">
+                      {r.offers?.title ?? 'this offer'}
+                    </Link>
+                  </div>
+                  <div className="mt-2 whitespace-pre-wrap text-sm">{r.note}</div>
+                  <div className="mt-2 text-xs">
+                    Status: <span className="font-semibold">{r.status}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/exchanges?thread=${r.id}`}
+                    className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
+                  >
+                    Open
+                  </Link>
+                </div>
+              </div>
+            </li>
+          ))}
+          {!loading && fulfilled.length === 0 && (
+            <p className="text-sm text-gray-600">No fulfilled exchanges yet.</p>
           )}
         </ul>
       )}
