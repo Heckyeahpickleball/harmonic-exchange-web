@@ -1,4 +1,3 @@
-// app/offers/new/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -174,10 +173,11 @@ export default function NewOfferPage() {
 
         <UploadImages value={images} onChange={setImages} />
 
+        {/* Submit — unified teal button styling */}
         <button
           type="submit"
           disabled={submitting}
-          className="hx-btn hx-btn--brand disabled:opacity-50"
+          className="hx-btn hx-btn--primary disabled:opacity-50"
         >
           {submitting ? 'Sharing…' : 'Share Your Gifts'}
         </button>
@@ -187,7 +187,7 @@ export default function NewOfferPage() {
       </form>
 
       <div className="pt-4">
-        <Link href="/offers" className="hx-link text-sm">
+        <Link href="/offers" className="hx-btn hx-btn--outline-primary text-sm">
           ← Back to Offerings
         </Link>
       </div>

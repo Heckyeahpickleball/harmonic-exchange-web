@@ -68,12 +68,12 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* NEW: slim section art divider */}
+      {/* Slim people-illustration divider on cream background */}
       <SectionArt src="/section-people.png" alt="People connecting in harmony" />
 
       {/* Why it's different — TINTED LIST */}
       <section className="hx-section hx-section--cool">
-        <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
+        <div className="mx-auto max-w-6xl px-4 pt-8 pb-14 sm:pt-10 sm:pb-16">
           <h3 className="text-center text-2xl font-bold">Why Harmonic Exchange is different</h3>
           <p className="mx-auto mt-4 max-w-3xl text-center text-[var(--hx-cool-ink-muted)]">
             This isn’t bartering, and it’s not transactional. It’s a <em>flow economy</em>—value shared,
@@ -96,6 +96,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* NEW: teal wave divider before “How it works” */}
+      <WaveDivider />
 
       {/* How it works — CARDS */}
       <section className="bg-white">
@@ -168,10 +171,37 @@ function SectionArt({ src, alt }: { src: string; alt: string }) {
         src={src}
         alt={alt}
         width={1200}
-        height={140}
+        height={220}
         className="hx-section-art"
         priority
       />
+    </div>
+  );
+}
+
+function WaveDivider() {
+  // inline SVG so you don’t need to add a file; inherits the teal brand
+  return (
+    <div className="hx-art-wrap" aria-hidden="true">
+      <svg
+        className="hx-section-art"
+        viewBox="0 0 1200 220"
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+      >
+        <defs>
+          <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="var(--hx-brand)" />
+            <stop offset="60%" stopColor="#11a39b" />
+            <stop offset="100%" stopColor="#14b8a6" />
+          </linearGradient>
+        </defs>
+        <path
+          d="M0,120 C200,60 350,180 600,120 C850,60 1000,180 1200,120 L1200,220 L0,220 Z"
+          fill="url(#g)"
+          opacity="0.85"
+        />
+      </svg>
     </div>
   );
 }
