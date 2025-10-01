@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -14,14 +14,36 @@ function slugify(s: string) {
     .toLowerCase();
 }
 
+// Recommended About template; we lightly interpolate the city if provided.
+function buildRecommendedAbout(city?: string, country?: string) {
+  const where = [city?.trim(), country?.trim()].filter(Boolean).join(', ');
+  return (
+`Harmonic Exchange is a gift-first community practicing a post-currency way of sharing value. We offer time, skills, products, services, education, coaching, presence, and creativity — freely given and received with dignity.
+
+This circle${where ? ` in ${where}` : ''} meets regularly to host share circles, skill-shares, and community projects. We keep it human-scale, inclusive, and rhythmical. Participation is voluntary and anchored in trust, responsibility, and care.
+
+New members are welcome to observe, share, or simply be present. Come as you are.`
+  );
+}
+
 export default function StartChapterPage() {
   const router = useRouter();
   const [city, setCity] = useState('');
   const [country, setCountry] = useState('');
-  const [about, setAbout] = useState('');
+
+  // Start with our recommended text; keep it editable.
+  const [about, setAbout] = useState(buildRecommendedAbout('', ''));
   const [agree, setAgree] = useState(false);
   const [msg, setMsg] = useState<string>('');
   const [busy, setBusy] = useState(false);
+
+  // Live preview of auto-name
+  const autoName = useMemo(() => `Harmonic Exchange- ${city || 'City'}`, [city]);
+
+  // If the user clicks "Use recommended", rebuild using current city/country.
+  function resetAboutToRecommended() {
+    setAbout(buildRecommendedAbout(city, country));
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -38,10 +60,10 @@ export default function StartChapterPage() {
         return;
       }
 
-      // Auto-name: "Harmonic Exchange- {city}"
+      // Auto-name
       const name = `Harmonic Exchange- ${city.trim()}`;
 
-      // Predictable slug, prefer city-country
+      // Predictable unique slug: city-country[-n]
       const baseSlug = slugify(`${city}-${country}`);
       let finalSlug = baseSlug;
       for (let i = 0; i < 12; i++) {
@@ -54,17 +76,16 @@ export default function StartChapterPage() {
         finalSlug = `${baseSlug}-${i + 2}`;
       }
 
-      // Insert (tolerates older schemas; PostgREST ignores unknown/missing cols)
       const insertPayload: any = {
         name,
         city,
         country,
-        about: about || null,
+        about: about && about.trim().length ? about.trim() : null,
         slug: finalSlug,
         type: 'chapter',
         created_by: auth.user.id,
         anchor_agreed_at: new Date().toISOString(),
-        status: 'pending',
+        status: 'pending', // tolerated if column exists; ignored if not
       };
 
       const { data: gRow, error: gErr } = await supabase
@@ -72,7 +93,6 @@ export default function StartChapterPage() {
         .insert(insertPayload)
         .select('id,slug')
         .single();
-
       if (gErr) throw gErr;
 
       // Creator becomes anchor
@@ -82,7 +102,7 @@ export default function StartChapterPage() {
         role: 'anchor',
       });
 
-      // Go to the new chapter detail page (creator may view even if pending)
+      // Redirect to chapter (creator can view even if pending)
       router.push(`/chapters/${gRow.slug}`);
     } catch (err: any) {
       console.error(err);
@@ -100,7 +120,7 @@ export default function StartChapterPage() {
       </p>
 
       <form onSubmit={onSubmit} className="mt-8 hx-card p-5 space-y-4">
-        {/* No name field — we auto-name as "Harmonic Exchange- {city}" */}
+        {/* No "name" field — auto-named as "Harmonic Exchange- {city}" */}
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="block text-sm font-medium">City</label>
@@ -125,11 +145,24 @@ export default function StartChapterPage() {
         <div>
           <label className="block text-sm font-medium">About</label>
           <textarea
-            className="mt-1 w-full rounded border px-3 py-2 min-h-[120px]"
+            className="mt-1 w-full rounded border px-3 py-2 min-h-[160px]"
             value={about}
             onChange={(e)=>setAbout(e.target.value)}
             placeholder="A few sentences about your chapter…"
           />
+          <div className="mt-1 flex flex-wrap items-center gap-3">
+            <p className="text-xs text-gray-600">
+              This is the recommended About text. You can edit or delete it. Final copy is subject to admin approval.
+            </p>
+            <button
+              type="button"
+              onClick={resetAboutToRecommended}
+              className="ml-auto hx-btn hx-btn--outline-primary text-xs px-2 py-1"
+              title="Restore the suggested About text"
+            >
+              Use recommended
+            </button>
+          </div>
         </div>
 
         <label className="flex items-start gap-2 text-sm">
@@ -145,9 +178,9 @@ export default function StartChapterPage() {
           </button>
         </div>
 
-        {/* Preview of auto-name */}
+        {/* Live preview of the auto-name */}
         <p className="text-xs text-gray-600">
-          Your chapter will be named <span className="font-mono">Harmonic Exchange- {city || 'City'}</span>.
+          Your chapter will be named <span className="font-mono">{autoName}</span>.
         </p>
       </form>
 
