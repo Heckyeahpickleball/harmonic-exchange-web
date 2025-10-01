@@ -2,47 +2,92 @@
 
 /* === Harmonic Exchange design tokens === */
 :root{
+  /* neutrals */
   --hx-bg: #ffffff;
-  --hx-ink: #111827;           /* gray-900 */
-  --hx-muted: #6b7280;         /* gray-500 */
-  --hx-panel: #ecfdf5;         /* emerald-50 */
-  --hx-brand: #059669;         /* emerald-600 */
-  --hx-brand-2: #d1fae5;       /* emerald-100 */
-  --hx-accent: #ef4444;        /* rose-500 */
-  --hx-ring: 0 0 0 3px rgba(5,150,105,.25);
+  --hx-surface: #f7fafc;       /* light surface for sections */
+  --hx-ink: #0f172a;           /* slate-900 */
+  --hx-muted: #475569;         /* slate-600 */
+
+  /* brand — aligned to cover (teal ↔ amber) */
+  --hx-brand: #0ea5a8;         /* teal-500-ish */
+  --hx-brand-strong: #0f766e;  /* teal-700 */
+  --hx-accent: #f59e0b;        /* amber-500 */
+  --hx-accent-strong: #d97706; /* amber-600 */
+
+  /* utility */
+  --hx-ring: 0 0 0 3px rgba(14,165,168,.28);
+  --hx-card-border: rgba(2, 6, 23, 0.08);
+  --hx-card-shadow: 0 1px 2px rgba(2, 6, 23, 0.06);
+
+  /* hero gradient over image */
+  --hx-hero-from: rgba(16, 185, 129, 0.65); /* emerald/teal glow */
+  --hx-hero-to: rgba(245, 158, 11, 0.72);   /* amber glow */
 }
 
-@theme inline {
-  --color-background: var(--hx-bg);
-  --color-foreground: var(--hx-ink);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-body {
+/* Use the system sans stack (original feel) */
+html, body {
   background: var(--hx-bg);
   color: var(--hx-ink);
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+               "Helvetica Neue", Arial, "Noto Sans",
+               "Apple Color Emoji", "Segoe UI Emoji";
 }
 
-/* Buttons (solid + ghost) */
-.hx-btn{ border-radius: 1rem; padding:.5rem 1rem; font-weight:500; }
-.hx-btn--brand{ color:#fff; background: var(--hx-brand); }
-.hx-btn--brand:hover{ filter: brightness(0.95); }
-.hx-btn--ghost{ border:1px solid rgba(0,0,0,.12); }
+/* HERO with cover image */
+.hx-hero{
+  position: relative;
+  padding: clamp(72px, 10vw, 120px) 1rem;
+  background-image:
+    linear-gradient(90deg, var(--hx-hero-from), var(--hx-hero-to)),
+    url('/harmonic-cover.jpg');
+  background-size: cover;
+  background-position: center;
+  border-bottom: 1px solid var(--hx-card-border);
+}
+
+/* Buttons */
+.hx-btn{
+  border-radius: 1rem;
+  padding: .625rem 1rem;
+  font-weight: 600;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  box-shadow: 0 1px 0 rgba(0,0,0,.03);
+  transition: filter .15s ease, box-shadow .15s ease, transform .05s ease;
+}
+.hx-btn--brand{
+  color: #fff;
+  background: linear-gradient(180deg, var(--hx-brand), var(--hx-brand-strong));
+}
+.hx-btn--brand:hover{ filter: brightness(1.03); }
+.hx-btn--ghost{
+  border: 1px solid var(--hx-card-border);
+  background: #fff;
+}
 .hx-btn--ghost:hover{ background: #f9fafb; }
 
 /* Cards */
-.hx-card{ border-radius: 1rem; background:#fff; border:1px solid rgba(0,0,0,.1); box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.hx-card{
+  border-radius: 1rem;
+  background: #fff;
+  border: 1px solid var(--hx-card-border);
+  box-shadow: var(--hx-card-shadow);
+}
 
 /* Links */
-.hx-link{ text-decoration: underline; text-underline-offset: 4px; text-decoration-color: #d1d5db; }
-.hx-link:hover{ text-decoration-color:#6b7280; }
+.hx-link{
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-color: #cbd5e1;
+}
+.hx-link:hover{ text-decoration-color: #64748b; }
 
 /* Focus ring */
-:focus-visible{ outline:none; box-shadow: var(--hx-ring); }
+:focus-visible{ outline: none; box-shadow: var(--hx-ring); }
 
-/* Button affordances */
+/* Click affordances */
 button,[role="button"],input[type="button"],input[type="submit"]{ cursor:pointer; }
 button{ transition: background-color .15s ease, box-shadow .15s ease, transform .05s ease; }
 button:hover{ box-shadow: inset 0 0 0 9999px rgba(0,0,0,0.03); }
