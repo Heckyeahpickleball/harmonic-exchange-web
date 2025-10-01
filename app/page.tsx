@@ -29,74 +29,47 @@ export default function HomePage() {
 
   return (
     <main className="min-h-[80vh]">
-      {/* Hero */}
-      <section className="mx-auto max-w-6xl px-4 pt-12 pb-10 sm:pt-16 sm:pb-14">
-        <div className="grid gap-10 md:grid-cols-2 md:items-center">
-          <div>
-            <div className="mb-3 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs text-gray-600">
-              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-              Community first • Gift-based
-            </div>
-            <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
-              Share your gifts. Receive with grace.
-            </h1>
-            <p className="mt-4 text-lg text-gray-600">
-              Harmonic Exchange isn’t about transactions. It’s a place to offer what’s natural for you—skills,
-              presence, care, creativity—without keeping score. And when you need support, the community is here.
-            </p>
+      {/* HERO — cover image (image already contains the title/subtitle) */}
+      <section className="hx-hero">
+        {/* Keep text for accessibility/SEO only */}
+        <h1 className="sr-only">HARMONIC EXCHANGE</h1>
+        <p className="sr-only">Exploring a new way of living through cooperation and mutual support</p>
 
-            <div className="mt-6 flex flex-wrap gap-3">
-              <Link
-                href="/browse"
-                className="rounded-2xl bg-black px-5 py-2.5 text-white shadow transition hover:shadow-md"
-              >
-                Explore community offerings
-              </Link>
+        <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-4 text-center">
+          {/* CTA chip group only */}
+          <div className="mt-2 flex flex-wrap justify-center gap-3 rounded-full bg-white/20 p-2 backdrop-blur-sm ring-1 ring-white/30">
+            <Link href="/browse" className="hx-btn hx-btn--brand">
+              Explore community offerings
+            </Link>
 
-              {loading ? (
-                <span className="rounded-2xl border px-5 py-2.5 text-gray-500">Checking…</span>
-              ) : user ? (
-                <>
-                  <Link
-                    href="/offers/new"
-                    className="rounded-2xl border px-5 py-2.5 shadow-sm transition hover:bg-gray-50"
-                  >
-                    Share a gift
-                  </Link>
-                  <Link
-                    href="/profile"
-                    className="rounded-2xl border px-5 py-2.5 shadow-sm transition hover:bg-gray-50"
-                  >
-                    My space
-                  </Link>
-                </>
-              ) : (
-                <Link
-                  href="/sign-in"
-                  className="rounded-2xl border px-5 py-2.5 shadow-sm transition hover:bg-gray-50"
-                >
-                  Join the community
+            {loading ? (
+              <span className="hx-btn hx-btn--ghost text-gray-600">Checking…</span>
+            ) : user ? (
+              <>
+                <Link href="/offers/new" className="hx-btn hx-btn--ghost">
+                  Share My Value
                 </Link>
-              )}
-            </div>
-          </div>
-
-          {/* Soft visual */}
-          <div className="relative order-first h-64 overflow-hidden rounded-3xl border bg-gradient-to-br from-emerald-50 to-white p-4 md:order-last md:h-80">
-            <div className="grid h-full grid-rows-3 gap-3">
-              <Card title="A gift offered" text="Breathwork circle • Sundays on Zoom" />
-              <Card title="Care received" text="Meal support for new parents" />
-              <Card title="Creative spark" text="Songwriting listening hour" />
-            </div>
-            <div className="pointer-events-none absolute -right-2 -top-2 h-24 w-24 rounded-full bg-emerald-200/40 blur-3xl" />
+                <Link href="/profile" className="hx-btn hx-btn--ghost">
+                  My space
+                </Link>
+              </>
+            ) : (
+              <Link href="/sign-in" className="hx-btn hx-btn--ghost">
+                Join the community
+              </Link>
+            )}
           </div>
         </div>
       </section>
 
-      {/* Principles */}
-      <section className="border-t bg-gray-50/60">
+      {/* What it is */}
+      <section className="border-t bg-[var(--hx-surface)]">
         <div className="mx-auto max-w-6xl px-4 py-12 sm:py-16">
-          <h2 className="text-center text-2xl font-bold">Our principles</h2>
+          <h2 className="text-center text-2xl font-bold">What it is</h2>
+          <p className="mx-auto mt-4 max-w-3xl text-center text-[var(--hx-muted)]">
+            Harmonic Exchange isn’t about transactions. It’s a place to offer what’s natural for you—skills,
+            presence, care, creativity—without keeping score. And when you need support, the community is here.
+          </p>
           <div className="mt-8 grid gap-6 sm:grid-cols-3">
             <Principle
               title="Give freely"
@@ -106,47 +79,34 @@ export default function HomePage() {
               title="Receive openly"
               body="Ask when your soul needs or wants something. Let the community care for you."
             />
-            <Principle
-              title="No tally"
-              body="We don’t track debts. Generosity and trust keep energy moving."
-            />
+            <Principle title="No tally" body="We don’t track debts. Generosity and trust keep energy moving." />
           </div>
         </div>
       </section>
 
-      {/* How it flows */}
+      {/* How it works */}
       <section>
         <div className="mx-auto max-w-6xl px-4 py-12 sm:py-16">
-          <h2 className="text-center text-2xl font-bold">How it flows</h2>
+          <h2 className="text-center text-2xl font-bold">How it works</h2>
           <div className="mt-8 grid gap-6 sm:grid-cols-3">
-            <Step
-              n="1"
-              title="Create your offering"
-              body="Write a short invitation. Add an image if you like. Hit “Share a gift.”"
-            />
+            <Step n="1" title="Share My Value" body="Create an offering with a short invitation and image." />
             <Step
               n="2"
               title="Be discoverable"
-              body="Others can find your offering on Browse or your profile. You can also share your link."
+              body="Others find your offering on Browse or your profile. You can share your link too."
             />
             <Step
               n="3"
-              title="Ask when needed"
+              title="Ask to Receive"
               body="When something calls to you, request support. We keep eligibility simple but non-transactional."
             />
           </div>
 
           <div className="mt-8 flex justify-center gap-3">
-            <Link
-              href="/offers/new"
-              className="rounded-2xl bg-emerald-600 px-5 py-2.5 font-medium text-white shadow transition hover:bg-emerald-700"
-            >
-              Share a gift
+            <Link href="/offers/new" className="hx-btn hx-btn--brand">
+              Share My Value
             </Link>
-            <Link
-              href="/browse"
-              className="rounded-2xl border px-5 py-2.5 shadow-sm transition hover:bg-gray-50"
-            >
+            <Link href="/browse" className="hx-btn hx-btn--ghost">
               See offerings
             </Link>
           </div>
@@ -157,7 +117,7 @@ export default function HomePage() {
       <section className="border-t bg-white">
         <div className="mx-auto max-w-6xl px-4 py-12 sm:py-16">
           <h2 className="text-center text-2xl font-bold">Community agreements</h2>
-          <ul className="mx-auto mt-6 max-w-3xl list-disc space-y-2 pl-6 text-gray-700">
+          <ul className="mx-auto mt-6 max-w-3xl list-disc space-y-2 pl-6 text-[var(--hx-ink)]/80">
             <li>Honor consent, boundaries, and safety—always.</li>
             <li>Use clear, kind communication. Confirm mutual fit before meeting.</li>
             <li>Keep it human-scale. If money is requested, it doesn’t belong here.</li>
@@ -168,12 +128,12 @@ export default function HomePage() {
 
       {/* Footer */}
       <footer className="border-t">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-6 text-sm text-gray-600">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-6 text-sm text-[var(--hx-muted)]">
           <span>© {new Date().getFullYear()} Harmonic Exchange</span>
           <div className="flex gap-4">
-            <Link href="/browse" className="hover:underline">Browse</Link>
-            <Link href="/offers/new" className="hover:underline">Share a gift</Link>
-            <Link href="/profile" className="hover:underline">My space</Link>
+            <Link href="/browse" className="hx-link">Browse</Link>
+            <Link href="/offers/new" className="hx-link">Share My Value</Link>
+            <Link href="/profile" className="hx-link">My space</Link>
           </div>
         </div>
       </footer>
@@ -183,32 +143,27 @@ export default function HomePage() {
 
 /* ——— tiny presentational helpers ——— */
 
-function Card({ title, text }: { title: string; text: string }) {
-  return (
-    <div className="rounded-2xl bg-white/80 p-3 shadow-sm backdrop-blur">
-      <div className="text-sm font-semibold">{title}</div>
-      <div className="mt-1 text-sm text-gray-600">{text}</div>
-    </div>
-  );
-}
-
 function Principle({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-2xl border bg-white p-5 shadow-sm">
-      <div className="mb-2 text-sm font-semibold text-emerald-600">{title}</div>
-      <p className="text-gray-600">{body}</p>
+    <div className="hx-card">
+      <div className="p-5">
+        <div className="mb-2 text-sm font-semibold text-[var(--hx-brand)]">{title}</div>
+        <p className="text-[var(--hx-muted)]">{body}</p>
+      </div>
     </div>
   );
 }
 
 function Step({ n, title, body }: { n: string; title: string; body: string }) {
   return (
-    <div className="rounded-2xl border bg-white p-5 shadow-sm">
-      <div className="mb-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-xs font-semibold text-white">
-        {n}
+    <div className="hx-card">
+      <div className="p-5">
+        <div className="mb-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--hx-brand)] text-xs font-semibold text-white">
+          {n}
+        </div>
+        <div className="font-semibold">{title}</div>
+        <p className="mt-1 text-[var(--hx-muted)]">{body}</p>
       </div>
-      <div className="font-semibold">{title}</div>
-      <p className="mt-1 text-gray-600">{body}</p>
     </div>
   );
 }
