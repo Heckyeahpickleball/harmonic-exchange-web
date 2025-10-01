@@ -1,9 +1,15 @@
-/* HX v0.9 — Admin panel with emails + delete + owner labels + offer title search
-   Tightened permissions:
-   - Audit tab visible to admins only
-   - Moderators cannot act on admin-owned offers (UI + client guard)
-   File: app/admin/page.tsx
+/* HX v1.1 — Admin panel (Users, Offers, Chapters, Audit)
+   - NEW: Chapters tab with pending/active/suspended views, search, and Approve/Decline.
+   - Approve sets groups.status='active' (triggers your starter-kit seeding).
+   - Decline sets groups.status='archived' (acts as “declined” per Phase 1 decisions).
+   - Only admins can change chapter status. Mods can view.
+
+   Keeps:
+   - Users tab: roles/status + reset ask quota + fulfilled received count
+   - Offers tab: role-aware actions (mods can’t act on admin-owned offers)
+   - Audit tab: admins only
 */
+
 'use client';
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
@@ -15,6 +21,8 @@ import AskWindowUsage from '@/components/AskWindowUsage';
 type Role = 'user' | 'moderator' | 'admin';
 type Status = 'active' | 'suspended';
 
+/* ===== Profiles / Users ===== */
+
 type Profile = {
   id: string;
   display_name: string;
@@ -22,6 +30,8 @@ type Profile = {
   status: Status;
   created_at: string;
 };
+
+/* ===== Offers ===== */
 
 type OfferRow = {
   id: string;
@@ -31,11 +41,13 @@ type OfferRow = {
   created_at: string;
 };
 
+/* ===== Admin actions ===== */
+
 type AdminAction = {
   id: string;
   admin_profile_id: string;
   action: string;
-  target_type: 'profile' | 'offer';
+  target_type: 'profile' | 'offer' | 'group';
   target_id: string;
   reason: string | null;
   created_at: string;
@@ -43,8 +55,24 @@ type AdminAction = {
   target_label?: string;
 };
 
+/* ===== Chapters / Groups ===== */
+
+type GroupStatus = 'pending' | 'active' | 'suspended' | 'archived';
+type GroupRow = {
+  id: string;
+  name: string;
+  slug: string | null;
+  city: string | null;
+  country: string | null;
+  status: GroupStatus | null;
+  created_by: string | null;
+  created_at: string;
+  about?: string | null;
+};
+
 type EmailRow = { id: string; email: string | null; display_name?: string };
-type Tab = 'users' | 'offers' | 'audit';
+
+type Tab = 'users' | 'offers' | 'chapters' | 'audit';
 
 export default function Page() {
   return (
@@ -54,7 +82,7 @@ export default function Page() {
   );
 }
 
-/** Tiny client component to read fulfilled count from the view (created in SQL) */
+/** Small component to show "Fulfilled received" (view created in SQL) */
 function FulfilledCount({ profileId }: { profileId: string }) {
   const [count, setCount] = useState<number | null>(null);
   const [error, setError] = useState<string>('');
@@ -104,8 +132,8 @@ function AdminContent() {
 
   const [me, setMe] = useState<Profile | null>(null);
   const [tab, setTab] = useState<Tab>(initialUrlTab ?? 'users');
-  const [pendingOnly, setPendingOnly] = useState<boolean>(urlPendingOnly);
 
+  const [pendingOnly, setPendingOnly] = useState<boolean>(urlPendingOnly);
   const [offerQ, setOfferQ] = useState('');
 
   const [users, setUsers] = useState<Profile[]>([]);
@@ -113,11 +141,13 @@ function AdminContent() {
 
   const [offers, setOffers] = useState<OfferRow[]>([]);
   const ownerRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
-
-  // include owner ROLE so we can gate moderator actions on admin-owned offers
   const [ownerInfo, setOwnerInfo] = useState<
     Record<string, { name: string; email: string | null; role: Role | undefined }>
   >({});
+
+  const [groups, setGroups] = useState<GroupRow[]>([]);
+  const [groupQ, setGroupQ] = useState('');
+  const [groupFilter, setGroupFilter] = useState<'pending' | 'active' | 'suspended' | 'archived' | 'all'>('pending');
 
   const [audit, setAudit] = useState<AdminAction[]>([]);
   const [loading, setLoading] = useState(false);
@@ -165,7 +195,7 @@ function AdminContent() {
     return false;
   };
 
-  // Fetch tab data
+  // ===== Fetch tab data =====
   useEffect(() => {
     if (!canViewAdmin) return;
 
@@ -217,6 +247,18 @@ function AdminContent() {
           }
         }
 
+        if (tab === 'chapters') {
+          // tolerate older schemas by selecting columns individually
+          const { data, error } = await supabase
+            .from('groups')
+            .select('id,name,slug,city,country,status,created_by,created_at,about')
+            .order('created_at', { ascending: false })
+            .limit(300);
+
+          if (error) throw error;
+          setGroups((data || []) as GroupRow[]);
+        }
+
         if (tab === 'audit') {
           if (!isAdmin) {
             setTab('users');
@@ -242,30 +284,39 @@ function AdminContent() {
           }
 
           const profileTargets = acts.filter((a) => a.target_type === 'profile').map((a) => a.target_id);
-          const offerTargets = acts.filter((a) => a.target_type === 'offer').map((a) => a.target_id);
+          const offerTargets   = acts.filter((a) => a.target_type === 'offer').map((a) => a.target_id);
+          const groupTargets   = acts.filter((a) => a.target_type === 'group').map((a) => a.target_id);
 
-          const [profileRows, offerRows] = await Promise.all([
+          const [profileRows, offerRows, groupRows] = await Promise.all([
             profileTargets.length
               ? supabase.from('profiles').select('id,display_name').in('id', profileTargets)
               : Promise.resolve({ data: [] as any[] }),
             offerTargets.length
               ? supabase.from('offers').select('id,title').in('id', offerTargets)
               : Promise.resolve({ data: [] as any[] }),
+            groupTargets.length
+              ? supabase.from('groups').select('id,name,city,country').in('id', groupTargets)
+              : Promise.resolve({ data: [] as any[] }),
           ]);
 
-          const profMap = new Map<string, string>();
-          for (const p of ((profileRows as any).data || []) as any[]) profMap.set(p.id, p.display_name);
+          const profMap  = new Map<string, string>();
           const offerMap = new Map<string, string>();
-          for (const o of ((offerRows as any).data || []) as any[]) offerMap.set(o.id, o.title);
+          const groupMap = new Map<string, string>();
+
+          for (const p of ((profileRows as any).data || []) as any[]) profMap.set(p.id, p.display_name);
+          for (const o of ((offerRows   as any).data || []) as any[]) offerMap.set(o.id, o.title);
+          for (const g of ((groupRows   as any).data || []) as any[]) {
+            groupMap.set(g.id, `${g.name}${g.city ? ` — ${g.city}` : ''}${g.country ? `, ${g.country}` : ''}`);
+          }
 
           setAudit(
             acts.map((a) => ({
               ...a,
               admin_name: adminMap.get(a.admin_profile_id) || a.admin_profile_id,
               target_label:
-                a.target_type === 'profile'
-                  ? profMap.get(a.target_id) || a.target_id
-                  : offerMap.get(a.target_id) || a.target_id,
+                a.target_type === 'profile' ? (profMap.get(a.target_id) || a.target_id) :
+                a.target_type === 'offer'   ? (offerMap.get(a.target_id) || a.target_id) :
+                a.target_type === 'group'   ? (groupMap.get(a.target_id) || a.target_id) : a.target_id
             }))
           );
         }
@@ -305,7 +356,18 @@ function AdminContent() {
 
   const usersVisible = useMemo(() => users, [users]);
 
-  // ===== Actions =====
+  const groupsVisible = useMemo(() => {
+    let rows = groups;
+    if (groupFilter !== 'all') rows = rows.filter((g) => (g.status || 'pending') === groupFilter);
+    const q = groupQ.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((g) => {
+      const label = `${g.name} ${g.city ?? ''} ${g.country ?? ''} ${g.slug ?? ''}`.toLowerCase();
+      return label.includes(q);
+    });
+  }, [groups, groupFilter, groupQ]);
+
+  // ===== User actions =====
   async function setUserStatus(id: string, targetRole: Role, next: Status) {
     if (!me) return;
 
@@ -372,6 +434,7 @@ function AdminContent() {
     }
   }
 
+  // ===== Offer actions =====
   async function setOfferStatus(id: string, next: OfferRow['status']) {
     if (!me) return;
 
@@ -390,6 +453,45 @@ function AdminContent() {
     } catch (e: any) {
       console.error(e);
       setMsg(e?.message ?? 'Failed to set offer status');
+    }
+  }
+
+  // ===== Chapter actions =====
+  function ensureAdminAction() {
+    if (!isAdmin) {
+      setMsg('Only admins can approve/decline chapters.');
+      return false;
+    }
+    return true;
+  }
+
+  async function setGroupStatus(id: string, next: GroupStatus) {
+    if (!ensureAdminAction()) return;
+    setMsg('');
+    const reason = prompt(`Reason for setting chapter status to ${next}? (optional)`) || null;
+
+    try {
+      const { error } = await supabase
+        .from('groups')
+        .update({ status: next })
+        .eq('id', id);
+      if (error) throw error;
+
+      setGroups((prev) => prev.map((g) => (g.id === id ? { ...g, status: next } : g)));
+
+      // Optional: log an admin action if your RPC/table exists
+      try {
+        await supabase.from('admin_actions').insert({
+          admin_profile_id: me?.id,
+          action: `groups.status -> ${next}`,
+          target_type: 'group',
+          target_id: id,
+          reason,
+        });
+      } catch { /* non-blocking */ }
+    } catch (e: any) {
+      console.error(e);
+      setMsg(e?.message ?? 'Failed to update chapter');
     }
   }
 
@@ -420,7 +522,7 @@ function AdminContent() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Admin</h2>
         <div className="flex gap-2">
-          {(['users', 'offers'] as Tab[]).map((t) => (
+          {(['users', 'offers', 'chapters'] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -694,6 +796,155 @@ function AdminContent() {
                   <tr>
                     <td className="px-3 py-4 text-gray-600" colSpan={5}>
                       No offers.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* CHAPTERS TAB */}
+      {tab === 'chapters' && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-600">Status</label>
+              <select
+                className="rounded border px-2 py-1 text-sm"
+                value={groupFilter}
+                onChange={(e) => setGroupFilter(e.target.value as any)}
+              >
+                <option value="pending">Pending</option>
+                <option value="active">Active</option>
+                <option value="suspended">Suspended</option>
+                <option value="archived">Archived</option>
+                <option value="all">All</option>
+              </select>
+            </div>
+
+            <div className="ml-auto flex items-center gap-2">
+              <label className="text-sm text-gray-600">Search</label>
+              <input
+                value={groupQ}
+                onChange={(e) => setGroupQ(e.target.value)}
+                className="rounded border px-2 py-1 text-sm"
+                placeholder="City / country / name / slug…"
+              />
+            </div>
+          </div>
+
+          <div className="overflow-auto rounded border">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-3 py-2 text-left">Chapter</th>
+                  <th className="px-3 py-2 text-left">Slug</th>
+                  <th className="px-3 py-2 text-left">Status</th>
+                  <th className="px-3 py-2 text-left">Created</th>
+                  <th className="px-3 py-2 text-left">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groupsVisible.map((g) => {
+                  const btn =
+                    'rounded border px-2 py-1 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed';
+                  const label = g.city && g.country ? `${g.city}, ${g.country}` : g.name;
+
+                  return (
+                    <tr key={g.id} className="border-t">
+                      <td className="px-3 py-2">
+                        <div className="font-medium">{label}</div>
+                        {g.about ? <div className="text-xs text-gray-600 line-clamp-1">{g.about}</div> : null}
+                      </td>
+                      <td className="px-3 py-2">{g.slug || '—'}</td>
+                      <td className="px-3 py-2">{g.status || 'pending'}</td>
+                      <td className="px-3 py-2">{new Date(g.created_at).toLocaleDateString()}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-2">
+                          {g.status === 'pending' && (
+                            <>
+                              <button
+                                disabled={!isAdmin}
+                                title={!isAdmin ? 'Only admins can approve.' : undefined}
+                                onClick={() => setGroupStatus(g.id, 'active')}
+                                className={btn}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                disabled={!isAdmin}
+                                title={!isAdmin ? 'Only admins can decline.' : undefined}
+                                onClick={() => setGroupStatus(g.id, 'archived')}
+                                className={btn}
+                              >
+                                Decline
+                              </button>
+                            </>
+                          )}
+
+                          {g.status === 'active' && (
+                            <>
+                              <button
+                                disabled={!isAdmin}
+                                title={!isAdmin ? 'Only admins can suspend.' : undefined}
+                                onClick={() => setGroupStatus(g.id, 'suspended')}
+                                className={btn}
+                              >
+                                Suspend
+                              </button>
+                              <a
+                                className="rounded border px-2 py-1 hover:bg-gray-50"
+                                href={g.slug ? `/chapters/${g.slug}` : '#'}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                View
+                              </a>
+                            </>
+                          )}
+
+                          {g.status === 'suspended' && (
+                            <>
+                              <button
+                                disabled={!isAdmin}
+                                title={!isAdmin ? 'Only admins can activate.' : undefined}
+                                onClick={() => setGroupStatus(g.id, 'active')}
+                                className={btn}
+                              >
+                                Activate
+                              </button>
+                              <button
+                                disabled={!isAdmin}
+                                title={!isAdmin ? 'Only admins can archive.' : undefined}
+                                onClick={() => setGroupStatus(g.id, 'archived')}
+                                className={btn}
+                              >
+                                Archive
+                              </button>
+                            </>
+                          )}
+
+                          {g.status === 'archived' && (
+                            <button
+                              disabled={!isAdmin}
+                              title={!isAdmin ? 'Only admins can activate.' : undefined}
+                              onClick={() => setGroupStatus(g.id, 'active')}
+                              className={btn}
+                            >
+                              Activate
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {groupsVisible.length === 0 && (
+                  <tr>
+                    <td className="px-3 py-4 text-gray-600" colSpan={5}>
+                      No chapters.
                     </td>
                   </tr>
                 )}
