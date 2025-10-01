@@ -19,7 +19,7 @@ type ReqRow = {
   requester?: { id: string; display_name: string | null };
 };
 
-type Tab = 'received' | 'sent' | 'fulfilled';
+type Tab = 'received' | 'sent' | 'fulfilled' | 'declined';
 
 type ChatMsg = {
   id: string;
@@ -310,7 +310,7 @@ function ExchangesContent() {
             requester:profiles ( id, display_name )
           `)
           .eq('offers.owner_id', uid)
-          .neq('status', 'fulfilled')          // ACTIVE ONLY
+          .not('status', 'in', '(fulfilled,declined)')   // ACTIVE ONLY
           .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -324,12 +324,12 @@ function ExchangesContent() {
             requester:profiles ( id, display_name )
           `)
           .eq('requester_profile_id', uid)
-          .neq('status', 'fulfilled')          // ACTIVE ONLY
+          .not('status', 'in', '(fulfilled,declined)')   // ACTIVE ONLY
           .order('created_at', { ascending: false });
 
         if (error) throw error;
         setItems((data || []) as unknown as ReqRow[]);
-      } else {
+      } else if (tab === 'fulfilled') {
         // FULFILLED: union of both sides where status is fulfilled
         const [rx, sx] = await Promise.all([
           supabase
@@ -356,14 +356,36 @@ function ExchangesContent() {
 
         const rxRows = (rx.data || []) as unknown as ReqRow[];
         const sxRows = (sx.data || []) as unknown as ReqRow[];
-        // de-dupe and sort newest first
-        const seen = new Set<string>();
-        const merged = [...rxRows, ...sxRows].filter((r) => {
-          if (seen.has(r.id)) return false;
-          seen.add(r.id);
-          return true;
-        });
-        merged.sort((a, b) => (a.created_at > b.created_at ? -1 : 1));
+        const merged = dedupeNewest([...rxRows, ...sxRows]);
+        setItems(merged);
+      } else {
+        // DECLINED: union of both sides where status is declined
+        const [rx, sx] = await Promise.all([
+          supabase
+            .from('requests')
+            .select(`
+              id, offer_id, requester_profile_id, note, status, created_at, updated_at,
+              offers!inner ( id, title, owner_id ),
+              requester:profiles ( id, display_name )
+            `)
+            .eq('offers.owner_id', uid)
+            .eq('status', 'declined')
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('requests')
+            .select(`
+              id, offer_id, requester_profile_id, note, status, created_at, updated_at,
+              offers ( id, title, owner_id ),
+              requester:profiles ( id, display_name )
+            `)
+            .eq('requester_profile_id', uid)
+            .eq('status', 'declined')
+            .order('created_at', { ascending: false }),
+        ]);
+
+        const rxRows = (rx.data || []) as unknown as ReqRow[];
+        const sxRows = (sx.data || []) as unknown as ReqRow[];
+        const merged = dedupeNewest([...rxRows, ...sxRows]);
         setItems(merged);
       }
     } catch (e: any) {
@@ -382,6 +404,7 @@ function ExchangesContent() {
   const received = useMemo(() => (tab === 'received' ? items : []), [tab, items]);
   const sent = useMemo(() => (tab === 'sent' ? items : []), [tab, items]);
   const fulfilled = useMemo(() => (tab === 'fulfilled' ? items : []), [tab, items]);
+  const declined = useMemo(() => (tab === 'declined' ? items : []), [tab, items]);
 
   async function notify(
     profileId: string,
@@ -434,9 +457,8 @@ function ExchangesContent() {
           });
       }
 
-      // If the user marks something fulfilled while on the active tabs,
-      // move it out of view naturally by reloading.
-      if (next === 'fulfilled') {
+      // If moved to fulfilled or declined, reload so it leaves Active tabs.
+      if (next === 'fulfilled' || next === 'declined') {
         await load();
       }
     } catch (e: any) {
@@ -450,7 +472,7 @@ function ExchangesContent() {
     <section className="max-w-4xl">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-2xl font-bold">Exchanges</h2>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setTab('received')}
             className={`rounded border px-3 py-1 text-sm ${
@@ -474,6 +496,14 @@ function ExchangesContent() {
             }`}
           >
             Fulfilled
+          </button>
+          <button
+            onClick={() => setTab('declined')}
+            className={`rounded border px-3 py-1 text-sm ${
+              tab === 'declined' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'
+            }`}
+          >
+            Declined
           </button>
         </div>
       </div>
@@ -627,8 +657,57 @@ function ExchangesContent() {
           )}
         </ul>
       )}
+
+      {tab === 'declined' && me && (
+        <ul className="space-y-3">
+          {declined.map((r) => (
+            <li key={r.id} className="rounded border p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm text-gray-600">
+                    {new Date(r.created_at).toLocaleString()}
+                  </div>
+                  <div className="mt-1">
+                    <Link href={`/offers/${r.offer_id}`} className="underline">
+                      {r.offers?.title ?? 'this offer'}
+                    </Link>
+                  </div>
+                  <div className="mt-2 whitespace-pre-wrap text-sm">{r.note}</div>
+                  <div className="mt-2 text-xs">
+                    Status: <span className="font-semibold">{r.status}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/exchanges?thread=${r.id}`}
+                    className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
+                  >
+                    Open
+                  </Link>
+                </div>
+              </div>
+            </li>
+          ))}
+          {!loading && declined.length === 0 && (
+            <p className="text-sm text-gray-600">No declined exchanges.</p>
+          )}
+        </ul>
+      )}
     </section>
   );
+}
+
+function dedupeNewest<T extends { id: string; created_at: string }>(rows: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const r of rows) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push(r);
+  }
+  out.sort((a, b) => (a.created_at > b.created_at ? -1 : 1));
+  return out;
 }
 
 // Suspense wrapper is required for Next 15+ if you use useSearchParams in the page tree.
