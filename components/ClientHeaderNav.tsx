@@ -13,17 +13,17 @@ export default function ClientHeaderNav() {
   const [role, setRole] = useState<Role>('user');
   const [busy, setBusy] = useState(false);
 
+  // local menu state
+  const [openExplore, setOpenExplore] = useState(false);
+  const [openMove, setOpenMove] = useState(false);
+
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
       const u = data?.user?.id ?? null;
       setUid(u);
       if (u) {
-        const { data: p } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', u)
-          .single();
+        const { data: p } = await supabase.from('profiles').select('role').eq('id', u).single();
         if (p?.role) setRole(p.role as Role);
       }
     })();
@@ -43,30 +43,92 @@ export default function ClientHeaderNav() {
 
   return (
     <nav className="flex items-center justify-between gap-3 py-2">
+      {/* LEFT: brand + primary links */}
       <div className="flex flex-wrap items-center gap-3">
         <Link href="/" className="underline-offset-4 hover:underline">Home</Link>
-        <Link href="/browse" className="underline-offset-4 hover:underline">Offerings</Link>
-        <Link href="/offers/new" className="underline-offset-4 hover:underline">Share My Value</Link>
-        <Link href="/offers/mine" className="underline-offset-4 hover:underline">My Offers</Link>
 
-        <Link href="/messages" className="underline-offset-4 hover:underline">
-          Inbox <MessagesUnreadBadge />
-        </Link>
+        {/* Explore menu */}
+        <div className="relative">
+          <button
+            className="hx-btn hx-btn--secondary text-sm px-3 py-2"
+            onClick={() => {
+              setOpenExplore((v) => !v);
+              setOpenMove(false);
+            }}
+            aria-haspopup="menu"
+            aria-expanded={openExplore}
+          >
+            Explore
+          </button>
+          {openExplore && (
+            <div
+              className="absolute z-50 mt-2 w-56 hx-card p-2"
+              role="menu"
+              onMouseLeave={() => setOpenExplore(false)}
+            >
+              <Link href="/browse" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                Offerings
+              </Link>
+              <Link href="/offers/new" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                Share My Value
+              </Link>
+              <Link href="/offers/mine" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                My Offers
+              </Link>
+              <Link href="/exchanges" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                Exchanges
+              </Link>
+              <Link href="/messages" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                Inbox <span className="ml-1 align-middle"><MessagesUnreadBadge /></span>
+              </Link>
+              <Link href="/profile" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                Profile
+              </Link>
+            </div>
+          )}
+        </div>
 
-        <Link href="/exchanges" className="underline-offset-4 hover:underline">Exchanges</Link>
-        <Link href="/profile" className="underline-offset-4 hover:underline">Profile</Link>
-
-        {/* NEW: movement pages */}
-        <Link href="/about" className="underline-offset-4 hover:underline">About</Link>
-        <Link href="/chapters" className="underline-offset-4 hover:underline">Chapters</Link>
-        <Link href="/chapters/start" className="underline-offset-4 hover:underline">Start a Chapter</Link>
-        <Link href="/guidelines" className="underline-offset-4 hover:underline">Guidelines</Link>
+        {/* Movement menu */}
+        <div className="relative">
+          <button
+            className="hx-btn hx-btn--secondary text-sm px-3 py-2"
+            onClick={() => {
+              setOpenMove((v) => !v);
+              setOpenExplore(false);
+            }}
+            aria-haspopup="menu"
+            aria-expanded={openMove}
+          >
+            Movement
+          </button>
+          {openMove && (
+            <div
+              className="absolute z-50 mt-2 w-60 hx-card p-2"
+              role="menu"
+              onMouseLeave={() => setOpenMove(false)}
+            >
+              <Link href="/about" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                About the Movement
+              </Link>
+              <Link href="/chapters" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                Local Chapters
+              </Link>
+              <Link href="/chapters/start" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                Start a Chapter
+              </Link>
+              <Link href="/guidelines" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                Community Guidelines
+              </Link>
+            </div>
+          )}
+        </div>
 
         {showAdmin && (
           <Link href="/admin" className="underline-offset-4 hover:underline">Admin</Link>
         )}
       </div>
 
+      {/* RIGHT: bell + auth */}
       <div className="flex items-center gap-2">
         <NotificationsBell />
         {!uid ? (

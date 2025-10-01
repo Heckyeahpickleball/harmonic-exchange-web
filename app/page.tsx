@@ -57,12 +57,12 @@ export default function HomePage() {
         <div className="mx-auto max-w-4xl px-4">
           <div className="hx-card p-6 text-center">
             <h2 className="text-2xl font-bold tracking-tight text-[var(--hx-ink)]">
-              Welcome to Harmonic Exchange — the Flow Economy Experiment
+              Welcome to Harmonic Exchange: the Flow Economy Experiment
             </h2>
             <p className="mx-auto mt-2 max-w-2xl text-[var(--hx-muted)]">
-              A movement exploring a post-currency, gift-first, resonance-based way of sharing value. Here, offerings
-              may be <strong>time</strong>, <strong>products</strong>, <strong>services</strong>, <strong>presence</strong>,
-              or <strong>creativity</strong>—given without obligation, and received with dignity.
+              Harmonic Exchange is a post-currency, gift-first way of sharing value. People offer
+              <strong> time</strong>, <strong> products</strong>, <strong> services</strong>, <strong> presence</strong>,
+              and <strong> creativity</strong>. Everything is given freely and received with dignity.
             </p>
           </div>
         </div>
@@ -71,7 +71,7 @@ export default function HomePage() {
       {/* Wave ABOVE the Why section (white background) */}
       <WaveDivider />
 
-      {/* “Why” as a 2-column block on cream, with stronger heading and centered intro copy */}
+      {/* “Why” as a 2-column block on cream */}
       <section style={{ background: 'var(--hx-cream)' }}>
         <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-8 px-4 py-10 sm:grid-cols-2 sm:py-12">
           <div>
@@ -88,16 +88,15 @@ export default function HomePage() {
           <div>
             <h3 className="hx-heading-title text-2xl font-bold">Why Harmonic Exchange is different</h3>
             <div className="hx-heading-accent" />
-            {/* centered + a touch bolder */}
             <p className="mt-4 mx-auto max-w-prose text-center font-semibold text-[var(--hx-muted)]">
-              This isn’t bartering, and it’s not transactional. It’s a <em>flow economy</em>—value shared, not counted—
-              guided by resonance, trust, and intuitive reciprocity.
+              This isn’t bartering or transactional. It’s a flow economy where value is shared, not counted,
+              and guided by resonance, trust, and intuitive reciprocity.
             </p>
 
             <div className="mt-6 space-y-4">
               <FeatureLine
                 title="Gift-first energy"
-                body="Offer what feels light, easy, and joyful—whether that’s a product, a service, time, presence, or art."
+                body="Offer what feels light, easy, and joyful, whether that’s a product, a service, time, presence, or art."
               />
               <FeatureLine
                 title="Dignity-centered receiving"
@@ -112,10 +111,10 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Wave BEFORE “How it works” (white background, tight) */}
+      {/* Wave BEFORE “How it works” */}
       <WaveDivider />
 
-      {/* How it works — tight top padding so it sits close to the wave */}
+      {/* How it works */}
       <section className="bg-white">
         <div className="mx-auto max-w-6xl px-4 pt-8 pb-14 sm:pt-8 sm:pb-16">
           <h3 className="text-center text-2xl font-bold">How it works</h3>
@@ -145,7 +144,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Agreements — BRAND GRADIENT */}
+      {/* Agreements — brand gradient */}
       <section className="hx-section hx-section--brand">
         <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
           <h3 className="text-center text-2xl font-bold text-white">Community agreements</h3>
@@ -178,7 +177,6 @@ export default function HomePage() {
 }
 
 /* ——— helpers ——— */
-
 function WaveDivider() {
   return (
     <div className="hx-wave-wrap" aria-hidden="true">

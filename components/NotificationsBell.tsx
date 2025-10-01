@@ -24,8 +24,7 @@ type Notif = {
   created_at: string;
   read_at: string | null;
   profile_id: string;
-  // local-only flags
-  _fresh?: boolean; // just arrived via realtime in this session
+  _fresh?: boolean;
 };
 
 export default function NotificationsBell() {
@@ -35,12 +34,12 @@ export default function NotificationsBell() {
   const [rows, setRows] = useState<Notif[]>([]);
   const unread = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
 
-  // caches to enrich labels without server code
-  const titleCache = useRef(new Map<string, string>()); // offer_id -> title
-  const requesterCache = useRef(new Map<string, string>()); // request_id -> requester display_name
-  const sigSeen = useRef<Set<string>>(new Set()); // in-memory de-dupe across sessions
+  // caches
+  const titleCache = useRef(new Map<string, string>());
+  const requesterCache = useRef(new Map<string, string>());
+  const sigSeen = useRef<Set<string>>(new Set());
 
-  // ---------- enrichment helpers ----------
+  /* ---------- enrichment helpers ---------- */
   async function enrichOfferTitles(notifs: Notif[]) {
     const missing = Array.from(
       new Set(
@@ -51,18 +50,15 @@ export default function NotificationsBell() {
     );
     if (!missing.length) return;
 
-    const { data, error } = await supabase.from('offers').select('id,title').in('id', missing);
-    if (error) return;
+    const { data } = await supabase.from('offers').select('id,title').in('id', missing);
     for (const row of (data || []) as { id: string; title: string }[]) {
       titleCache.current.set(row.id, row.title);
     }
     setRows((prev) =>
       prev.map((n) => {
         const oid = n?.data?.offer_id as string | undefined;
-        if (!oid) return n;
-        const t = titleCache.current.get(oid);
-        if (!t) return n;
-        return { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } };
+        const t = oid ? titleCache.current.get(oid) : undefined;
+        return t ? { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } } : n;
       }),
     );
   }
@@ -89,15 +85,13 @@ export default function NotificationsBell() {
     setRows((prev) =>
       prev.map((n) => {
         const rid = n?.data?.request_id as string | undefined;
-        if (!rid) return n;
-        const name = requesterCache.current.get(rid);
-        if (!name) return n;
-        return { ...n, data: { ...n.data, requester_name: n.data?.requester_name ?? name } };
+        const name = rid ? requesterCache.current.get(rid) : undefined;
+        return name ? { ...n, data: { ...n.data, requester_name: n.data?.requester_name ?? name } } : n;
       }),
     );
   }
 
-  // ---------- label + href ----------
+  /* ---------- label + href ---------- */
   function label(n: Notif): { text: string; href?: string } {
     const offerId = n.data?.offer_id as string | undefined;
     const offerTitle = n.data?.offer_title as string | undefined;
@@ -106,9 +100,7 @@ export default function NotificationsBell() {
 
     switch (n.type) {
       case 'offer_pending': {
-        const href = offerId
-          ? `/admin?tab=offers&pending=1&offer=${offerId}`
-          : '/admin?tab=offers&pending=1';
+        const href = offerId ? `/admin?tab=offers&pending=1&offer=${offerId}` : '/admin?tab=offers&pending=1';
         return { text: `New offer pending${offerTitle ? `: “${offerTitle}”` : ''}`, href };
       }
       case 'request_received':
@@ -119,20 +111,11 @@ export default function NotificationsBell() {
           href: '/exchanges?tab=received',
         };
       case 'request_accepted':
-        return {
-          text: `Your request was accepted${offerTitle ? ` — “${offerTitle}”` : ''}`,
-          href: '/exchanges?tab=sent',
-        };
+        return { text: `Your request was accepted${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
       case 'request_declined':
-        return {
-          text: `Your request was declined${offerTitle ? ` — “${offerTitle}”` : ''}`,
-          href: '/exchanges?tab=sent',
-        };
+        return { text: `Your request was declined${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
       case 'request_fulfilled':
-        return {
-          text: `Request marked fulfilled${offerTitle ? ` — “${offerTitle}”` : ''}`,
-          href: '/exchanges?tab=sent',
-        };
+        return { text: `Request marked fulfilled${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
       case 'message':
       case 'message_received': {
         const snip = body ? `: ${body.slice(0, 80)}` : '';
@@ -151,34 +134,30 @@ export default function NotificationsBell() {
     }
   }
 
-  // ---------- mark read helpers ----------
+  /* ---------- mark read helpers ---------- */
   async function markAllRead() {
     if (!uid) return;
     const ids = rows.filter((r) => !r.read_at).map((r) => r.id);
     if (!ids.length) return;
-    const nowISO = new Date().toISOString();
+    const now = new Date().toISOString();
 
-    // optimistic update
-    setRows((prev) => prev.map((r) => (ids.includes(r.id) ? { ...r, read_at: nowISO, _fresh: false } : r)));
-
-    // best-effort server update
-    await supabase.from('notifications').update({ read_at: nowISO }).in('id', ids);
+    setRows((prev) => prev.map((r) => (ids.includes(r.id) ? { ...r, read_at: now, _fresh: false } : r)));
+    await supabase.from('notifications').update({ read_at: now }).in('id', ids);
   }
 
   async function markOneRead(id: string) {
     const found = rows.find((r) => r.id === id);
     if (!found || found.read_at) return;
-    const nowISO = new Date().toISOString();
-
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, read_at: nowISO, _fresh: false } : r)));
-    await supabase.from('notifications').update({ read_at: nowISO }).eq('id', id);
+    const now = new Date().toISOString();
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, read_at: now, _fresh: false } : r)));
+    await supabase.from('notifications').update({ read_at: now }).eq('id', id);
   }
 
   function sig(n: Notif) {
     return `${n.profile_id}|${n.type}|${n.data?.offer_id ?? ''}|${n.data?.request_id ?? ''}`;
-  }
+    }
 
-  // ---------- initial load + realtime ----------
+  /* ---------- initial load + realtime ---------- */
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -195,7 +174,6 @@ export default function NotificationsBell() {
 
       const initial = (list || []) as Notif[];
 
-      // de-dupe by signature
       const seen = new Set<string>();
       const dedup: Notif[] = [];
       for (const n of initial) {
@@ -209,7 +187,7 @@ export default function NotificationsBell() {
 
       void Promise.allSettled([enrichOfferTitles(dedup), enrichRequesterNames(dedup)]);
 
-      // Realtime: INSERT
+      // realtime
       const chIns = supabase
         .channel('realtime:notifications:ins')
         .on(
@@ -220,7 +198,6 @@ export default function NotificationsBell() {
             const s = sig(n);
             if (sigSeen.current.has(s)) return;
             sigSeen.current.add(s);
-            // tag as fresh for a subtle pulse
             const fresh = { ...n, _fresh: true };
             setRows((prev) => [fresh, ...prev].slice(0, 50));
             await Promise.allSettled([enrichOfferTitles([fresh]), enrichRequesterNames([fresh])]);
@@ -228,7 +205,6 @@ export default function NotificationsBell() {
         )
         .subscribe();
 
-      // Realtime: UPDATE (read_at changes elsewhere)
       const chUpd = supabase
         .channel('realtime:notifications:upd')
         .on(
@@ -236,9 +212,7 @@ export default function NotificationsBell() {
           { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `profile_id=eq.${u}` },
           (payload) => {
             const upd = payload.new as Notif;
-            setRows((prev) =>
-              prev.map((r) => (r.id === upd.id ? { ...r, read_at: upd.read_at ?? null, _fresh: false } : r)),
-            );
+            setRows((prev) => prev.map((r) => (r.id === upd.id ? { ...r, read_at: upd.read_at ?? null, _fresh: false } : r)));
           },
         )
         .subscribe();
@@ -248,64 +222,64 @@ export default function NotificationsBell() {
         supabase.removeChannel(chUpd);
       };
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---------- UI ----------
+  /* ---------- UI ---------- */
   return (
     <div className="relative">
+      {/* teal outline button */}
       <button
-        className="relative rounded border px-2 py-1 text-sm"
+        className="hx-btn hx-btn--outline-primary text-sm px-3 py-2 relative"
         onClick={() => setOpen((v) => !v)}
         title="Notifications"
         aria-label="Open notifications"
       >
-        🔔
+        <span aria-hidden>🔔</span>
         {unread > 0 && (
-          <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-amber-500 px-1 text-[11px] font-bold text-white">
+          <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-[var(--hx-brand)] px-1 text-[11px] font-bold text-white">
             {unread}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-[340px] max-w-[90vw] rounded border bg-white shadow">
+        <div className="absolute right-0 z-50 mt-2 w-[360px] max-w-[92vw] hx-card p-0">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <strong className="text-sm">Notifications</strong>
-            <button onClick={markAllRead} className="text-xs underline">
+            <button onClick={markAllRead} className="hx-btn hx-btn--secondary text-xs px-2 py-1">
               Mark all read
             </button>
           </div>
 
           <ul className="max-h-[55vh] overflow-auto">
-            {rows.length === 0 && <li className="px-3 py-3 text-sm text-gray-600">No notifications.</li>}
+            {rows.length === 0 && <li className="px-3 py-3 text-sm text-[var(--hx-muted)]">No notifications.</li>}
 
             {rows.map((n) => {
               const { text, href } = label(n);
               const ts = new Date(n.created_at).toLocaleString();
-
               const isUnread = !n.read_at;
-              const wrapperCls = [
-                'border-b px-3 py-2 text-sm transition-colors',
-                isUnread ? 'bg-amber-50' : '',
-              ].join(' ');
 
               return (
-                <li key={n.id} className={wrapperCls}>
+                <li
+                  key={n.id}
+                  className={[
+                    'border-b px-3 py-2 text-sm transition-colors',
+                    isUnread ? 'bg-teal-50/50' : '',
+                  ].join(' ')}
+                >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        {/* “New” dot when unread; subtle pulse only for fresh arrivals */}
                         {isUnread && (
                           <span
                             className={[
-                              'mt-1 inline-block h-2 w-2 rounded-full bg-amber-600',
+                              'mt-1 inline-block h-2 w-2 rounded-full bg-[var(--hx-brand)]',
                               n._fresh ? 'animate-pulse' : '',
                             ].join(' ')}
                             aria-hidden
                           />
                         )}
-                        <div className="text-[11px] text-gray-500">{ts}</div>
+                        <div className="text-[11px] text-[var(--hx-muted)]">{ts}</div>
                       </div>
                       <div className="mt-0.5 break-words">{text}</div>
                     </div>
@@ -313,13 +287,13 @@ export default function NotificationsBell() {
                     {href && (
                       <button
                         type="button"
-                        className="shrink-0 whitespace-nowrap rounded border px-2 py-1 text-xs hover:bg-gray-50"
+                        className="hx-btn hx-btn--outline-primary text-xs px-2 py-1 shrink-0"
                         onClick={async () => {
                           await markOneRead(n.id);
                           setOpen(false);
                           router.push(href);
                         }}
-                        aria-label="View related item"
+                        aria-label="View"
                         title="View"
                       >
                         View
