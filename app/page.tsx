@@ -43,7 +43,7 @@ export default function HomePage() {
           ) : user ? (
             <>
               <Link href="/offers/new" className="hx-btn hx-btn--outline-primary">Share My Value</Link>
-              <Link href="/profile" className="hx-btn hx-btn--outline-primary">Receive Support</Link>
+              <Link href="/profile" className="hx-btn hx-btn--outline-primary">Create Space</Link>
             </>
           ) : (
             <Link href="/sign-in" className="hx-btn hx-btn--outline-primary">Join the Community</Link>
@@ -67,7 +67,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Why it's different — TINTED LIST (not cards) */}
+      {/* Why it's different — TINTED LIST */}
       <section className="hx-section hx-section--cool">
         <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
           <h3 className="text-center text-2xl font-bold">Why Harmonic Exchange is different</h3>
@@ -93,7 +93,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* How it works — CARDS so it contrasts the list above */}
+      {/* How it works — CARDS */}
       <section className="bg-white">
         <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
           <h3 className="text-center text-2xl font-bold">How it works</h3>
@@ -123,7 +123,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Agreements — BRAND GRADIENT (not black) */}
+      {/* Agreements — BRAND GRADIENT */}
       <section className="hx-section hx-section--brand">
         <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
           <h3 className="text-center text-2xl font-bold text-white">Community agreements</h3>
@@ -147,7 +147,7 @@ export default function HomePage() {
           <div className="flex gap-4">
             <Link href="/browse" className="hx-link">Offerings</Link>
             <Link href="/offers/new" className="hx-link">Share My Value</Link>
-            <Link href="/profile" className="hx-link">Receive Support</Link>
+            <Link href="/profile" className="hx-link">Create Space</Link>
           </div>
         </div>
       </footer>
@@ -155,7 +155,7 @@ export default function HomePage() {
   );
 }
 
-/* ——— helpers ——— */
+/* helpers */
 
 function FeatureLine({ title, body }: { title: string; body: string }) {
   return (

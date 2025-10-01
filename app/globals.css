@@ -1,27 +1,24 @@
 @import "tailwindcss";
 
-/* Deep blue + warm gold; clear button contrast; distinct section tints */
+/* Teal brand accents pulled from the cover; warm gold remains as secondary accent */
 :root{
   --hx-bg: #ffffff;
   --hx-surface: #f6f8fb;
   --hx-ink: #0b1220;
   --hx-muted: #475569;
 
-  --hx-brand: #1e3a8a;         /* deep blue */
-  --hx-brand-strong: #1e40af;  /* brighter blue */
-  --hx-accent: #f59e0b;        /* warm golden */
+  /* TEAL brand */
+  --hx-brand: #0f766e;         /* teal-700 */
+  --hx-brand-strong: #0a5f59;  /* slightly deeper teal */
+  --hx-accent: #f59e0b;        /* warm golden for highlights */
 
-  --hx-cool: #eef2ff;          /* indigo-50 */
+  --hx-cool: #eef2ff;          /* indigo-50 (soft cool tint for sections) */
   --hx-cool-ink-muted: #475569;
 
-  --hx-deep: #0b1220;
-  --hx-deep-ink: #ffffff;
-
-  --hx-ring: 0 0 0 3px rgba(30,58,138,.28);
+  --hx-ring: 0 0 0 3px rgba(15,118,110,.28);
   --hx-card-border: rgba(2, 6, 23, 0.14);
   --hx-card-shadow: 0 1px 2px rgba(2, 6, 23, 0.08);
 
-  /* hero overlay (minimal—image leads) */
   --hx-hero-overlay: linear-gradient(0deg, rgba(255,255,255,0) 60%, rgba(255,255,255,0.0) 100%);
 }
 
@@ -61,14 +58,13 @@ html, body {
 
 /* Section themes */
 .hx-section--cool{ background: var(--hx-cool); }
-
-/* New brand gradient section (bold, not black) */
+/* Brand gradient — teal with a warm edge */
 .hx-section--brand{
-  background: linear-gradient(135deg, var(--hx-brand) 0%, #2442c1 55%, #2f52d9 100%);
+  background: linear-gradient(135deg, #0f766e 0%, #0ea5a8 55%, #14b8a6 100%);
   color: #fff;
 }
 
-/* Buttons */
+/* Buttons — now TEAL globally */
 .hx-btn{
   border-radius: 999px;
   padding: .72rem 1.15rem;
@@ -82,7 +78,7 @@ html, body {
   transition: filter .15s ease, box-shadow .15s ease, transform .05s ease, border-color .15s ease, background .15s ease;
 }
 
-/* Primary */
+/* Primary (solid teal) */
 .hx-btn--primary{
   color: #fff;
   background: linear-gradient(180deg, var(--hx-brand), var(--hx-brand-strong));
@@ -91,16 +87,22 @@ html, body {
 .hx-btn--primary:hover{ filter: brightness(1.04); }
 .hx-btn--primary:active{ transform: translateY(1px); }
 
-/* Outline primary */
+/* Outline teal */
 .hx-btn--outline-primary{
   color: var(--hx-brand-strong);
   background: #fff;
   border: 2px solid var(--hx-brand-strong);
   box-shadow: 0 1px 0 rgba(0,0,0,.03);
 }
-.hx-btn--outline-primary:hover{
-  background: #f8fafc;
+.hx-btn--outline-primary:hover{ background: #f0fdfa; } /* subtle teal-tinted hover */
+
+/* Neutral outline */
+.hx-btn--secondary{
+  background: #fff;
+  color: var(--hx-ink);
+  border: 2px solid #cbd5e1;
 }
+.hx-btn--secondary:hover{ background: #f8fafc; }
 
 /* Links */
 .hx-link{
