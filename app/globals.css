@@ -121,3 +121,32 @@ button,[role="button"],input[type="button"],input[type="submit"]{ cursor:pointer
 button{ transition: background-color .15s ease, box-shadow .15s ease, transform .05s ease; }
 button:hover{ box-shadow: inset 0 0 0 9999px rgba(0,0,0,0.02); }
 button:active{ transform: translateY(1px); }
+
+/* ——— Section header art (blends into background) ——— */
+.hx-art-wrap{
+  background: transparent;
+  display: flex;
+  justify-content: center;
+}
+/* ——— Section header art (blends into background) ——— */
+.hx-art-wrap{
+  background: transparent;
+  display: flex;
+  justify-content: center;
+  /* slightly closer to neighbors */
+  margin: 10px auto 8px;
+  padding: 0 1rem;
+}
+.hx-section-art{
+  display: block;
+  width: min(1100px, 98%);  /* wider */
+  max-height: 220px;        /* taller but still slim */
+  object-fit: contain;
+  opacity: .98;
+  filter: saturate(1.05);
+  border-radius: 12px;       /* integrates w/ cards */
+  box-shadow: 0 6px 18px rgba(2,6,23,.08);
+  /* soften fade so it feels embedded, not clipped */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 12%, #000 88%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 12%, #000 88%, transparent 100%);
+}

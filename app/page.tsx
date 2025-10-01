@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -66,6 +67,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* NEW: slim section art divider */}
+      <SectionArt src="/section-people.png" alt="People connecting in harmony" />
 
       {/* Why it's different — TINTED LIST */}
       <section className="hx-section hx-section--cool">
@@ -155,7 +159,22 @@ export default function HomePage() {
   );
 }
 
-/* helpers */
+/* ——— helpers ——— */
+
+function SectionArt({ src, alt }: { src: string; alt: string }) {
+  return (
+    <div className="hx-art-wrap">
+      <Image
+        src={src}
+        alt={alt}
+        width={1200}
+        height={140}
+        className="hx-section-art"
+        priority
+      />
+    </div>
+  );
+}
 
 function FeatureLine({ title, body }: { title: string; body: string }) {
   return (
