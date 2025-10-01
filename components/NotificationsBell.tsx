@@ -13,6 +13,7 @@ type NotifType =
   | 'message_received'
   | 'message'
   | 'offer_pending'
+  | 'fulfillment_reminder' // NEW: weekly “mark fulfilled?” nudges
   | 'system'
   | string;
 
@@ -30,34 +31,38 @@ export default function NotificationsBell() {
   const [open, setOpen] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [rows, setRows] = useState<Notif[]>([]);
-  const unread = useMemo(() => rows.filter(r => !r.read_at).length, [rows]);
+  const unread = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
 
-  const titleCache = useRef(new Map<string, string>());      // offer_id -> title
-  const requesterCache = useRef(new Map<string, string>());  // request_id -> name
-  const sigSeen = useRef<Set<string>>(new Set());            // sig-level dedup
+  // Caches to enrich labels without extra server code
+  const titleCache = useRef(new Map<string, string>()); // offer_id -> title
+  const requesterCache = useRef(new Map<string, string>()); // request_id -> requester display_name
+  const sigSeen = useRef<Set<string>>(new Set()); // de-dupe identical signals in-memory
 
+  // -------- helpers to enrich labels ----------
   async function enrichOfferTitles(notifs: Notif[]) {
     const missing = Array.from(
       new Set(
         notifs
-          .map(n => (n?.data?.offer_title ? null : n?.data?.offer_id))
-          .filter((v): v is string => !!v && !titleCache.current.has(v))
-      )
+          .map((n) => (n?.data?.offer_title ? null : n?.data?.offer_id))
+          .filter((v): v is string => !!v && !titleCache.current.has(v)),
+      ),
     );
     if (!missing.length) return;
+
     const { data, error } = await supabase.from('offers').select('id,title').in('id', missing);
     if (error) return;
+
     for (const row of (data || []) as { id: string; title: string }[]) {
       titleCache.current.set(row.id, row.title);
     }
-    setRows(prev =>
-      prev.map(n => {
+    setRows((prev) =>
+      prev.map((n) => {
         const oid = n?.data?.offer_id as string | undefined;
         if (!oid) return n;
         const t = titleCache.current.get(oid);
         if (!t) return n;
         return { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } };
-      })
+      }),
     );
   }
 
@@ -65,29 +70,34 @@ export default function NotificationsBell() {
     const ids = Array.from(
       new Set(
         notifs
-          .map(n => (n.type === 'request_received' && !n?.data?.requester_name ? n?.data?.request_id : null))
-          .filter((v): v is string => !!v && !requesterCache.current.has(v))
-      )
+          .map((n) => (n.type === 'request_received' && !n?.data?.requester_name ? n?.data?.request_id : null))
+          .filter((v): v is string => !!v && !requesterCache.current.has(v)),
+      ),
     );
     if (!ids.length) return;
+
+    // Adjust this select if your request->profiles relationship differs
     const { data } = await supabase
       .from('requests')
       .select('id, requester:profiles(id, display_name)')
       .in('id', ids);
+
     for (const r of (data || []) as any[]) {
       requesterCache.current.set(r.id, r.requester?.display_name || 'Someone');
     }
-    setRows(prev =>
-      prev.map(n => {
+
+    setRows((prev) =>
+      prev.map((n) => {
         const rid = n?.data?.request_id as string | undefined;
         if (!rid) return n;
         const name = requesterCache.current.get(rid);
         if (!name) return n;
         return { ...n, data: { ...n.data, requester_name: n.data?.requester_name ?? name } };
-      })
+      }),
     );
   }
 
+  // -------- label + href for each type ----------
   function label(n: Notif): { text: string; href?: string } {
     const offerId = n.data?.offer_id as string | undefined;
     const offerTitle = n.data?.offer_title as string | undefined;
@@ -103,20 +113,37 @@ export default function NotificationsBell() {
       }
       case 'request_received':
         return {
-          text: `New request${offerTitle ? ` for “${offerTitle}”` : ''}${n.data?.requester_name ? ` from ${n.data.requester_name}` : ''}`,
+          text: `New request${offerTitle ? ` for “${offerTitle}”` : ''}${
+            n.data?.requester_name ? ` from ${n.data.requester_name}` : ''
+          }`,
           href: '/exchanges?tab=received',
         };
       case 'request_accepted':
-        return { text: `Your request was accepted${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
+        return {
+          text: `Your request was accepted${offerTitle ? ` — “${offerTitle}”` : ''}`,
+          href: '/exchanges?tab=sent',
+        };
       case 'request_declined':
-        return { text: `Your request was declined${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
+        return {
+          text: `Your request was declined${offerTitle ? ` — “${offerTitle}”` : ''}`,
+          href: '/exchanges?tab=sent',
+        };
       case 'request_fulfilled':
-        return { text: `Request marked fulfilled${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
+        return {
+          text: `Request marked fulfilled${offerTitle ? ` — “${offerTitle}”` : ''}`,
+          href: '/exchanges?tab=sent',
+        };
       case 'message':
       case 'message_received': {
         const snip = body ? `: ${body.slice(0, 80)}` : '';
         const on = offerTitle ? ` on “${offerTitle}”` : '';
         return { text: `New message${on}${snip}`, href: reqId ? `/messages?thread=${reqId}` : '/messages' };
+      }
+      case 'fulfillment_reminder': {
+        const t = offerTitle ? ` “${offerTitle}”` : '';
+        // If you have a direct thread route for a specific request, swap href to that
+        const href = reqId ? `/exchanges?focus=${reqId}` : '/exchanges';
+        return { text: `Mark fulfilled?${t}`, href };
       }
       default: {
         const text = n.data?.message || n.data?.text || 'Update';
@@ -125,20 +152,26 @@ export default function NotificationsBell() {
     }
   }
 
+  // -------- mark read helpers ----------
   async function markAllRead() {
     if (!uid) return;
-    const ids = rows.filter(r => !r.read_at).map(r => r.id);
+    const ids = rows.filter((r) => !r.read_at).map((r) => r.id);
     if (!ids.length) return;
     const nowISO = new Date().toISOString();
-    setRows(prev => prev.map(r => (ids.includes(r.id) ? { ...r, read_at: nowISO } : r)));
+
+    // optimistic update
+    setRows((prev) => prev.map((r) => (ids.includes(r.id) ? { ...r, read_at: nowISO } : r)));
+
+    // best-effort server update (requires RLS allowing owner to update their notifications)
     await supabase.from('notifications').update({ read_at: nowISO }).in('id', ids);
   }
 
   async function markOneRead(id: string) {
-    const found = rows.find(r => r.id === id);
+    const found = rows.find((r) => r.id === id);
     if (!found || found.read_at) return;
     const nowISO = new Date().toISOString();
-    setRows(prev => prev.map(r => (r.id === id ? { ...r, read_at: nowISO } : r)));
+
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, read_at: nowISO } : r)));
     await supabase.from('notifications').update({ read_at: nowISO }).eq('id', id);
   }
 
@@ -146,6 +179,7 @@ export default function NotificationsBell() {
     return `${n.profile_id}|${n.type}|${n.data?.offer_id ?? ''}|${n.data?.request_id ?? ''}`;
   }
 
+  // -------- initial load + realtime subscriptions ----------
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -174,6 +208,7 @@ export default function NotificationsBell() {
 
       void Promise.allSettled([enrichOfferTitles(dedup), enrichRequesterNames(dedup)]);
 
+      // Realtime: INSERT
       const chIns = supabase
         .channel('realtime:notifications:ins')
         .on(
@@ -184,12 +219,13 @@ export default function NotificationsBell() {
             const s = sig(n);
             if (sigSeen.current.has(s)) return;
             sigSeen.current.add(s);
-            setRows(prev => [n, ...prev].slice(0, 50));
+            setRows((prev) => [n, ...prev].slice(0, 50));
             await Promise.allSettled([enrichOfferTitles([n]), enrichRequesterNames([n])]);
-          }
+          },
         )
         .subscribe();
 
+      // Realtime: UPDATE (read_at)
       const chUpd = supabase
         .channel('realtime:notifications:upd')
         .on(
@@ -197,8 +233,8 @@ export default function NotificationsBell() {
           { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `profile_id=eq.${u}` },
           (payload) => {
             const upd = payload.new as Notif;
-            setRows(prev => prev.map(r => (r.id === upd.id ? { ...r, read_at: upd.read_at } : r)));
-          }
+            setRows((prev) => prev.map((r) => (r.id === upd.id ? { ...r, read_at: upd.read_at } : r)));
+          },
         )
         .subscribe();
 
@@ -207,13 +243,15 @@ export default function NotificationsBell() {
         supabase.removeChannel(chUpd);
       };
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // once
 
   async function toggleOpen() {
-    setOpen(v => !v);
+    setOpen((v) => !v);
     if (!open) await markAllRead();
   }
 
+  // -------- UI ----------
   return (
     <div className="relative">
       <button className="relative rounded border px-2 py-1 text-sm" onClick={toggleOpen} title="Notifications">
@@ -229,7 +267,9 @@ export default function NotificationsBell() {
         <div className="absolute right-0 z-50 mt-2 w-[340px] max-w-[90vw] rounded border bg-white shadow">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <strong className="text-sm">Notifications</strong>
-            <button onClick={markAllRead} className="text-xs underline">Mark all read</button>
+            <button onClick={markAllRead} className="text-xs underline">
+              Mark all read
+            </button>
           </div>
 
           <ul className="max-h-[55vh] overflow-auto">
