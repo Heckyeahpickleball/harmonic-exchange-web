@@ -1,20 +1,11 @@
-/* HX v1.3.1 — Chapter detail
-   - Anchors can Edit About (save to groups.about)
-   - Composer supports text and/or images (<=6)
-   - Robust post insert: retry on columns content|text|body
-   - Avoid selecting 'content' explicitly to dodge schema-cache errors
-   - Renders image previews for posts (maps storage paths -> public URLs)
-*/
-
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, notFound } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 type GroupStatus = 'pending' | 'active' | 'suspended' | 'archived';
-
 type Group = {
   id: string;
   slug: string;
@@ -48,19 +39,19 @@ type EventRow = {
 type PostRow = {
   id: string;
   created_at: string;
-  owner_id: string;
-  images?: string[] | null;
-  [key: string]: any; // content|text|body at runtime
+  profile_id: string;
+  body: string | null;
+  images: string[];          // text[]
+  group_id: string | null;
 };
 
 type PostPreview = {
   id: string;
-  content: string | null;
   created_at: string;
-  owner_id: string;
-  owner_name?: string | null;
-  image_paths?: string[] | null;
-  image_urls?: string[] | null;
+  author_id: string;
+  author_name?: string | null;
+  body: string | null;
+  image_urls: string[];
 };
 
 type OfferPreview = {
@@ -82,8 +73,8 @@ export default function ChapterPage() {
 
   const [group, setGroup] = useState<Group | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
-  const [isMember, setIsMember] = useState<boolean>(false);
-  const [isAnchor, setIsAnchor] = useState<boolean>(false);
+  const [isMember, setIsMember] = useState(false);
+  const [isAnchor, setIsAnchor] = useState(false);
 
   const [events, setEvents] = useState<EventRow[]>([]);
   const [posts, setPosts] = useState<PostPreview[]>([]);
@@ -92,10 +83,12 @@ export default function ChapterPage() {
 
   // Composer (text + images)
   const [postText, setPostText] = useState('');
-  const [postImages, setPostImages] = useState<File[]>([]);
+  const [postFiles, setPostFiles] = useState<File[]>([]);
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const [posting, setPosting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // About editing (anchors)
+  // About editor (anchors)
   const [editingAbout, setEditingAbout] = useState(false);
   const [aboutDraft, setAboutDraft] = useState('');
 
@@ -103,25 +96,39 @@ export default function ChapterPage() {
   const [showEventForm, setShowEventForm] = useState(false);
   const [evTitle, setEvTitle] = useState('');
   const [evDesc, setEvDesc] = useState('');
-  const [evStart, setEvStart] = useState(''); // datetime-local
-  const [evEnd, setEvEnd] = useState('');     // datetime-local
+  const [evStart, setEvStart] = useState('');
+  const [evEnd, setEvEnd] = useState('');
   const [evOnline, setEvOnline] = useState(false);
   const [evLocation, setEvLocation] = useState('');
   const [creatingEvent, setCreatingEvent] = useState(false);
 
-  function pathsToPublicUrls(paths: string[] | null | undefined): string[] {
-    if (!paths || paths.length === 0) return [];
-    const bucket = supabase.storage.from('post-media');
-    return paths.map((p) => bucket.getPublicUrl(p).data.publicUrl);
+  // --- helpers
+  function toIsoLocal(dt: string) {
+    const d = new Date(dt);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString();
   }
 
+  function normalizeImageList(arr: any): string[] {
+    if (!arr) return [];
+    if (Array.isArray(arr)) return arr.map(String);
+    return [String(arr)];
+  }
+
+  function isStoragePath(s: string) {
+    return !/^https?:\/\//i.test(s);
+  }
+
+  function publicUrlForPath(path: string) {
+    return supabase.storage.from('post-media').getPublicUrl(path).data.publicUrl;
+  }
+
+  // --- load
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       setLoading(true);
       setMsg('');
-
       try {
         const { data: auth } = await supabase.auth.getUser();
         const uid = auth.user?.id ?? null;
@@ -142,35 +149,35 @@ export default function ChapterPage() {
           setAboutDraft((gRow as Group).about ?? '');
         }
 
-        // members + flags
+        // members
         const { data: gm } = await supabase
           .from('group_members')
           .select('profile_id,role')
           .eq('group_id', gRow.id);
 
-        const memberList: Member[] = [];
-        const profileIds = (gm || []).map((r) => r.profile_id);
+        const ids = (gm || []).map((r: any) => r.profile_id);
+        const { data: profs } = ids.length
+          ? await supabase.from('profiles').select('id,display_name').in('id', ids)
+          : { data: [] as any[] };
+
         const nameMap = new Map<string, string | null>();
-        if (profileIds.length) {
-          const { data: profs } = await supabase
-            .from('profiles')
-            .select('id,display_name')
-            .in('id', profileIds);
-          for (const p of (profs || []) as any[]) nameMap.set(p.id, p.display_name ?? null);
-        }
-        for (const r of (gm || []) as any[]) {
-          memberList.push({ profile_id: r.profile_id, role: r.role, display_name: nameMap.get(r.profile_id) ?? null });
-        }
+        for (const p of (profs || []) as any[]) nameMap.set(p.id, p.display_name ?? null);
+
+        const mList: Member[] = (gm || []).map((r: any) => ({
+          profile_id: r.profile_id,
+          role: r.role,
+          display_name: nameMap.get(r.profile_id) ?? null,
+        }));
+        mList.sort((a, b) => (a.role === 'anchor' && b.role !== 'anchor' ? -1 : 1));
 
         if (!cancelled) {
-          memberList.sort((a, b) => (a.role === 'anchor' && b.role !== 'anchor' ? -1 : 1));
-          setMembers(memberList);
-          const mine = uid ? memberList.find((m) => m.profile_id === uid) : undefined;
+          setMembers(mList);
+          const mine = uid ? mList.find((m) => m.profile_id === uid) : undefined;
           setIsMember(!!mine);
           setIsAnchor(mine?.role === 'anchor');
         }
 
-        // events upcoming (with RSVP)
+        // events
         const { data: eRows } = await supabase
           .from('group_events')
           .select('id,title,description,starts_at,ends_at,location,is_online')
@@ -179,64 +186,61 @@ export default function ChapterPage() {
           .order('starts_at', { ascending: true })
           .limit(10);
 
-        let listEvents: EventRow[] = (eRows || []) as any[];
-        if (listEvents.length) {
-          const eventIds = listEvents.map((e) => e.id);
-          const [countsRes, mineRes] = await Promise.all([
-            supabase.from('event_rsvps').select('event_id').in('event_id', eventIds),
+        let eList: EventRow[] = (eRows || []) as any[];
+        if (eList.length) {
+          const eids = eList.map((e) => e.id);
+          const [cRes, mRes] = await Promise.all([
+            supabase.from('event_rsvps').select('event_id').in('event_id', eids),
             uid
-              ? supabase.from('event_rsvps').select('event_id').in('event_id', eventIds).eq('profile_id', uid)
+              ? supabase.from('event_rsvps').select('event_id').in('event_id', eids).eq('profile_id', uid)
               : Promise.resolve({ data: [] as any[] }),
           ]);
           const counts = new Map<string, number>();
-          for (const r of ((countsRes.data || []) as any[])) {
+          for (const r of ((cRes.data || []) as any[])) {
             counts.set(r.event_id, (counts.get(r.event_id) || 0) + 1);
           }
-          const mineSet = new Set<string>(((mineRes as any).data || []).map((r: any) => r.event_id));
-          listEvents = listEvents.map((e) => ({
+          const mineSet = new Set<string>(((mRes as any).data || []).map((r: any) => r.event_id));
+          eList = eList.map((e) => ({
             ...e,
             rsvp_count: counts.get(e.id) || 0,
             i_rsvped: mineSet.has(e.id),
           }));
         }
-        if (!cancelled) setEvents(listEvents);
+        if (!cancelled) setEvents(eList);
 
-        // posts scoped by group — select all; resolve text field and images
+        // posts (exact columns)
         const { data: pRows } = await supabase
           .from('posts')
-          .select('*')
+          .select('id, created_at, profile_id, body, images, group_id')
           .eq('group_id', gRow.id)
-          .order('pinned', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false })
           .limit(20);
 
-        let postList: PostPreview[] =
-          (pRows || []).map((p: PostRow) => {
-            const c = (p as any).content ?? (p as any).text ?? (p as any).body ?? null;
-            const paths = Array.isArray(p.images) ? p.images : null;
+        let pList: PostPreview[] =
+          (pRows || []).map((p: any) => {
+            const imgs = normalizeImageList(p.images).map((u) => (isStoragePath(u) ? publicUrlForPath(u) : u));
             return {
               id: p.id,
-              content: c,
               created_at: p.created_at,
-              owner_id: p.owner_id,
-              image_paths: paths,
-              image_urls: pathsToPublicUrls(paths),
+              author_id: p.profile_id,
+              body: p.body ?? null,
+              image_urls: imgs,
             };
           }) ?? [];
 
-        if (postList.length) {
-          const ownerIds = Array.from(new Set(postList.map((p) => p.owner_id)));
-          const { data: profs } = await supabase
+        if (pList.length) {
+          const authorIds = Array.from(new Set(pList.map((p) => p.author_id)));
+          const { data: profs2 } = await supabase
             .from('profiles')
             .select('id,display_name')
-            .in('id', ownerIds);
-          const nameMap = new Map<string, string | null>();
-          for (const p of (profs || []) as any[]) nameMap.set(p.id, p.display_name ?? null);
-          postList = postList.map((p) => ({ ...p, owner_name: nameMap.get(p.owner_id) ?? null }));
+            .in('id', authorIds);
+          const map2 = new Map<string, string | null>();
+          for (const p of (profs2 || []) as any[]) map2.set(p.id, p.display_name ?? null);
+          pList = pList.map((p) => ({ ...p, author_name: map2.get(p.author_id) ?? null }));
         }
-        if (!cancelled) setPosts(postList);
+        if (!cancelled) setPosts(pList);
 
-        // offers scoped by group
+        // offers (same as before)
         const { data: oRows } = await supabase
           .from('offers')
           .select('id,title,status,created_at,owner_id')
@@ -245,18 +249,18 @@ export default function ChapterPage() {
           .order('created_at', { ascending: false })
           .limit(10);
 
-        let offerList: OfferPreview[] = (oRows || []) as any[];
-        if (offerList.length) {
-          const ownerIds = Array.from(new Set(offerList.map((o) => o.owner_id)));
-          const { data: profs } = await supabase
+        let oList: OfferPreview[] = (oRows || []) as any[];
+        if (oList.length) {
+          const ids2 = Array.from(new Set(oList.map((o) => o.owner_id)));
+          const { data: profs3 } = await supabase
             .from('profiles')
             .select('id,display_name')
-            .in('id', ownerIds);
-          const nameMap = new Map<string, string | null>();
-          for (const p of (profs || []) as any[]) nameMap.set(p.id, p.display_name ?? null);
-          offerList = offerList.map((o) => ({ ...o, owner_name: nameMap.get(o.owner_id) ?? null }));
+            .in('id', ids2);
+          const map3 = new Map<string, string | null>();
+          for (const p of (profs3 || []) as any[]) map3.set(p.id, p.display_name ?? null);
+          oList = oList.map((o) => ({ ...o, owner_name: map3.get(o.owner_id) ?? null }));
         }
-        if (!cancelled) setOffers(offerList);
+        if (!cancelled) setOffers(oList);
       } catch (e: any) {
         console.error(e);
         if (!cancelled) setMsg(e?.message ?? 'Failed to load chapter.');
@@ -265,7 +269,12 @@ export default function ChapterPage() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      // revoke previews on unmount
+      previewUrls.forEach((u) => URL.revokeObjectURL(u));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   const anchors = useMemo(() => members.filter((m) => m.role === 'anchor'), [members]);
@@ -275,7 +284,7 @@ export default function ChapterPage() {
     return offers.filter((o) => o.title.toLowerCase().includes(q));
   }, [offers, offerQ]);
 
-  // Membership
+  // membership
   async function joinChapter() {
     if (!group) return;
     setMsg('');
@@ -356,19 +365,16 @@ export default function ChapterPage() {
     }
   }
 
-  // Helpers
-  function toIsoLocal(dt: string) {
-    const d = new Date(dt);
-    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString();
-  }
-
-  // Edit About (anchors)
+  // About
   async function saveAbout() {
     if (!group) return;
     setMsg('');
     try {
       const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) { router.push('/signin'); return; }
+      if (!auth.user) {
+        router.push('/signin');
+        return;
+      }
       const about = aboutDraft.trim() || null;
       const { error } = await supabase.from('groups').update({ about }).eq('id', group.id);
       if (error) throw error;
@@ -380,23 +386,39 @@ export default function ChapterPage() {
     }
   }
 
-  // Upload images to storage and return storage paths
-  async function uploadImages(uid: string, files: File[]): Promise<string[]> {
-    if (!files.length) return [];
-    const up = supabase.storage.from('post-media');
-    const paths: string[] = [];
-    for (let i = 0; i < files.length; i++) {
-      const f = files[i];
-      const ext = f.name.includes('.') ? f.name.split('.').pop() : 'jpg';
-      const key = `posts/${uid}/${Date.now()}_${i}.${ext}`;
-      const { error } = await up.upload(key, f, { upsert: false, contentType: f.type || 'image/*' });
-      if (error) throw error;
-      paths.push(key);
-    }
-    return paths;
+  // image previews
+  function refreshPreviews(files: File[]) {
+    previewUrls.forEach((u) => URL.revokeObjectURL(u));
+    setPreviewUrls(files.map((f) => URL.createObjectURL(f)));
+  }
+  function removeImageAt(i: number) {
+    const next = postFiles.slice();
+    next.splice(i, 1);
+    setPostFiles(next);
+    refreshPreviews(next);
+  }
+  function clearAllImages() {
+    setPostFiles([]);
+    refreshPreviews([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
-  // Create post (text and/or images) with robust column fallback
+  // upload like PostComposer (returns PUBLIC URL)
+  async function uploadToPostMedia(file: File): Promise<string> {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth.user?.id;
+    if (!uid) throw new Error('Not signed in');
+    const key = `${uid}/${Date.now()}_${file.name}`;
+    const { error } = await supabase.storage.from('post-media').upload(key, file, {
+      cacheControl: '3600',
+      upsert: true,
+      contentType: file.type || 'image/*',
+    });
+    if (error) throw error;
+    return supabase.storage.from('post-media').getPublicUrl(key).data.publicUrl;
+  }
+
+  // create post (uses profile_id, body, images[], group_id)
   async function createPost() {
     if (!group) return;
     setMsg('');
@@ -408,131 +430,59 @@ export default function ChapterPage() {
         return;
       }
 
-      const content = postText.trim();
-      if (!content && postImages.length === 0) {
-        setMsg('Share a message or add at least one image.'); setPosting(false); return;
+      const text = postText.trim();
+      if (!text && postFiles.length === 0) {
+        setMsg('Share a message or add at least one image.');
+        setPosting(false);
+        return;
       }
 
-      // Upload images first (if any)
-      const imagePaths = await uploadImages(auth.user.id, postImages);
+      // upload files -> public URLs (like global composer)
+      const urls: string[] = [];
+      for (const f of postFiles) urls.push(await uploadToPostMedia(f));
 
-      // Build base payload
-      const base: any = {
-        owner_id: auth.user.id,
+      const payload = {
+        profile_id: auth.user.id,
+        body: text || null,
+        images: urls.length ? urls : [],     // images is NOT NULL (text[]), so use [] when none
         group_id: group.id,
-        images: imagePaths.length ? imagePaths : null,
       };
 
-      // Try content/text/body in order
-      const tries = ['content', 'text', 'body'] as const;
-      let lastErr: any = null;
-      let inserted: any = null;
+      const { data, error } = await supabase
+        .from('posts')
+        .insert(payload)
+        .select('id, created_at, profile_id, body, images, group_id')
+        .single();
+      if (error) throw error;
 
-      for (const field of tries) {
-        try {
-          const payload = { ...base, ...(content ? { [field]: content } : {}) };
-          const { data, error } = await supabase
-            .from('posts')
-            .insert(payload)
-            .select('*')
-            .single();
-          if (error) throw error;
-          inserted = data;
-          lastErr = null;
-          break;
-        } catch (e: any) {
-          lastErr = e;
-          const msg: string = e?.message || '';
-          if (!/column .* does not exist|undefined column|schema cache/i.test(msg)) break;
-        }
-      }
-
-      if (lastErr && !inserted) throw lastErr;
-
-      const p = inserted as PostRow;
-      const textValue = (p as any).content ?? (p as any).text ?? (p as any).body ?? null;
-      const paths = Array.isArray(p.images) ? p.images : null;
-      const image_urls = pathsToPublicUrls(paths || []);
-
-      // Enrich with display name for immediate UI
+      // lookup name for immediate UI
       const { data: prof } = await supabase
         .from('profiles')
         .select('id,display_name')
-        .eq('id', auth.user.id)
+        .eq('id', data.profile_id)
         .maybeSingle();
-      const owner_name = (prof as any)?.display_name ?? auth.user.id.slice(0, 8);
 
-      setPosts((prev) => [
-        {
-          id: p.id,
-          content: textValue,
-          created_at: p.created_at,
-          owner_id: p.owner_id,
-          owner_name,
-          image_paths: paths,
-          image_urls,
-        },
-        ...prev,
-      ]);
+      const newPost: PostPreview = {
+        id: data.id,
+        created_at: data.created_at,
+        author_id: data.profile_id,
+        author_name: (prof as any)?.display_name ?? data.profile_id.slice(0, 8),
+        body: data.body ?? null,
+        image_urls: normalizeImageList(data.images).map((u) => (isStoragePath(u) ? publicUrlForPath(u) : u)),
+      };
 
+      setPosts((prev) => [newPost, ...prev]);
       setPostText('');
-      setPostImages([]);
+      clearAllImages();
     } catch (e: any) {
       console.error(e);
-      setMsg(e?.message ?? 'Failed to share to chapter.');
+      setMsg(e?.message ?? 'Could not post.');
     } finally {
       setPosting(false);
     }
   }
 
-  // Create event
-  async function createEvent() {
-    if (!group) return;
-    setMsg('');
-    setCreatingEvent(true);
-    try {
-      if (!evTitle.trim() || !evStart) {
-        setMsg('Title and start time are required.'); setCreatingEvent(false); return;
-      }
-      const starts_at = toIsoLocal(evStart);
-      const ends_at = evEnd ? toIsoLocal(evEnd) : null;
-
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) {
-        router.push('/signin?next=' + encodeURIComponent(`/chapters/${group.slug}`));
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from('group_events')
-        .insert({
-          group_id: group.id,
-          title: evTitle.trim(),
-          description: evDesc.trim() || null,
-          starts_at,
-          ends_at,
-          is_online: evOnline,
-          location: evOnline ? null : (evLocation.trim() || null),
-        })
-        .select('id,title,description,starts_at,ends_at,location,is_online')
-        .single();
-      if (error) throw error;
-
-      setEvents((prev) => [
-        ...prev,
-        { ...data!, rsvp_count: 0, i_rsvped: false }
-      ].sort((a, b) => +new Date(a.starts_at) - +new Date(b.starts_at)));
-
-      setEvTitle(''); setEvDesc(''); setEvStart(''); setEvEnd(''); setEvOnline(false); setEvLocation('');
-      setShowEventForm(false);
-    } catch (e: any) {
-      console.error(e);
-      setMsg(e?.message ?? 'Failed to create event.');
-    } finally {
-      setCreatingEvent(false);
-    }
-  }
-
+  // --- render
   if (loading) return <div className="max-w-5xl p-4 text-sm text-gray-600">Loading chapter…</div>;
   if (!group) {
     return (
@@ -546,7 +496,7 @@ export default function ChapterPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4">
-      {/* Cover + Header */}
+      {/* Header */}
       <section className="hx-card p-4 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -568,7 +518,7 @@ export default function ChapterPage() {
           </div>
         </div>
 
-        {/* About + edit for anchors */}
+        {/* About (editable for anchors) */}
         <div className="mt-4">
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-700">About this chapter</h3>
@@ -578,20 +528,16 @@ export default function ChapterPage() {
               </button>
             )}
           </div>
-
           {!editingAbout ? (
-            group.about ? (
-              <p className="max-w-prose whitespace-pre-wrap text-gray-800">{group.about}</p>
-            ) : (
-              <p className="text-sm text-gray-600">No description yet.</p>
-            )
+            group.about ? <p className="max-w-prose whitespace-pre-wrap text-gray-800">{group.about}</p>
+                        : <p className="text-sm text-gray-600">No description yet.</p>
           ) : (
             <div className="rounded border p-3">
               <textarea
                 className="w-full rounded border px-3 py-2 min-h-[160px]"
                 value={aboutDraft}
-                onChange={(e)=>setAboutDraft(e.target.value)}
-                placeholder="Write a short, welcoming description for your chapter."
+                onChange={(e) => setAboutDraft(e.target.value)}
+                placeholder="Write a short, welcoming description."
               />
               <div className="mt-2 flex gap-2">
                 <button onClick={saveAbout} className="hx-btn hx-btn--primary">Save</button>
@@ -698,7 +644,7 @@ export default function ChapterPage() {
         )}
       </section>
 
-      {/* Share composer + Recent posts */}
+      {/* Posts */}
       <section className="hx-card p-4 sm:p-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Recent posts</h2>
@@ -711,30 +657,48 @@ export default function ChapterPage() {
             <textarea
               className="mt-1 w-full rounded border px-3 py-2 min-h-[90px]"
               value={postText}
-              onChange={(e)=>setPostText(e.target.value)}
+              onChange={(e) => setPostText(e.target.value)}
               placeholder="What would you like to offer or reflect on?"
             />
 
             {/* Images */}
             <div className="mt-3">
-              <label className="block text-sm font-medium">Add images (optional, up to 6)</label>
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-medium">Add images (optional, up to 6)</label>
+                {postFiles.length > 0 && (
+                  <button type="button" className="text-xs underline" onClick={clearAllImages}>
+                    Clear all
+                  </button>
+                )}
+              </div>
               <input
+                ref={fileInputRef}
                 type="file"
                 accept="image/*"
                 multiple
-                onChange={(e) => {
-                  const files = Array.from(e.target.files || []);
-                  const max = 6;
-                  setPostImages(files.slice(0, max));
-                }}
                 className="mt-1"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []).slice(0, 6);
+                  setPostFiles(files);
+                  refreshPreviews(files);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
               />
-              {postImages.length > 0 && (
+              {previewUrls.length > 0 && (
                 <div className="mt-2 grid grid-cols-6 gap-2">
-                  {postImages.map((f, i) => (
-                    <div key={i} className="rounded border p-1">
+                  {previewUrls.map((url, i) => (
+                    <div key={i} className="relative rounded border">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img alt={f.name} src={URL.createObjectURL(f)} className="h-16 w-full object-cover rounded" />
+                      <img src={url} alt="" className="h-16 w-full rounded object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => removeImageAt(i)}
+                        className="absolute right-1 top-1 rounded-full bg-white/90 px-2 text-xs shadow"
+                        aria-label="Remove image"
+                        title="Remove"
+                      >
+                        ×
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -756,10 +720,10 @@ export default function ChapterPage() {
             {posts.map((p) => (
               <li key={p.id} className="rounded border p-3">
                 <div className="text-sm text-gray-600">
-                  {p.owner_name || p.owner_id.slice(0, 8)} • {new Date(p.created_at).toLocaleString()}
+                  {p.author_name || p.author_id.slice(0, 8)} • {new Date(p.created_at).toLocaleString()}
                 </div>
-                {p.content && <p className="mt-2 whitespace-pre-wrap">{p.content}</p>}
-                {p.image_urls && p.image_urls.length > 0 && (
+                {p.body && <p className="mt-2 whitespace-pre-wrap">{p.body}</p>}
+                {p.image_urls.length > 0 && (
                   <div className="mt-2 grid grid-cols-3 gap-2">
                     {p.image_urls.map((url, idx) => (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -776,7 +740,7 @@ export default function ChapterPage() {
         )}
       </section>
 
-      {/* Offers (scoped by group) */}
+      {/* Offers */}
       <section className="hx-card p-4 sm:p-6">
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg font-semibold">Chapter offerings</h2>
