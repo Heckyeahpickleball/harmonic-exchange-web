@@ -1,38 +1,29 @@
 @import "tailwindcss";
 
-/* === Harmonic Exchange tokens ===
-   Deep blues + warm golds, clear outlines, stylish contrast. */
+/* Deep blue + warm gold; clear button contrast; distinct section tints */
 :root{
   --hx-bg: #ffffff;
-  --hx-surface: #f6f8fb;       /* gentle light surface */
-  --hx-ink: #0b1220;           /* deep slate/navy */
-  --hx-muted: #475569;         /* slate-600 */
+  --hx-surface: #f6f8fb;
+  --hx-ink: #0b1220;
+  --hx-muted: #475569;
 
-  /* brand */
   --hx-brand: #1e3a8a;         /* deep blue */
-  --hx-brand-strong: #1e40af;  /* slightly brighter */
+  --hx-brand-strong: #1e40af;
   --hx-accent: #f59e0b;        /* warm golden */
 
-  /* themed surfaces */
   --hx-cool: #eef2ff;          /* indigo-50 */
-  --hx-cool-ink: #1e293b;      /* slate-800 */
   --hx-cool-ink-muted: #475569;
 
-  --hx-warm: #fff7ed;          /* amber-50 */
-  --hx-warm-ink: #1f2937;      /* gray-800 */
-
-  --hx-deep: #0b1220;          /* deep navy */
+  --hx-deep: #0b1220;
   --hx-deep-ink: #ffffff;
 
   --hx-ring: 0 0 0 3px rgba(30,58,138,.28);
-  --hx-card-border: rgba(2, 6, 23, 0.12);
+  --hx-card-border: rgba(2, 6, 23, 0.14);
   --hx-card-shadow: 0 1px 2px rgba(2, 6, 23, 0.08);
 
-  /* hero overlay (minimal—image leads) */
   --hx-hero-overlay: linear-gradient(0deg, rgba(255,255,255,0) 60%, rgba(255,255,255,0.0) 100%);
 }
 
-/* System font */
 html, body {
   background: var(--hx-bg);
   color: var(--hx-ink);
@@ -41,7 +32,7 @@ html, body {
                "Apple Color Emoji", "Segoe UI Emoji";
 }
 
-/* HERO — image only */
+/* HERO */
 .hx-hero{
   position: relative;
   min-height: clamp(260px, 36vw, 360px);
@@ -53,13 +44,13 @@ html, body {
   border-bottom: 1px solid var(--hx-card-border);
 }
 
-/* CTA strip: neutral base so buttons are the star */
+/* CTA strip */
 .hx-cta-strip{
-  background: #ffffff;
+  background: #fff;
   border-bottom: 1px solid var(--hx-card-border);
 }
 
-/* CTA Card (if/when used elsewhere) */
+/* Cards */
 .hx-card{
   border-radius: 14px;
   background: #fff;
@@ -68,58 +59,42 @@ html, body {
 }
 
 /* Section themes */
-.hx-section{ }
-.hx-section--cool{
-  background: var(--hx-cool);
-  color: var(--hx-cool-ink);
-}
-.hx-section--warm{
-  background: var(--hx-warm);
-  color: var(--hx-warm-ink);
-}
-.hx-section--deep{
-  background: var(--hx-deep);
-  color: var(--hx-deep-ink);
-}
+.hx-section--cool{ background: var(--hx-cool); }
+.hx-section--deep{ background: var(--hx-deep); color: var(--hx-deep-ink); }
 
-/* Buttons — stronger visibility across the site */
+/* Buttons — more color, stronger outline, subtle depth */
 .hx-btn{
   border-radius: 999px;
-  padding: .7rem 1.1rem;
+  padding: .72rem 1.15rem;
   font-weight: 700;
   letter-spacing: .01em;
   line-height: 1;
   display: inline-flex;
   align-items: center;
   gap: .55rem;
-  box-shadow: 0 1px 0 rgba(0,0,0,.03);
-  transition: filter .15s ease, box-shadow .15s ease, transform .05s ease, border-color .15s ease;
+  box-shadow: 0 1px 0 rgba(0,0,0,.04);
+  transition: filter .15s ease, box-shadow .15s ease, transform .05s ease, border-color .15s ease, background .15s ease;
 }
 
-/* Primary (deep blue) */
+/* Primary */
 .hx-btn--primary{
   color: #fff;
-  background: var(--hx-brand);
-  border: 2px solid var(--hx-brand);
+  background: linear-gradient(180deg, var(--hx-brand), var(--hx-brand-strong));
+  border: 2px solid var(--hx-brand-strong);
 }
-.hx-btn--primary:hover{ filter: brightness(1.03); }
+.hx-btn--primary:hover{ filter: brightness(1.04); }
 .hx-btn--primary:active{ transform: translateY(1px); }
 
-/* Outline primary — thicker border for visibility */
+/* Outline primary */
 .hx-btn--outline-primary{
-  color: var(--hx-brand);
-  border: 2px solid var(--hx-brand);
+  color: var(--hx-brand-strong);
   background: #fff;
+  border: 2px solid var(--hx-brand-strong);
+  box-shadow: 0 1px 0 rgba(0,0,0,.03);
 }
-.hx-btn--outline-primary:hover{ background: #f8fafc; }
-
-/* Secondary neutral outline (still thicker for clarity) */
-.hx-btn--secondary{
-  background: #fff;
-  color: var(--hx-ink);
-  border: 2px solid #cbd5e1; /* slate-300 */
+.hx-btn--outline-primary:hover{
+  background: #f8fafc;
 }
-.hx-btn--secondary:hover{ background: #f8fafc; }
 
 /* Links */
 .hx-link{
