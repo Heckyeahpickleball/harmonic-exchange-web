@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* ===== Design tokens (unchanged except where noted) ===== */
+/* ===== Design tokens ===== */
 :root{
   --hx-bg: #ffffff;
   --hx-surface: #f6f8fb;
@@ -12,10 +12,10 @@
   --hx-brand-strong: #0a5f59;  /* deeper teal */
   --hx-accent: #f59e0b;        /* warm golden */
 
-  --hx-cool: #eef2ff;          /* cool tint (if needed elsewhere) */
+  --hx-cool: #eef2ff;
   --hx-cool-ink-muted: #475569;
 
-  --hx-cream: #F6EFE2;         /* NEW: paper-tan to match illustration */
+  --hx-cream: #F6EFE2;         /* paper-tan to match illustration */
 
   --hx-ring: 0 0 0 3px rgba(15,118,110,.28);
   --hx-card-border: rgba(2, 6, 23, 0.14);
@@ -95,33 +95,44 @@ html, body {
 :focus-visible{ outline:none; box-shadow:var(--hx-ring) }
 button,[role="button"],input[type="button"],input[type="submit"]{ cursor:pointer }
 
-/* ===== Art blocks ===== */
+/* ===== Art & waves ===== */
 
-/* (A) People illustration used beside “Why” — feathered edges */
+/* People illustration on cream, feathered on all sides */
 .hx-feather-img{
   width:100%;
   height:auto;
   display:block;
   border-radius:14px;
   box-shadow:0 8px 24px rgba(2,6,23,.06);
-  /* feather on all sides */
   -webkit-mask-image: radial-gradient(120% 120% at 50% 50%, #000 65%, rgba(0,0,0,0.0) 100%);
   mask-image: radial-gradient(120% 120% at 50% 50%, #000 65%, rgba(0,0,0,0.0) 100%);
 }
 
-/* (B) Slim “wave” divider — now extra tight spacing */
+/* Teal wave separators — white background, tight spacing */
 .hx-wave-wrap{
-  background: var(--hx-cream);
+  background:#fff;                  /* <-- white per request */
   display:flex; justify-content:center;
-  margin: 4px auto;          /* reduced big time */
-  padding: 0 .75rem;         /* minimal */
+  margin: 0 auto;                   /* extra tight */
+  padding: 2px .75rem;              /* minimal padding */
   border-top: 1px solid rgba(2,6,23,.06);
   border-bottom: 1px solid rgba(2,6,23,.06);
 }
 .hx-wave{
   width:min(1100px,98%);
-  max-height:160px;          /* shallower */
+  max-height:140px;
   display:block;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 18%, #000 82%, transparent 100%);
   mask-image: linear-gradient(to bottom, transparent 0%, #000 18%, #000 82%, transparent 100%);
+}
+
+/* Heading accent for contrast against bullets below */
+.hx-heading-title{
+  color: var(--hx-ink);
+}
+.hx-heading-accent{
+  height: 4px;
+  width: 72px;
+  background: var(--hx-brand);
+  border-radius: 999px;
+  margin-top: .5rem;
 }
