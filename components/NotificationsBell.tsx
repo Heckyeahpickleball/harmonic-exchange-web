@@ -13,7 +13,7 @@ type NotifType =
   | 'message_received'
   | 'message'
   | 'offer_pending'
-  | 'fulfillment_reminder' // NEW: weekly “mark fulfilled?” nudges
+  | 'fulfillment_reminder' // NEW: weekly “Has your offer been fulfilled?” nudges
   | 'system'
   | string;
 
@@ -143,7 +143,7 @@ export default function NotificationsBell() {
         const t = offerTitle ? ` “${offerTitle}”` : '';
         // If you have a direct thread route for a specific request, swap href to that
         const href = reqId ? `/exchanges?focus=${reqId}` : '/exchanges';
-        return { text: `Mark fulfilled?${t}`, href };
+        return { text: `Has your offer been fulfilled?${t}`, href };
       }
       default: {
         const text = n.data?.message || n.data?.text || 'Update';
