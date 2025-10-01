@@ -1,14 +1,12 @@
-// components/PostItem.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
 
-/* ---------- Types ---------- */
 type PostRow = {
   id: string;
-  profile_id: string; // post owner
+  profile_id: string;
   body: string | null;
   images?: string[] | null;
   created_at: string;
@@ -25,25 +23,15 @@ type CommentRow = {
   profiles?: { display_name: string | null } | null;
 };
 
-/* ---------- Small UI helpers ---------- */
 function Kebab({
   items,
   onClose,
-}: {
-  items: Array<{ label: string; action: () => void }>;
-  onClose: () => void;
-}) {
+}: { items: Array<{ label: string; action: () => void }>; onClose: () => void }) {
   return (
     <div className="absolute right-0 z-10 mt-1 w-36 rounded border bg-white shadow">
       {items.map((it, i) => (
-        <button
-          key={i}
-          className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
-          onClick={() => {
-            it.action();
-            onClose();
-          }}
-        >
+        <button key={i} className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
+          onClick={() => { it.action(); onClose(); }}>
           {it.label}
         </button>
       ))}
@@ -51,163 +39,69 @@ function Kebab({
   );
 }
 
-/* ---------- Accessible inline confirm dialog ---------- */
 function ConfirmInline({
-  text,
-  confirmLabel = 'Delete',
-  cancelLabel = 'Cancel',
-  onConfirm,
-  onCancel,
-  busy,
+  text, confirmLabel = 'Delete', cancelLabel = 'Cancel', onConfirm, onCancel, busy,
 }: {
-  text: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  onConfirm: () => void | Promise<void>;
-  onCancel: () => void;
-  busy?: boolean;
+  text: string; confirmLabel?: string; cancelLabel?: string;
+  onConfirm: () => void | Promise<void>; onCancel: () => void; busy?: boolean;
 }) {
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  const lastFocusedRef = useRef<HTMLElement | null>(null);
   const confirmBtnRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    lastFocusedRef.current = (document.activeElement as HTMLElement) ?? null;
-    const t = setTimeout(() => confirmBtnRef.current?.focus(), 0);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      clearTimeout(t);
-      document.body.style.overflow = prevOverflow;
-      lastFocusedRef.current?.focus?.();
-    };
-  }, []);
-
-  function onKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Escape') {
-      e.stopPropagation();
-      e.preventDefault();
-      if (!busy) onCancel();
-      return;
-    }
-    if (e.key === 'Enter') {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag !== 'TEXTAREA') {
-        e.preventDefault();
-        if (!busy) onConfirm();
-      }
-    }
-  }
-
+  useEffect(() => { const t = setTimeout(() => confirmBtnRef.current?.focus(), 0); return () => clearTimeout(t); }, []);
   return (
-    <div
-      ref={dialogRef}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="confirm-title"
-      className="mt-2 rounded-lg border border-gray-200 bg-white p-3 shadow-sm"
-      onKeyDown={onKeyDown}
-    >
-      <h3 id="confirm-title" className="mb-2 text-sm font-semibold">
-        Confirm delete
-      </h3>
+    <div role="dialog" aria-modal="true" className="mt-2 rounded-lg border bg-white p-3 shadow-sm">
+      <h3 className="mb-2 text-sm font-semibold">Confirm delete</h3>
       <p className="mb-3 text-sm text-gray-700">{text}</p>
       <div className="flex items-center gap-2">
-        <button
-          ref={confirmBtnRef}
-          type="button"
-          className="inline-flex items-center rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
-          onClick={onConfirm}
-          disabled={!!busy}
-        >
-          {busy ? 'Working…' : confirmLabel}
-        </button>
-        <button
-          type="button"
-          className="inline-flex items-center rounded border px-3 py-1.5 text-sm font-medium disabled:opacity-60"
-          onClick={onCancel}
-          disabled={!!busy}
-        >
-          {cancelLabel}
-        </button>
+        <button ref={confirmBtnRef} className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+          onClick={onConfirm} disabled={!!busy}>{busy ? 'Working…' : confirmLabel}</button>
+        <button className="rounded border px-3 py-1.5 text-sm font-medium disabled:opacity-60"
+          onClick={onCancel} disabled={!!busy}>{cancelLabel}</button>
       </div>
     </div>
   );
 }
 
-/* ---------- Utils ---------- */
 function normalizeProfile<T extends { profiles?: any }>(row: T) {
   const p = row.profiles;
-  return {
-    ...row,
-    profiles: Array.isArray(p) ? (p[0] ?? null) : p ?? null,
-  };
+  return { ...row, profiles: Array.isArray(p) ? (p[0] ?? null) : p ?? null };
 }
-
 function byCreatedAtAsc<A extends { created_at: string }>(a: A, b: A) {
   return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
 }
 
-/* ---------- Component ---------- */
 export default function PostItem({
-  post,
-  me,
-  onDeleted,
-}: {
-  post: PostRow;
-  me: string | null;
-  onDeleted: () => void;
-}) {
+  post, me, onDeleted,
+}: { post: PostRow; me: string | null; onDeleted: () => void; }) {
   const [menuOpen, setMenuOpen] = useState(false);
-
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [commentText, setCommentText] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
-  // comment images
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // accurate count regardless of whether comments are loaded
   const [commentCount, setCommentCount] = useState<number>(0);
-
-  // realtime dedupe + subscription handle
   const commentIdsRef = useRef<Set<string>>(new Set());
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   useEffect(() => {
-    // initial count
     (async () => {
-      const { count, error } = await supabase
+      const { count } = await supabase
         .from('post_comments')
         .select('id', { head: true, count: 'exact' })
         .eq('post_id', post.id);
-      if (!error) setCommentCount(count || 0);
+      setCommentCount(count || 0);
     })();
   }, [post.id]);
 
-  // subscribe to realtime when thread opens
   useEffect(() => {
-    if (!commentsOpen) {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-      return;
-    }
+    if (!commentsOpen) { if (channelRef.current) supabase.removeChannel(channelRef.current); return; }
     const ch = supabase
       .channel(`post_comments:${post.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'post_comments',
-          filter: `post_id=eq.${post.id}`,
-        },
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'post_comments', filter: `post_id=eq.${post.id}` },
         (payload) => {
           if (payload.eventType === 'INSERT') {
             const row = normalizeProfile(payload.new as CommentRow) as CommentRow;
@@ -218,31 +112,23 @@ export default function PostItem({
             }
           } else if (payload.eventType === 'DELETE') {
             const oldRow = payload.old as { id: string };
-            if (commentIdsRef.current.has(oldRow.id)) {
-              commentIdsRef.current.delete(oldRow.id);
-            }
+            if (commentIdsRef.current.has(oldRow.id)) commentIdsRef.current.delete(oldRow.id);
             setComments((prev) => prev.filter((c) => c.id !== oldRow.id));
             setCommentCount((c) => Math.max(0, c - 1));
           } else if (payload.eventType === 'UPDATE') {
             const row = normalizeProfile(payload.new as CommentRow) as CommentRow;
             setComments((prev) => prev.map((c) => (c.id === row.id ? row : c)));
           }
-        }
-      )
+        })
       .subscribe();
-
     channelRef.current = ch;
-    return () => {
-      if (ch) supabase.removeChannel(ch);
-      channelRef.current = null;
-    };
+    return () => { if (ch) supabase.removeChannel(ch); };
   }, [commentsOpen, post.id]);
 
   async function toggleComments() {
     const open = !commentsOpen;
     setCommentsOpen(open);
     setErr('');
-
     if (open && comments.length === 0) {
       const { data, error } = await supabase
         .from('post_comments')
@@ -250,10 +136,8 @@ export default function PostItem({
         .eq('post_id', post.id)
         .order('created_at', { ascending: true })
         .limit(200);
-
-      if (error) {
-        setErr(error.message);
-      } else {
+      if (error) setErr(error.message);
+      else {
         const normalized: CommentRow[] = (data || []).map((r: any) => normalizeProfile(r));
         setComments(normalized);
         commentIdsRef.current = new Set((normalized || []).map((r) => r.id));
@@ -267,10 +151,8 @@ export default function PostItem({
     if (!error) onDeleted();
   }
 
-  // ----- comment uploads -----
   function onCommentPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
-    const items = Array.from(e.clipboardData?.items || []);
-    const imgs = items
+    const imgs = Array.from(e.clipboardData?.items || [])
       .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
       .map((it) => it.getAsFile())
       .filter(Boolean) as File[];
@@ -294,14 +176,9 @@ export default function PostItem({
     const urls: string[] = [];
     for (const f of imgs) {
       const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}_${f.name}`;
-      const { error } = await bucket.upload(path, f, {
-        cacheControl: '3600',
-        upsert: true,
-        contentType: f.type || 'image/*',
-      });
+      const { error } = await bucket.upload(path, f, { cacheControl: '3600', upsert: true, contentType: f.type || 'image/*' });
       if (error) throw error;
-      const { data } = bucket.getPublicUrl(path);
-      urls.push(data.publicUrl);
+      urls.push(bucket.getPublicUrl(path).data.publicUrl);
     }
     return urls;
   }
@@ -309,60 +186,31 @@ export default function PostItem({
   async function addComment() {
     const body = commentText.trim();
     if (!body && files.length === 0) return;
-    setBusy(true);
-    setErr('');
+    setBusy(true); setErr('');
     try {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth.user?.id;
       if (!uid) throw new Error('Not signed in');
-
       const imageUrls = await uploadAllImages(uid, files);
-
       const { data, error } = await supabase
         .from('post_comments')
-        .insert({
-          post_id: post.id,
-          profile_id: uid,
-          body: body || ' ', // allow image-only comments
-          images: imageUrls,
-        })
+        .insert({ post_id: post.id, profile_id: uid, body: body || ' ', images: imageUrls })
         .select('id, post_id, profile_id, body, created_at, images, profiles(display_name)')
         .single();
-
       if (error) throw error;
-
       const normalized = normalizeProfile(data) as CommentRow;
-
       setComments((prev) => [...prev, normalized].sort(byCreatedAtAsc));
       setCommentCount((c) => c + 1);
-
-      setCommentText('');
-      previews.forEach((u) => URL.revokeObjectURL(u));
-      setFiles([]);
-      setPreviews([]);
-    } catch (e: any) {
-      setErr(e?.message ?? 'Could not comment.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deleteComment(id: string) {
-    if (!confirm('Delete this comment?')) return;
-    const { error } = await supabase.from('post_comments').delete().eq('id', id);
-    if (!error) {
-      setComments((prev) => prev.filter((c) => c.id !== id));
-      setCommentCount((c) => Math.max(0, c - 1));
-      if (commentIdsRef.current.has(id)) commentIdsRef.current.delete(id);
-    }
+      setCommentText(''); previews.forEach((u) => URL.revokeObjectURL(u)); setFiles([]); setPreviews([]);
+    } catch (e: any) { setErr(e?.message ?? 'Could not comment.'); }
+    finally { setBusy(false); }
   }
 
   function onComposerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (!busy) addComment();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!busy) addComment(); }
   }
+
+  const toggleLabel = commentsOpen ? `Hide comments (${commentCount})` : `See comments (${commentCount})`;
 
   return (
     <article className="hx-card p-3">
@@ -374,19 +222,8 @@ export default function PostItem({
         </div>
         {me === post.profile_id && (
           <div className="relative">
-            <button
-              className="rounded border px-2 py-1 text-sm"
-              aria-label="More actions"
-              onClick={() => setMenuOpen((v) => !v)}
-            >
-              …
-            </button>
-            {menuOpen && (
-              <Kebab
-                items={[{ label: 'Delete post', action: deletePost }]}
-                onClose={() => setMenuOpen(false)}
-              />
-            )}
+            <button className="rounded border px-2 py-1 text-sm" aria-label="More actions" onClick={() => setMenuOpen((v) => !v)}>…</button>
+            {menuOpen && <Kebab items={[{ label: 'Delete post', action: deletePost }]} onClose={() => setMenuOpen(false)} />}
           </div>
         )}
       </header>
@@ -397,21 +234,14 @@ export default function PostItem({
         <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
           {post.images.map((src) => (
             <div key={src} className="relative h-48 w-full overflow-hidden rounded">
-              <Image
-                src={src}
-                alt={post.body ? `Post image: ${post.body.slice(0, 80)}` : 'Post image'}
-                fill
-                className="object-cover"
-                sizes="(max-width: 640px) 100vw, 50vw"
-                priority={false}
-              />
+              <Image src={src} alt="" fill className="object-cover" sizes="(max-width: 640px) 100vw, 50vw" />
             </div>
           ))}
         </div>
       ) : null}
 
       <button className="text-sm underline" onClick={toggleComments}>
-        {commentsOpen ? `Hide comments (${commentCount})` : `Show comments (${commentCount})`}
+        {toggleLabel}
       </button>
 
       {commentsOpen && (
@@ -431,20 +261,9 @@ export default function PostItem({
               <div className="flex flex-col items-end gap-2">
                 <label className="inline-flex items-center gap-2">
                   <span className="cursor-pointer rounded border px-2 py-1">Add image</span>
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    accept="image/*"
-                    hidden
-                    multiple
-                    onChange={onCommentFiles}
-                  />
+                  <input ref={fileRef} type="file" accept="image/*" hidden multiple onChange={onCommentFiles}/>
                 </label>
-                <button
-                  className="rounded bg-black px-3 py-1 text-white disabled:opacity-60"
-                  disabled={busy}
-                  onClick={addComment}
-                >
+                <button className="rounded bg-black px-3 py-1 text-white disabled:opacity-60" disabled={busy} onClick={addComment}>
                   {busy ? 'Posting…' : 'Post'}
                 </button>
               </div>
@@ -472,9 +291,7 @@ export default function PostItem({
               </div>
             )}
 
-            <div className="text-xs text-gray-500">
-              Enter = Post • Shift+Enter = newline • Up to 6 images
-            </div>
+            <div className="text-xs text-gray-500">Enter = Post • Shift+Enter = newline • Up to 6 images</div>
             {err && <p className="text-sm text-red-600">{err}</p>}
           </div>
 
@@ -499,18 +316,9 @@ export default function PostItem({
   );
 }
 
-/* ---------- Single Comment with kebab + confirm ---------- */
 function CommentItem({
-  comment,
-  me,
-  ownerId,
-  onDeleted,
-}: {
-  comment: CommentRow;
-  me: string | null;
-  ownerId: string;
-  onDeleted: () => void;
-}) {
+  comment, me, ownerId, onDeleted,
+}: { comment: CommentRow; me: string | null; ownerId: string; onDeleted: () => void; }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -539,32 +347,17 @@ function CommentItem({
         <div>
           <span className="font-medium">{comment.profiles?.display_name ?? 'Someone'}</span>
           <span className="mx-1">•</span>
-          <time dateTime={comment.created_at}>
-            {new Date(comment.created_at).toLocaleString()}
-          </time>
+          <time dateTime={comment.created_at}>{new Date(comment.created_at).toLocaleString()}</time>
         </div>
-
         {canDelete && (
           <div className="relative">
-            <button
-              className="rounded border px-2 py-1 text-sm"
-              aria-label="More actions"
-              onClick={() => setMenuOpen((v) => !v)}
-            >
-              …
-            </button>
-            {menuOpen && (
-              <Kebab
-                items={[{ label: 'Delete comment', action: () => setConfirmDel(true) }]}
-                onClose={() => setMenuOpen(false)}
-              />
-            )}
+            <button className="rounded border px-2 py-1 text-sm" aria-label="More actions" onClick={() => setMenuOpen((v) => !v)}>…</button>
+            {menuOpen && <Kebab items={[{ label: 'Delete comment', action: () => setConfirmDel(true) }]} onClose={() => setMenuOpen(false)} />}
           </div>
         )}
       </div>
 
       {comment.body && <p className="whitespace-pre-wrap">{comment.body}</p>}
-
       {comment.images?.length ? (
         <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
           {comment.images.map((src) => (
@@ -576,12 +369,7 @@ function CommentItem({
       ) : null}
 
       {confirmDel && (
-        <ConfirmInline
-          text="Delete this comment? This can’t be undone."
-          onConfirm={reallyDelete}
-          onCancel={() => setConfirmDel(false)}
-          busy={busy}
-        />
+        <ConfirmInline text="Delete this comment? This can’t be undone." onConfirm={reallyDelete} onCancel={() => setConfirmDel(false)} busy={busy}/>
       )}
       {err && <p className="mt-1 text-sm text-red-600">{err}</p>}
     </div>
