@@ -13,7 +13,7 @@ type NotifType =
   | 'message_received'
   | 'message'
   | 'offer_pending'
-  | 'fulfillment_reminder' // NEW: weekly “Has your offer been fulfilled?” nudges
+  | 'fulfillment_reminder'
   | 'system'
   | string;
 
@@ -24,6 +24,8 @@ type Notif = {
   created_at: string;
   read_at: string | null;
   profile_id: string;
+  // local-only flags
+  _fresh?: boolean; // just arrived via realtime in this session
 };
 
 export default function NotificationsBell() {
@@ -33,12 +35,12 @@ export default function NotificationsBell() {
   const [rows, setRows] = useState<Notif[]>([]);
   const unread = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
 
-  // Caches to enrich labels without extra server code
+  // caches to enrich labels without server code
   const titleCache = useRef(new Map<string, string>()); // offer_id -> title
   const requesterCache = useRef(new Map<string, string>()); // request_id -> requester display_name
-  const sigSeen = useRef<Set<string>>(new Set()); // de-dupe identical signals in-memory
+  const sigSeen = useRef<Set<string>>(new Set()); // in-memory de-dupe across sessions
 
-  // -------- helpers to enrich labels ----------
+  // ---------- enrichment helpers ----------
   async function enrichOfferTitles(notifs: Notif[]) {
     const missing = Array.from(
       new Set(
@@ -51,7 +53,6 @@ export default function NotificationsBell() {
 
     const { data, error } = await supabase.from('offers').select('id,title').in('id', missing);
     if (error) return;
-
     for (const row of (data || []) as { id: string; title: string }[]) {
       titleCache.current.set(row.id, row.title);
     }
@@ -76,7 +77,6 @@ export default function NotificationsBell() {
     );
     if (!ids.length) return;
 
-    // Adjust this select if your request->profiles relationship differs
     const { data } = await supabase
       .from('requests')
       .select('id, requester:profiles(id, display_name)')
@@ -97,7 +97,7 @@ export default function NotificationsBell() {
     );
   }
 
-  // -------- label + href for each type ----------
+  // ---------- label + href ----------
   function label(n: Notif): { text: string; href?: string } {
     const offerId = n.data?.offer_id as string | undefined;
     const offerTitle = n.data?.offer_title as string | undefined;
@@ -141,7 +141,6 @@ export default function NotificationsBell() {
       }
       case 'fulfillment_reminder': {
         const t = offerTitle ? ` “${offerTitle}”` : '';
-        // If you have a direct thread route for a specific request, swap href to that
         const href = reqId ? `/exchanges?focus=${reqId}` : '/exchanges';
         return { text: `Has your offer been fulfilled?${t}`, href };
       }
@@ -152,7 +151,7 @@ export default function NotificationsBell() {
     }
   }
 
-  // -------- mark read helpers ----------
+  // ---------- mark read helpers ----------
   async function markAllRead() {
     if (!uid) return;
     const ids = rows.filter((r) => !r.read_at).map((r) => r.id);
@@ -160,9 +159,9 @@ export default function NotificationsBell() {
     const nowISO = new Date().toISOString();
 
     // optimistic update
-    setRows((prev) => prev.map((r) => (ids.includes(r.id) ? { ...r, read_at: nowISO } : r)));
+    setRows((prev) => prev.map((r) => (ids.includes(r.id) ? { ...r, read_at: nowISO, _fresh: false } : r)));
 
-    // best-effort server update (requires RLS allowing owner to update their notifications)
+    // best-effort server update
     await supabase.from('notifications').update({ read_at: nowISO }).in('id', ids);
   }
 
@@ -171,7 +170,7 @@ export default function NotificationsBell() {
     if (!found || found.read_at) return;
     const nowISO = new Date().toISOString();
 
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, read_at: nowISO } : r)));
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, read_at: nowISO, _fresh: false } : r)));
     await supabase.from('notifications').update({ read_at: nowISO }).eq('id', id);
   }
 
@@ -179,7 +178,7 @@ export default function NotificationsBell() {
     return `${n.profile_id}|${n.type}|${n.data?.offer_id ?? ''}|${n.data?.request_id ?? ''}`;
   }
 
-  // -------- initial load + realtime subscriptions ----------
+  // ---------- initial load + realtime ----------
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -195,13 +194,15 @@ export default function NotificationsBell() {
         .limit(50);
 
       const initial = (list || []) as Notif[];
-      const dedup: Notif[] = [];
+
+      // de-dupe by signature
       const seen = new Set<string>();
+      const dedup: Notif[] = [];
       for (const n of initial) {
         const s = sig(n);
         if (seen.has(s)) continue;
         seen.add(s);
-        dedup.push(n);
+        dedup.push({ ...n, _fresh: false });
       }
       sigSeen.current = seen;
       setRows(dedup);
@@ -219,13 +220,15 @@ export default function NotificationsBell() {
             const s = sig(n);
             if (sigSeen.current.has(s)) return;
             sigSeen.current.add(s);
-            setRows((prev) => [n, ...prev].slice(0, 50));
-            await Promise.allSettled([enrichOfferTitles([n]), enrichRequesterNames([n])]);
+            // tag as fresh for a subtle pulse
+            const fresh = { ...n, _fresh: true };
+            setRows((prev) => [fresh, ...prev].slice(0, 50));
+            await Promise.allSettled([enrichOfferTitles([fresh]), enrichRequesterNames([fresh])]);
           },
         )
         .subscribe();
 
-      // Realtime: UPDATE (read_at)
+      // Realtime: UPDATE (read_at changes elsewhere)
       const chUpd = supabase
         .channel('realtime:notifications:upd')
         .on(
@@ -233,7 +236,9 @@ export default function NotificationsBell() {
           { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `profile_id=eq.${u}` },
           (payload) => {
             const upd = payload.new as Notif;
-            setRows((prev) => prev.map((r) => (r.id === upd.id ? { ...r, read_at: upd.read_at } : r)));
+            setRows((prev) =>
+              prev.map((r) => (r.id === upd.id ? { ...r, read_at: upd.read_at ?? null, _fresh: false } : r)),
+            );
           },
         )
         .subscribe();
@@ -244,17 +249,17 @@ export default function NotificationsBell() {
       };
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // once
+  }, []);
 
-  async function toggleOpen() {
-    setOpen((v) => !v);
-    if (!open) await markAllRead();
-  }
-
-  // -------- UI ----------
+  // ---------- UI ----------
   return (
     <div className="relative">
-      <button className="relative rounded border px-2 py-1 text-sm" onClick={toggleOpen} title="Notifications">
+      <button
+        className="relative rounded border px-2 py-1 text-sm"
+        onClick={() => setOpen((v) => !v)}
+        title="Notifications"
+        aria-label="Open notifications"
+      >
         🔔
         {unread > 0 && (
           <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-amber-500 px-1 text-[11px] font-bold text-white">
@@ -278,18 +283,37 @@ export default function NotificationsBell() {
             {rows.map((n) => {
               const { text, href } = label(n);
               const ts = new Date(n.created_at).toLocaleString();
+
+              const isUnread = !n.read_at;
+              const wrapperCls = [
+                'border-b px-3 py-2 text-sm transition-colors',
+                isUnread ? 'bg-amber-50' : '',
+              ].join(' ');
+
               return (
-                <li key={n.id} className={`border-b px-3 py-2 text-sm ${!n.read_at ? 'bg-amber-50' : ''}`}>
+                <li key={n.id} className={wrapperCls}>
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="text-[11px] text-gray-500">{ts}</div>
-                      <div>{text}</div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        {/* “New” dot when unread; subtle pulse only for fresh arrivals */}
+                        {isUnread && (
+                          <span
+                            className={[
+                              'mt-1 inline-block h-2 w-2 rounded-full bg-amber-600',
+                              n._fresh ? 'animate-pulse' : '',
+                            ].join(' ')}
+                            aria-hidden
+                          />
+                        )}
+                        <div className="text-[11px] text-gray-500">{ts}</div>
+                      </div>
+                      <div className="mt-0.5 break-words">{text}</div>
                     </div>
 
                     {href && (
                       <button
                         type="button"
-                        className="whitespace-nowrap rounded border px-2 py-1 text-xs hover:bg-gray-50"
+                        className="shrink-0 whitespace-nowrap rounded border px-2 py-1 text-xs hover:bg-gray-50"
                         onClick={async () => {
                           await markOneRead(n.id);
                           setOpen(false);
