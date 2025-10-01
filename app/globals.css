@@ -8,7 +8,7 @@
   --hx-muted: #475569;
 
   --hx-brand: #1e3a8a;         /* deep blue */
-  --hx-brand-strong: #1e40af;
+  --hx-brand-strong: #1e40af;  /* brighter blue */
   --hx-accent: #f59e0b;        /* warm golden */
 
   --hx-cool: #eef2ff;          /* indigo-50 */
@@ -21,6 +21,7 @@
   --hx-card-border: rgba(2, 6, 23, 0.14);
   --hx-card-shadow: 0 1px 2px rgba(2, 6, 23, 0.08);
 
+  /* hero overlay (minimal—image leads) */
   --hx-hero-overlay: linear-gradient(0deg, rgba(255,255,255,0) 60%, rgba(255,255,255,0.0) 100%);
 }
 
@@ -60,9 +61,14 @@ html, body {
 
 /* Section themes */
 .hx-section--cool{ background: var(--hx-cool); }
-.hx-section--deep{ background: var(--hx-deep); color: var(--hx-deep-ink); }
 
-/* Buttons — more color, stronger outline, subtle depth */
+/* New brand gradient section (bold, not black) */
+.hx-section--brand{
+  background: linear-gradient(135deg, var(--hx-brand) 0%, #2442c1 55%, #2f52d9 100%);
+  color: #fff;
+}
+
+/* Buttons */
 .hx-btn{
   border-radius: 999px;
   padding: .72rem 1.15rem;

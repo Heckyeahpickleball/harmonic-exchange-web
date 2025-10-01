@@ -28,14 +28,14 @@ function StatusBadge({ status }: { status: OfferRow['status'] }) {
   if (status === 'active') return null;
   const label =
     status === 'pending'
-      ? 'pending approval'
+      ? 'PENDING'
       : status === 'blocked'
-      ? 'blocked'
+      ? 'BLOCKED'
       : status === 'paused'
-      ? 'paused'
-      : 'archived';
+      ? 'PAUSED'
+      : 'ARCHIVED';
   return (
-    <span className="rounded bg-gray-200 px-2 py-0.5 text-[11px] uppercase tracking-wide text-gray-700">
+    <span className="rounded-full border px-2 py-0.5 text-[11px] font-semibold tracking-wide text-gray-700">
       {label}
     </span>
   );
@@ -67,18 +67,26 @@ export default function OfferCard({ offer, mine = false, onDeleted }: Props) {
   const location = offer.is_online ? 'Online' : [offer.city, offer.country].filter(Boolean).join(', ');
 
   return (
-    <article className="hx-card hover:shadow-md transition">
+    <article className="hx-card transition hover:shadow-md">
       <Link href={href} className="block">
         <div className="relative h-48 w-full overflow-hidden rounded-t bg-gray-100">
           {thumb ? (
-            <Image src={thumb} alt={offer.title} fill className="object-cover" sizes="(max-width: 768px) 100vw, 50vw" />
+            <Image
+              src={thumb}
+              alt={offer.title}
+              fill
+              className="object-cover"
+              sizes="(max-width: 768px) 100vw, 50vw"
+            />
           ) : (
-            <div className="flex h-full items-center justify-center text-xs text-gray-400">No image</div>
+            <div className="flex h-full items-center justify-center text-xs text-gray-400">
+              No image
+            </div>
           )}
         </div>
       </Link>
 
-      <div className="space-y-2 p-3">
+      <div className="space-y-3 p-3">
         <div className="flex items-start justify-between gap-2">
           <div>
             <Link href={href} className="block text-base font-semibold hover:underline">
@@ -89,21 +97,34 @@ export default function OfferCard({ offer, mine = false, onDeleted }: Props) {
             </div>
             {offer.owner_name && offer.owner_id && (
               <div className="mt-0.5 text-xs text-gray-500">
-                by <Link href={`/u/${offer.owner_id}`} className="hx-link">{offer.owner_name}</Link>
+                by{' '}
+                <Link href={`/u/${offer.owner_id}`} className="hx-link">
+                  {offer.owner_name}
+                </Link>
               </div>
             )}
           </div>
           <StatusBadge status={offer.status} />
         </div>
 
-        <div className="flex gap-2">
-          <Link href={href} className="hx-btn hx-btn--ghost text-sm">View</Link>
-          {!mine && <Link href={href} className="hx-btn hx-btn--brand text-sm">Ask to Receive</Link>}
+        {/* Actions */}
+        <div className="flex flex-wrap gap-2">
+          {/* View = outline, Ask = primary (pops), Delete = secondary outline */}
+          <Link href={href} className="hx-btn hx-btn--outline-primary text-sm">
+            View
+          </Link>
+
+          {!mine && (
+            <Link href={href} className="hx-btn hx-btn--primary text-sm">
+              Ask to Receive
+            </Link>
+          )}
+
           {mine && (
             <button
               onClick={handleDelete}
               disabled={deleting}
-              className="hx-btn hx-btn--ghost text-sm disabled:opacity-60"
+              className="hx-btn hx-btn--secondary text-sm disabled:opacity-60"
               title="Delete permanently"
             >
               {deleting ? 'Deleting…' : 'Delete'}

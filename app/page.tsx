@@ -123,8 +123,8 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Agreements — deep section */}
-      <section className="hx-section hx-section--deep">
+      {/* Agreements — BRAND GRADIENT (not black) */}
+      <section className="hx-section hx-section--brand">
         <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
           <h3 className="text-center text-2xl font-bold text-white">Community agreements</h3>
           <ul className="mx-auto mt-6 max-w-3xl list-disc space-y-2 pl-6 text-white/90">
@@ -134,7 +134,7 @@ export default function HomePage() {
             <li>If money is requested, it doesn’t belong here.</li>
             <li>Celebrate completion—share gratitude if you wish.</li>
           </ul>
-          <p className="mx-auto mt-6 max-w-3xl text-center text-white/80">
+          <p className="mx-auto mt-6 max-w-3xl text-center text-white/85">
             This is a living experiment. We learn by doing. Local and global chapters welcome you to participate,
             share updates, and help evolve the practice.
           </p>
@@ -155,7 +155,7 @@ export default function HomePage() {
   );
 }
 
-/* ——— presentational helpers ——— */
+/* ——— helpers ——— */
 
 function FeatureLine({ title, body }: { title: string; body: string }) {
   return (
