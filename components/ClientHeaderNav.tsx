@@ -33,7 +33,6 @@ export default function ClientHeaderNav() {
     try {
       setBusy(true);
       await supabase.auth.signOut();
-      // simple client redirect
       window.location.href = '/';
     } finally {
       setBusy(false);
@@ -56,6 +55,13 @@ export default function ClientHeaderNav() {
 
         <Link href="/exchanges" className="underline-offset-4 hover:underline">Exchanges</Link>
         <Link href="/profile" className="underline-offset-4 hover:underline">Profile</Link>
+
+        {/* NEW: movement pages */}
+        <Link href="/about" className="underline-offset-4 hover:underline">About</Link>
+        <Link href="/chapters" className="underline-offset-4 hover:underline">Chapters</Link>
+        <Link href="/chapters/start" className="underline-offset-4 hover:underline">Start a Chapter</Link>
+        <Link href="/guidelines" className="underline-offset-4 hover:underline">Guidelines</Link>
+
         {showAdmin && (
           <Link href="/admin" className="underline-offset-4 hover:underline">Admin</Link>
         )}
@@ -64,14 +70,14 @@ export default function ClientHeaderNav() {
       <div className="flex items-center gap-2">
         <NotificationsBell />
         {!uid ? (
-          <Link href="/sign-in" className="rounded border px-2 py-1 text-sm hover:bg-gray-50">
+          <Link href="/sign-in" className="hx-btn hx-btn--outline-primary text-sm px-3 py-2">
             Sign in
           </Link>
         ) : (
           <button
             onClick={signOut}
             disabled={busy}
-            className="rounded border px-2 py-1 text-sm hover:bg-gray-50 disabled:opacity-50"
+            className="hx-btn hx-btn--secondary text-sm px-3 py-2 disabled:opacity-50"
             aria-label="Sign out"
           >
             {busy ? 'Signing out…' : 'Sign out'}
