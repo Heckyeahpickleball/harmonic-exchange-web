@@ -1,25 +1,27 @@
 @import "tailwindcss";
 
-/* Teal brand accents pulled from the cover; warm gold remains as secondary accent */
+/* ===== Design tokens (unchanged except where noted) ===== */
 :root{
   --hx-bg: #ffffff;
   --hx-surface: #f6f8fb;
   --hx-ink: #0b1220;
   --hx-muted: #475569;
 
-  /* TEAL brand */
+  /* TEAL brand accents */
   --hx-brand: #0f766e;         /* teal-700 */
-  --hx-brand-strong: #0a5f59;  /* slightly deeper teal */
-  --hx-accent: #f59e0b;        /* warm golden for highlights */
+  --hx-brand-strong: #0a5f59;  /* deeper teal */
+  --hx-accent: #f59e0b;        /* warm golden */
 
-  --hx-cool: #eef2ff;          /* indigo-50 (soft cool tint for sections) */
+  --hx-cool: #eef2ff;          /* cool tint (if needed elsewhere) */
   --hx-cool-ink-muted: #475569;
+
+  --hx-cream: #F6EFE2;         /* NEW: paper-tan to match illustration */
 
   --hx-ring: 0 0 0 3px rgba(15,118,110,.28);
   --hx-card-border: rgba(2, 6, 23, 0.14);
   --hx-card-shadow: 0 1px 2px rgba(2, 6, 23, 0.08);
 
-  --hx-hero-overlay: linear-gradient(0deg, rgba(255,255,255,0) 60%, rgba(255,255,255,0.0) 100%);
+  --hx-hero-overlay: linear-gradient(0deg, rgba(255,255,255,0) 60%, rgba(255,255,255,0) 100%);
 }
 
 html, body {
@@ -30,7 +32,7 @@ html, body {
                "Apple Color Emoji", "Segoe UI Emoji";
 }
 
-/* HERO */
+/* ===== HERO ===== */
 .hx-hero{
   position: relative;
   min-height: clamp(260px, 36vw, 360px);
@@ -43,10 +45,7 @@ html, body {
 }
 
 /* CTA strip */
-.hx-cta-strip{
-  background: #fff;
-  border-bottom: 1px solid var(--hx-card-border);
-}
+.hx-cta-strip{ background:#fff; border-bottom:1px solid var(--hx-card-border); }
 
 /* Cards */
 .hx-card{
@@ -56,15 +55,13 @@ html, body {
   box-shadow: 0 8px 24px rgba(2,6,23,0.06);
 }
 
-/* Section themes */
-.hx-section--cool{ background: var(--hx-cool); }
-/* Brand gradient — teal with a warm edge */
+/* ===== Section themes ===== */
 .hx-section--brand{
   background: linear-gradient(135deg, #0f766e 0%, #0ea5a8 55%, #14b8a6 100%);
   color: #fff;
 }
 
-/* Buttons — now TEAL globally */
+/* ===== Buttons (teal) ===== */
 .hx-btn{
   border-radius: 999px;
   padding: .72rem 1.15rem;
@@ -77,76 +74,54 @@ html, body {
   box-shadow: 0 1px 0 rgba(0,0,0,.04);
   transition: filter .15s ease, box-shadow .15s ease, transform .05s ease, border-color .15s ease, background .15s ease;
 }
-
-/* Primary (solid teal) */
 .hx-btn--primary{
-  color: #fff;
-  background: linear-gradient(180deg, var(--hx-brand), var(--hx-brand-strong));
-  border: 2px solid var(--hx-brand-strong);
+  color:#fff; background:linear-gradient(180deg,var(--hx-brand),var(--hx-brand-strong));
+  border:2px solid var(--hx-brand-strong);
 }
-.hx-btn--primary:hover{ filter: brightness(1.04); }
-.hx-btn--primary:active{ transform: translateY(1px); }
+.hx-btn--primary:hover{ filter:brightness(1.04) }
+.hx-btn--primary:active{ transform:translateY(1px) }
 
-/* Outline teal */
 .hx-btn--outline-primary{
-  color: var(--hx-brand-strong);
-  background: #fff;
-  border: 2px solid var(--hx-brand-strong);
-  box-shadow: 0 1px 0 rgba(0,0,0,.03);
+  color:var(--hx-brand-strong); background:#fff; border:2px solid var(--hx-brand-strong);
 }
-.hx-btn--outline-primary:hover{ background: #f0fdfa; } /* subtle teal-tinted hover */
+.hx-btn--outline-primary:hover{ background:#f0fdfa }
 
-/* Neutral outline */
-.hx-btn--secondary{
-  background: #fff;
-  color: var(--hx-ink);
-  border: 2px solid #cbd5e1;
+.hx-btn--secondary{ background:#fff; color:var(--hx-ink); border:2px solid #cbd5e1 }
+.hx-btn--secondary:hover{ background:#f8fafc }
+
+/* Links + focus */
+.hx-link{ text-decoration:underline; text-underline-offset:4px; text-decoration-thickness:1.25px; text-decoration-color:#cbd5e1 }
+.hx-link:hover{ text-decoration-color:#64748b }
+:focus-visible{ outline:none; box-shadow:var(--hx-ring) }
+button,[role="button"],input[type="button"],input[type="submit"]{ cursor:pointer }
+
+/* ===== Art blocks ===== */
+
+/* (A) People illustration used beside “Why” — feathered edges */
+.hx-feather-img{
+  width:100%;
+  height:auto;
+  display:block;
+  border-radius:14px;
+  box-shadow:0 8px 24px rgba(2,6,23,.06);
+  /* feather on all sides */
+  -webkit-mask-image: radial-gradient(120% 120% at 50% 50%, #000 65%, rgba(0,0,0,0.0) 100%);
+  mask-image: radial-gradient(120% 120% at 50% 50%, #000 65%, rgba(0,0,0,0.0) 100%);
 }
-.hx-btn--secondary:hover{ background: #f8fafc; }
 
-/* Links */
-.hx-link{
-  text-decoration: underline;
-  text-underline-offset: 4px;
-  text-decoration-thickness: 1.25px;
-  text-decoration-color: #cbd5e1;
+/* (B) Slim “wave” divider — now extra tight spacing */
+.hx-wave-wrap{
+  background: var(--hx-cream);
+  display:flex; justify-content:center;
+  margin: 4px auto;          /* reduced big time */
+  padding: 0 .75rem;         /* minimal */
+  border-top: 1px solid rgba(2,6,23,.06);
+  border-bottom: 1px solid rgba(2,6,23,.06);
 }
-.hx-link:hover{ text-decoration-color: #64748b; }
-
-/* Focus */
-:focus-visible{ outline: none; box-shadow: var(--hx-ring); }
-
-/* Click affordances */
-button,[role="button"],input[type="button"],input[type="submit"]{ cursor:pointer; }
-button{ transition: background-color .15s ease, box-shadow .15s ease, transform .05s ease; }
-button:hover{ box-shadow: inset 0 0 0 9999px rgba(0,0,0,0.02); }
-button:active{ transform: translateY(1px); }
-
-/* ——— Section header art (blends into background) ——— */
-.hx-art-wrap{
-  background: transparent;
-  display: flex;
-  justify-content: center;
-}
-/* ——— Section header art (blends into background) ——— */
-.hx-art-wrap{
-  background: transparent;
-  display: flex;
-  justify-content: center;
-  /* slightly closer to neighbors */
-  margin: 10px auto 8px;
-  padding: 0 1rem;
-}
-.hx-section-art{
-  display: block;
-  width: min(1100px, 98%);  /* wider */
-  max-height: 220px;        /* taller but still slim */
-  object-fit: contain;
-  opacity: .98;
-  filter: saturate(1.05);
-  border-radius: 12px;       /* integrates w/ cards */
-  box-shadow: 0 6px 18px rgba(2,6,23,.08);
-  /* soften fade so it feels embedded, not clipped */
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 12%, #000 88%, transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0%, #000 12%, #000 88%, transparent 100%);
+.hx-wave{
+  width:min(1100px,98%);
+  max-height:160px;          /* shallower */
+  display:block;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 18%, #000 82%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 18%, #000 82%, transparent 100%);
 }

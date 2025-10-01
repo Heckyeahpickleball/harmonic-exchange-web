@@ -68,41 +68,65 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Slim people-illustration divider on cream background */}
-      <SectionArt src="/section-people.png" alt="People connecting in harmony" />
+      {/* NEW: “Why” as a 2-column block with people image on cream */}
+      <section style={{ background: 'var(--hx-cream)' }}>
+        <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-8 px-4 py-10 sm:grid-cols-2 sm:py-12">
+          <div>
+            <Image
+              src="/section-people.png"           /* you said you'll keep the same filename */
+              alt="People connecting in harmony"
+              width={900}
+              height={900}
+              className="hx-feather-img"
+              priority
+            />
+          </div>
 
-      {/* Why it's different — TINTED LIST */}
-      <section className="hx-section hx-section--cool">
-        <div className="mx-auto max-w-6xl px-4 pt-8 pb-14 sm:pt-10 sm:pb-16">
-          <h3 className="text-center text-2xl font-bold">Why Harmonic Exchange is different</h3>
-          <p className="mx-auto mt-4 max-w-3xl text-center text-[var(--hx-cool-ink-muted)]">
-            This isn’t bartering, and it’s not transactional. It’s a <em>flow economy</em>—value shared,
-            not counted—guided by resonance, trust, and intuitive reciprocity.
-          </p>
+          <div>
+            <h3 className="text-2xl font-bold">Why Harmonic Exchange is different</h3>
+            <p className="mt-3 max-w-prose text-[var(--hx-muted)]">
+              This isn’t bartering, and it’s not transactional. It’s a <em>flow economy</em>—value shared, not counted—
+              guided by resonance, trust, and intuitive reciprocity.
+            </p>
 
-          <div className="mx-auto mt-8 grid max-w-4xl gap-4">
-            <FeatureLine
-              title="Gift-first energy"
-              body="Offer what feels light, easy, and joyful—whether that’s a product, a service, time, presence, or art."
-            />
-            <FeatureLine
-              title="Dignity-centered receiving"
-              body="Needs are normal. Asking is a strength. Receiving is welcomed and respected."
-            />
-            <FeatureLine
-              title="Trust over tally"
-              body="No score-keeping or debt. Balance emerges through alignment and care."
-            />
+            <div className="mt-6 space-y-4">
+              <FeatureLine
+                title="Gift-first energy"
+                body="Offer what feels light, easy, and joyful—whether that’s a product, a service, time, presence, or art."
+              />
+              <FeatureLine
+                title="Dignity-centered receiving"
+                body="Needs are normal. Asking is a strength. Receiving is welcomed and respected."
+              />
+              <FeatureLine
+                title="Trust over tally"
+                body="No score-keeping or debt. Balance emerges through alignment and care."
+              />
+            </div>
           </div>
         </div>
       </section>
 
-      {/* NEW: teal wave divider before “How it works” */}
-      <WaveDivider />
+      {/* Teal wave divider — now very tight spacing */}
+      <div className="hx-wave-wrap" aria-hidden="true">
+        <svg className="hx-wave" viewBox="0 0 1200 160" preserveAspectRatio="xMidYMid meet" role="img">
+          <defs>
+            <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="var(--hx-brand)" />
+              <stop offset="60%" stopColor="#11a39b" />
+              <stop offset="100%" stopColor="#14b8a6" />
+            </linearGradient>
+          </defs>
+          <path
+            d="M0,90 C200,40 360,140 600,90 C840,40 1000,140 1200,90 L1200,160 L0,160 Z"
+            fill="url(#g)" opacity="0.85"
+          />
+        </svg>
+      </div>
 
-      {/* How it works — CARDS */}
+      {/* How it works — reduce top padding to sit closer to the wave */}
       <section className="bg-white">
-        <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
+        <div className="mx-auto max-w-6xl px-4 pt-8 pb-14 sm:pt-8 sm:pb-16">
           <h3 className="text-center text-2xl font-bold">How it works</h3>
 
           <div className="mt-8 grid gap-6 sm:grid-cols-3">
@@ -164,51 +188,9 @@ export default function HomePage() {
 
 /* ——— helpers ——— */
 
-function SectionArt({ src, alt }: { src: string; alt: string }) {
-  return (
-    <div className="hx-art-wrap">
-      <Image
-        src={src}
-        alt={alt}
-        width={1200}
-        height={220}
-        className="hx-section-art"
-        priority
-      />
-    </div>
-  );
-}
-
-function WaveDivider() {
-  // inline SVG so you don’t need to add a file; inherits the teal brand
-  return (
-    <div className="hx-art-wrap" aria-hidden="true">
-      <svg
-        className="hx-section-art"
-        viewBox="0 0 1200 220"
-        preserveAspectRatio="xMidYMid meet"
-        role="img"
-      >
-        <defs>
-          <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="var(--hx-brand)" />
-            <stop offset="60%" stopColor="#11a39b" />
-            <stop offset="100%" stopColor="#14b8a6" />
-          </linearGradient>
-        </defs>
-        <path
-          d="M0,120 C200,60 350,180 600,120 C850,60 1000,180 1200,120 L1200,220 L0,220 Z"
-          fill="url(#g)"
-          opacity="0.85"
-        />
-      </svg>
-    </div>
-  );
-}
-
 function FeatureLine({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-xl border border-[var(--hx-card-border)] bg-white/70 p-4 shadow-sm backdrop-blur-sm">
+    <div className="rounded-xl border border-[var(--hx-card-border)] bg-white/80 p-4 shadow-sm backdrop-blur-sm">
       <div className="flex gap-3">
         <div className="mt-1 h-5 w-1.5 shrink-0 rounded-full bg-[var(--hx-brand)]" />
         <div>
