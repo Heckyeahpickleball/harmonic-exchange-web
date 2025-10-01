@@ -96,7 +96,7 @@ export default function HomePage() {
             <div className="mt-6 space-y-4">
               <FeatureLine
                 title="Gift-first energy"
-                body="Offer what feels light, easy, and joyful, whether that’s a product, a service, time, presence, or art."
+                body="Offer what you feel called to share—products, services, time, education, coaching, presence, or art."
               />
               <FeatureLine
                 title="Dignity-centered receiving"
