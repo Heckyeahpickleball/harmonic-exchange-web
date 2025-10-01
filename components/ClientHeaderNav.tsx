@@ -40,6 +40,8 @@ export default function ClientHeaderNav() {
     }
   }
 
+  const showAdmin = role === 'admin' || role === 'moderator';
+
   return (
     <nav className="flex items-center justify-between gap-3 py-2">
       <div className="flex flex-wrap items-center gap-3">
@@ -54,7 +56,7 @@ export default function ClientHeaderNav() {
 
         <Link href="/exchanges" className="underline-offset-4 hover:underline">Exchanges</Link>
         <Link href="/profile" className="underline-offset-4 hover:underline">Profile</Link>
-        {role === 'admin' && (
+        {showAdmin && (
           <Link href="/admin" className="underline-offset-4 hover:underline">Admin</Link>
         )}
       </div>
