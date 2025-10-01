@@ -29,49 +29,49 @@ export default function HomePage() {
 
   return (
     <main className="min-h-[80vh]">
-      {/* HERO — image only; the art sets the vibe */}
+      {/* HERO — image only */}
       <section className="hx-hero" aria-label="Harmonic Exchange cover image">
         <h1 className="sr-only">Harmonic Exchange — The Flow Economy Experiment</h1>
       </section>
 
-      {/* Welcome + primary CTAs, calm card below hero */}
+      {/* CTA STRIP — bold, centered buttons directly under hero */}
+      <section className="hx-cta-strip">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-3 px-4 py-5">
+          <Link href="/browse" className="hx-btn hx-btn--primary">Explore Offerings</Link>
+          {loading ? (
+            <span className="hx-btn hx-btn--outline-primary">Checking…</span>
+          ) : user ? (
+            <>
+              <Link href="/offers/new" className="hx-btn hx-btn--outline-primary">Share My Value</Link>
+              <Link href="/profile" className="hx-btn hx-btn--outline-primary">Receive Support</Link>
+            </>
+          ) : (
+            <Link href="/sign-in" className="hx-btn hx-btn--outline-primary">Join the Community</Link>
+          )}
+        </div>
+      </section>
+
+      {/* Welcome text card (now below the buttons) */}
       <section>
         <div className="mx-auto max-w-6xl px-4">
-          <div className="hx-cta-card">
-            <div className="space-y-2">
-              <h2 className="text-2xl font-bold tracking-tight text-[var(--hx-ink)]">
-                Welcome to Harmonic Exchange — the Flow Economy Experiment
-              </h2>
-              <p className="max-w-2xl text-[var(--hx-muted)]">
-                A movement exploring a post-currency, gift-first, resonance-based way of sharing value.
-                Here, offerings may be <strong>time</strong>, <strong>products</strong>, <strong>services</strong>,
-                <strong> presence</strong>, or <strong>creativity</strong>—given without obligation, and received with dignity.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              <Link href="/browse" className="hx-btn hx-btn--primary">Explore Offerings</Link>
-
-              {loading ? (
-                <span className="hx-btn hx-btn--secondary">Checking…</span>
-              ) : user ? (
-                <>
-                  <Link href="/offers/new" className="hx-btn hx-btn--secondary">Share My Value</Link>
-                  <Link href="/profile" className="hx-btn hx-btn--secondary">Receive Support</Link>
-                </>
-              ) : (
-                <Link href="/sign-in" className="hx-btn hx-btn--secondary">Join the Community</Link>
-              )}
-            </div>
+          <div className="hx-card p-5 sm:p-6">
+            <h2 className="text-xl font-bold tracking-tight text-[var(--hx-ink)]">
+              Welcome to Harmonic Exchange — the Flow Economy Experiment
+            </h2>
+            <p className="mt-2 max-w-3xl text-[var(--hx-muted)]">
+              A movement exploring a post-currency, gift-first, resonance-based way of sharing value. Here, offerings
+              may be <strong>time</strong>, <strong>products</strong>, <strong>services</strong>, <strong>presence</strong>,
+              or <strong>creativity</strong>—given without obligation, and received with dignity.
+            </p>
           </div>
         </div>
       </section>
 
-      {/* Why it's different */}
-      <section className="bg-[var(--hx-surface)]">
+      {/* Why it's different — COOL section */}
+      <section className="hx-section hx-section--cool">
         <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
           <h3 className="text-center text-2xl font-bold">Why Harmonic Exchange is different</h3>
-          <p className="mx-auto mt-4 max-w-3xl text-center text-[var(--hx-muted)]">
+          <p className="mx-auto mt-4 max-w-3xl text-center text-[var(--hx-cool-ink-muted)]">
             This isn’t bartering, and it’s not transactional. It’s a <em>flow economy</em>—value shared,
             not counted—guided by resonance, trust, and intuitive reciprocity.
           </p>
@@ -93,8 +93,8 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* How it works */}
-      <section>
+      {/* How it works — WARM section */}
+      <section className="hx-section hx-section--warm">
         <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
           <h3 className="text-center text-2xl font-bold">How it works</h3>
 
@@ -118,16 +118,16 @@ export default function HomePage() {
 
           <div className="mt-8 flex justify-center gap-3">
             <Link href="/offers/new" className="hx-btn hx-btn--primary">Share My Value</Link>
-            <Link href="/browse" className="hx-btn hx-btn--secondary">See Offerings</Link>
+            <Link href="/browse" className="hx-btn hx-btn--outline-primary">See Offerings</Link>
           </div>
         </div>
       </section>
 
-      {/* Agreements */}
-      <section className="bg-white">
+      {/* Agreements — DEEP section */}
+      <section className="hx-section hx-section--deep">
         <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
-          <h3 className="text-center text-2xl font-bold">Community agreements</h3>
-          <ul className="mx-auto mt-6 max-w-3xl list-disc space-y-2 pl-6 text-[var(--hx-ink)]/80">
+          <h3 className="text-center text-2xl font-bold text-white">Community agreements</h3>
+          <ul className="mx-auto mt-6 max-w-3xl list-disc space-y-2 pl-6 text-white/90">
             <li>Honor consent, boundaries, and safety—always.</li>
             <li>Use clear, kind communication.</li>
             <li>Confirm mutual fit before meeting.</li>
@@ -135,7 +135,7 @@ export default function HomePage() {
             <li>Celebrate completion—share gratitude if you wish.</li>
           </ul>
 
-          <p className="mx-auto mt-6 max-w-3xl text-center text-[var(--hx-muted)]">
+          <p className="mx-auto mt-6 max-w-3xl text-center text-white/80">
             This is a living experiment. We learn by doing. Local and global chapters welcome you to participate,
             share updates, and help evolve the practice.
           </p>
