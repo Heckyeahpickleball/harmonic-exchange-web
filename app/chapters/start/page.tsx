@@ -16,7 +16,6 @@ function slugify(s: string) {
 
 export default function StartChapterPage() {
   const router = useRouter();
-  const [name, setName] = useState('');
   const [city, setCity] = useState('');
   const [country, setCountry] = useState('');
   const [about, setAbout] = useState('');
@@ -27,8 +26,9 @@ export default function StartChapterPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setMsg('');
+
     if (!agree) { setMsg('Please agree to the anchor commitment.'); return; }
-    if (!name || !city || !country) { setMsg('Name, city, and country are required.'); return; }
+    if (!city || !country) { setMsg('City and country are required.'); return; }
 
     setBusy(true);
     try {
@@ -38,17 +38,23 @@ export default function StartChapterPage() {
         return;
       }
 
-      // Build a predictable slug, e.g. ottawa-canada
+      // Auto-name: "Harmonic Exchange- {city}"
+      const name = `Harmonic Exchange- ${city.trim()}`;
+
+      // Predictable slug, prefer city-country
       const baseSlug = slugify(`${city}-${country}`);
-      // ensure uniqueness by appending a number if needed
       let finalSlug = baseSlug;
-      for (let i = 0; i < 10; i++) {
-        const { data: exists } = await supabase.from('groups').select('id').eq('slug', finalSlug).maybeSingle();
+      for (let i = 0; i < 12; i++) {
+        const { data: exists } = await supabase
+          .from('groups')
+          .select('id')
+          .eq('slug', finalSlug)
+          .maybeSingle();
         if (!exists) break;
         finalSlug = `${baseSlug}-${i + 2}`;
       }
 
-      // Insert group (works whether or not status column exists; if missing, PostgREST ignores it)
+      // Insert (tolerates older schemas; PostgREST ignores unknown/missing cols)
       const insertPayload: any = {
         name,
         city,
@@ -69,14 +75,14 @@ export default function StartChapterPage() {
 
       if (gErr) throw gErr;
 
-      // Add creator as anchor
+      // Creator becomes anchor
       await supabase.from('group_members').insert({
         group_id: gRow.id,
         profile_id: auth.user.id,
         role: 'anchor',
       });
 
-      // Redirect to the new chapter (creator can see it even if pending)
+      // Go to the new chapter detail page (creator may view even if pending)
       router.push(`/chapters/${gRow.slug}`);
     } catch (err: any) {
       console.error(err);
@@ -94,24 +100,38 @@ export default function StartChapterPage() {
       </p>
 
       <form onSubmit={onSubmit} className="mt-8 hx-card p-5 space-y-4">
-        <div>
-          <label className="block text-sm font-medium">Chapter name</label>
-          <input className="mt-1 w-full rounded border px-3 py-2" value={name} onChange={(e)=>setName(e.target.value)} placeholder="Harmonic Exchange — Ottawa" />
-        </div>
+        {/* No name field — we auto-name as "Harmonic Exchange- {city}" */}
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="block text-sm font-medium">City</label>
-            <input className="mt-1 w-full rounded border px-3 py-2" value={city} onChange={(e)=>setCity(e.target.value)} placeholder="Ottawa" />
+            <input
+              className="mt-1 w-full rounded border px-3 py-2"
+              value={city}
+              onChange={(e)=>setCity(e.target.value)}
+              placeholder="Ottawa"
+            />
           </div>
           <div>
             <label className="block text-sm font-medium">Country</label>
-            <input className="mt-1 w-full rounded border px-3 py-2" value={country} onChange={(e)=>setCountry(e.target.value)} placeholder="Canada" />
+            <input
+              className="mt-1 w-full rounded border px-3 py-2"
+              value={country}
+              onChange={(e)=>setCountry(e.target.value)}
+              placeholder="Canada"
+            />
           </div>
         </div>
+
         <div>
           <label className="block text-sm font-medium">About</label>
-          <textarea className="mt-1 w-full rounded border px-3 py-2 min-h-[120px]" value={about} onChange={(e)=>setAbout(e.target.value)} placeholder="A few sentences about your chapter…" />
+          <textarea
+            className="mt-1 w-full rounded border px-3 py-2 min-h-[120px]"
+            value={about}
+            onChange={(e)=>setAbout(e.target.value)}
+            placeholder="A few sentences about your chapter…"
+          />
         </div>
+
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" className="mt-0.5" checked={agree} onChange={(e)=>setAgree(e.target.checked)} />
           <span>I agree to anchor with a gift-first spirit and uphold community agreements.</span>
@@ -124,6 +144,11 @@ export default function StartChapterPage() {
             {busy ? 'Submitting…' : 'Submit for Approval'}
           </button>
         </div>
+
+        {/* Preview of auto-name */}
+        <p className="text-xs text-gray-600">
+          Your chapter will be named <span className="font-mono">Harmonic Exchange- {city || 'City'}</span>.
+        </p>
       </form>
 
       <div className="mt-8 grid gap-3">
