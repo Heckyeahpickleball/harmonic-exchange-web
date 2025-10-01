@@ -68,10 +68,10 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* NEW wave ABOVE the Why section (white background) */}
+      {/* Wave ABOVE the Why section (white background) */}
       <WaveDivider />
 
-      {/* “Why” as a 2-column block on cream, with stronger heading contrast */}
+      {/* “Why” as a 2-column block on cream, with stronger heading and centered intro copy */}
       <section style={{ background: 'var(--hx-cream)' }}>
         <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-8 px-4 py-10 sm:grid-cols-2 sm:py-12">
           <div>
@@ -88,7 +88,8 @@ export default function HomePage() {
           <div>
             <h3 className="hx-heading-title text-2xl font-bold">Why Harmonic Exchange is different</h3>
             <div className="hx-heading-accent" />
-            <p className="mt-4 max-w-prose text-[var(--hx-muted)]">
+            {/* centered + a touch bolder */}
+            <p className="mt-4 mx-auto max-w-prose text-center font-semibold text-[var(--hx-muted)]">
               This isn’t bartering, and it’s not transactional. It’s a <em>flow economy</em>—value shared, not counted—
               guided by resonance, trust, and intuitive reciprocity.
             </p>
@@ -111,10 +112,10 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Wave BEFORE “How it works” (also white background, tighter) */}
+      {/* Wave BEFORE “How it works” (white background, tight) */}
       <WaveDivider />
 
-      {/* How it works — tight top padding so it sits closer to the wave */}
+      {/* How it works — tight top padding so it sits close to the wave */}
       <section className="bg-white">
         <div className="mx-auto max-w-6xl px-4 pt-8 pb-14 sm:pt-8 sm:pb-16">
           <h3 className="text-center text-2xl font-bold">How it works</h3>

@@ -1,4 +1,3 @@
-// Offer detail with “Ask to Receive” CTA
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -187,11 +186,12 @@ export default function OfferDetailPage() {
               )}
             </div>
 
+            {/* unified teal CTA */}
             <button
               type="button"
               disabled={!canAsk}
               onClick={() => setShowModal(true)}
-              className="hx-btn hx-btn--brand disabled:opacity-50"
+              className="hx-btn hx-btn--primary disabled:opacity-50"
               aria-label="Ask to Receive"
             >
               Ask to Receive
