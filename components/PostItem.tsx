@@ -105,11 +105,11 @@ export default function PostItem({
         (payload) => {
           if (payload.eventType === 'INSERT') {
             const row = normalizeProfile(payload.new as CommentRow) as CommentRow;
-            if (!commentIdsRef.current.has(row.id)) {
-              commentIdsRef.current.add(row.id);
-              setComments((prev) => [...prev, row].sort(byCreatedAtAsc));
-              setCommentCount((c) => c + 1);
-            }
+            // Guard: skip if we already know this comment ID
+            if (commentIdsRef.current.has(row.id)) return;
+            commentIdsRef.current.add(row.id);
+            setComments((prev) => [...prev, row].sort(byCreatedAtAsc));
+            setCommentCount((c) => c + 1);
           } else if (payload.eventType === 'DELETE') {
             const oldRow = payload.old as { id: string };
             if (commentIdsRef.current.has(oldRow.id)) commentIdsRef.current.delete(oldRow.id);
@@ -140,6 +140,7 @@ export default function PostItem({
       else {
         const normalized: CommentRow[] = (data || []).map((r: any) => normalizeProfile(r));
         setComments(normalized);
+        // initialize the known IDs set so realtime INSERT of existing rows won't duplicate
         commentIdsRef.current = new Set((normalized || []).map((r) => r.id));
       }
     }
@@ -199,6 +200,10 @@ export default function PostItem({
         .single();
       if (error) throw error;
       const normalized = normalizeProfile(data) as CommentRow;
+
+      // NEW: mark this ID as seen BEFORE setting state to prevent realtime duplicate
+      commentIdsRef.current.add(normalized.id);
+
       setComments((prev) => [...prev, normalized].sort(byCreatedAtAsc));
       setCommentCount((c) => c + 1);
       setCommentText(''); previews.forEach((u) => URL.revokeObjectURL(u)); setFiles([]); setPreviews([]);
@@ -217,7 +222,7 @@ export default function PostItem({
       <header className="mb-2 flex items-center justify-between text-sm text-gray-600">
         <div>
           <span className="font-medium">{post.profiles?.display_name ?? 'Someone'}</span>
-          <span className="mx-1">•</span>
+        <span className="mx-1">•</span>
           <time dateTime={post.created_at}>{new Date(post.created_at).toLocaleString()}</time>
         </div>
         {me === post.profile_id && (
