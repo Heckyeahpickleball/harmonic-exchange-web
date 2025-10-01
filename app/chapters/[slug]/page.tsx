@@ -42,6 +42,11 @@ type OfferPreview = {
   created_at: string;
   owner_id: string;
   owner_name?: string | null;
+
+  // NEW for thumbnails
+  images?: string[] | null;
+  cover_image?: string | null;
+  thumb?: string | null;
 };
 
 // Shape expected by components/PostItem.tsx
@@ -93,6 +98,9 @@ export default function ChapterPage() {
   const [evLocation, setEvLocation] = useState('');
   const [creatingEvent, setCreatingEvent] = useState(false);
 
+  // NEW: carousel track
+  const offerTrackRef = useRef<HTMLDivElement | null>(null);
+
   // helpers
   function toIsoLocal(dt: string) {
     const d = new Date(dt);
@@ -110,6 +118,12 @@ export default function ChapterPage() {
     if (!arr) return [];
     if (Array.isArray(arr)) return arr.map(String);
     return [String(arr)];
+  }
+  // NEW: pick an offer thumbnail
+  function offerThumb(o: { cover_image?: string | null; images?: string[] | null }): string | null {
+    const candidate = o.cover_image ?? (Array.isArray(o.images) ? o.images[0] : null);
+    if (!candidate) return null;
+    return isStoragePath(candidate) ? publicUrlForPath(String(candidate)) : String(candidate);
   }
 
   // load
@@ -158,7 +172,7 @@ export default function ChapterPage() {
           setIsAnchor(mine?.role === 'anchor' || uid === gRow.created_by);
         }
 
-        // events
+        // EVENTS — unchanged logic (only events with this chapter's group_id)
         const { data: eRows } = await supabase
           .from('group_events')
           .select('id,title,description,starts_at,ends_at,location,is_online')
@@ -181,7 +195,7 @@ export default function ChapterPage() {
         }
         if (!cancelled) setEvents(eList);
 
-        // posts for this group -> EXACT shape for PostItem (include profiles.display_name)
+        // POSTS for this group (shape for PostItem)
         const { data: pRows, error: pErr } = await supabase
           .from('posts')
           .select('id,profile_id,body,created_at,images,group_id,profiles(display_name)')
@@ -195,21 +209,21 @@ export default function ChapterPage() {
         }));
         if (!cancelled) setPosts(pList);
 
-        // offers
+        // OFFERS (now select images/cover_image and compute thumb)
         const { data: oRows } = await supabase
           .from('offers')
-          .select('id,title,status,created_at,owner_id')
+          .select('id,title,status,created_at,owner_id,images,cover_image')
           .eq('group_id', gRow.id)
           .eq('status', 'active')
           .order('created_at', { ascending: false })
-          .limit(10);
+          .limit(20);
         let oList: OfferPreview[] = (oRows || []) as any[];
         if (oList.length) {
           const ids2 = Array.from(new Set(oList.map((o) => o.owner_id)));
           const { data: profs3 } = await supabase.from('profiles').select('id,display_name').in('id', ids2);
           const map3 = new Map<string, string | null>();
           for (const p of (profs3 || []) as any[]) map3.set(p.id, p.display_name ?? null);
-          oList = oList.map((o) => ({ ...o, owner_name: map3.get(o.owner_id) ?? null }));
+          oList = oList.map((o) => ({ ...o, owner_name: map3.get(o.owner_id) ?? null, thumb: offerThumb(o) }));
         }
         if (!cancelled) setOffers(oList);
       } catch (e: any) {
@@ -434,6 +448,68 @@ export default function ChapterPage() {
             </div>
           </div>
         )}
+
+        {/* NEW — Local offers carousel */}
+        {offers.length > 0 && (
+          <div className="mt-6">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-700">Local offerings</h3>
+              <div className="flex items-center gap-2">
+                <button
+                  aria-label="Scroll left"
+                  className="rounded border px-2 py-1 text-sm"
+                  onClick={() => { const el = offerTrackRef.current; if (el) el.scrollBy({ left: -320, behavior: 'smooth' }); }}
+                >
+                  ‹
+                </button>
+                <button
+                  aria-label="Scroll right"
+                  className="rounded border px-2 py-1 text-sm"
+                  onClick={() => { const el = offerTrackRef.current; if (el) el.scrollBy({ left: 320, behavior: 'smooth' }); }}
+                >
+                  ›
+                </button>
+                <Link
+                  href={`/browse?city=${encodeURIComponent(group.city || '')}${group.id ? `&group=${group.id}` : ''}`}
+                  className="ml-2 hx-btn hx-btn--outline-primary"
+                >
+                  See all
+                </Link>
+              </div>
+            </div>
+            <div
+              ref={offerTrackRef}
+              className="flex gap-3 overflow-x-auto"
+              style={{ scrollSnapType: 'x mandatory' }}
+            >
+              {offers.map((o) => (
+                <Link
+                  key={o.id}
+                  href={`/offers/${o.id}`}
+                  className="min-w-[280px] max-w-[280px] rounded border p-3 hover:shadow"
+                  style={{ scrollSnapAlign: 'start' }}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="min-w-16 max-w-16 h-16 rounded overflow-hidden border">
+                      {o.thumb ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={o.thumb} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-xs text-gray-500 bg-gray-50">No image</div>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="line-clamp-2 font-medium leading-snug">{o.title}</div>
+                      <div className="mt-1 text-xs text-gray-600">
+                        by {o.owner_name || o.owner_id.slice(0, 8)} • {new Date(o.created_at).toLocaleDateString()}
+                      </div>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Events */}
@@ -507,8 +583,6 @@ export default function ChapterPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-600">{e.rsvp_count ?? 0} going</span>
-                    {/* RSVP button (no change) */}
-                    {/* You can hook back your toggle function here if needed */}
                   </div>
                 </div>
               </li>
@@ -517,7 +591,7 @@ export default function ChapterPage() {
         )}
       </section>
 
-      {/* Posts – now using PostItem for inline threads */}
+      {/* Posts – inline threads */}
       <section className="hx-card p-4 sm:p-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Recent posts</h2>
@@ -601,7 +675,7 @@ export default function ChapterPage() {
         </div>
       </section>
 
-      {/* Offers (unchanged) */}
+      {/* Offers list with right-side thumbnails */}
       <section className="hx-card p-4 sm:p-6">
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg font-semibold">Chapter offerings</h2>
@@ -622,12 +696,24 @@ export default function ChapterPage() {
           <ul className="grid gap-3 sm:grid-cols-2">
             {filteredOffers.map((o) => (
               <li key={o.id} className="rounded border p-3">
-                <div className="font-medium">{o.title}</div>
-                <div className="mt-1 text-sm text-gray-600">
-                  by {o.owner_name || o.owner_id.slice(0, 8)} • {new Date(o.created_at).toLocaleDateString()}
-                </div>
-                <div className="mt-3">
-                  <Link href={`/offers/${o.id}`} className="hx-btn hx-btn--primary">Ask to Receive</Link>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <div className="font-medium">{o.title}</div>
+                    <div className="mt-1 text-sm text-gray-600">
+                      by {o.owner_name || o.owner_id.slice(0, 8)} • {new Date(o.created_at).toLocaleDateString()}
+                    </div>
+                    <div className="mt-3">
+                      <Link href={`/offers/${o.id}`} className="hx-btn hx-btn--primary">Ask to Receive</Link>
+                    </div>
+                  </div>
+                  <div className="ml-2 h-16 w-24 shrink-0 overflow-hidden rounded border">
+                    {o.thumb ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={o.thumb} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-xs text-gray-500 bg-gray-50">No image</div>
+                    )}
+                  </div>
                 </div>
               </li>
             ))}
