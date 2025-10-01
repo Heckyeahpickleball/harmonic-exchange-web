@@ -1,23 +1,23 @@
 @import "tailwindcss";
 
 /* === Harmonic Exchange tokens ===
-   Softer brand, neutral UI. */
+   Deep blues + warm golden accents for calm + vitality. */
 :root{
   --hx-bg: #ffffff;
   --hx-surface: #f6f8fb;       /* gentle light surface */
-  --hx-ink: #0f172a;           /* slate-900 */
+  --hx-ink: #0b1220;           /* deep slate/navy */
   --hx-muted: #475569;         /* slate-600 */
 
-  /* brand — calm teal with warm accent used sparingly */
-  --hx-brand: #0891b2;         /* cyan/teal 600 */
-  --hx-brand-strong: #0e7490;  /* cyan/teal 700 */
-  --hx-accent: #f59e0b;        /* amber 500 */
+  /* brand */
+  --hx-brand: #1e3a8a;         /* deep blue (indigo-800) */
+  --hx-brand-strong: #1e40af;  /* indigo-700 */
+  --hx-accent: #f59e0b;        /* warm golden (amber-500) */
 
-  --hx-ring: 0 0 0 3px rgba(8,145,178,.28);
+  --hx-ring: 0 0 0 3px rgba(30,58,138,.28);
   --hx-card-border: rgba(2, 6, 23, 0.08);
   --hx-card-shadow: 0 1px 2px rgba(2, 6, 23, 0.06);
 
-  /* hero overlay toned way down so it doesn’t clash with the image */
+  /* hero: keep overlay minimal so image leads */
   --hx-hero-overlay: linear-gradient(0deg, rgba(255,255,255,0) 60%, rgba(255,255,255,0.0) 100%);
 }
 
@@ -33,7 +33,7 @@ html, body {
 /* Sections spacing */
 section { scroll-margin-top: 80px; }
 
-/* HERO — image only, no busy overlays */
+/* HERO — image only */
 .hx-hero{
   position: relative;
   min-height: clamp(260px, 36vw, 360px);
@@ -45,9 +45,9 @@ section { scroll-margin-top: 80px; }
   border-bottom: 1px solid var(--hx-card-border);
 }
 
-/* CTA CARD just below hero */
+/* CTA CARD below hero */
 .hx-cta-card{
-  margin-top: -28px;                 /* slight overlap for polish */
+  margin-top: -28px;
   margin-bottom: 24px;
   background: #fff;
   border: 1px solid var(--hx-card-border);
@@ -74,7 +74,7 @@ section { scroll-margin-top: 80px; }
   box-shadow: var(--hx-card-shadow);
 }
 
-/* Buttons: calm, consistent */
+/* Buttons */
 .hx-btn{
   border-radius: 999px;
   padding: .625rem 1rem;
@@ -86,7 +86,7 @@ section { scroll-margin-top: 80px; }
   transition: filter .15s ease, box-shadow .15s ease, transform .05s ease;
 }
 
-/* primary */
+/* primary: deep blue */
 .hx-btn--primary{
   color: #fff;
   background: var(--hx-brand);
@@ -95,7 +95,7 @@ section { scroll-margin-top: 80px; }
 .hx-btn--primary:hover{ filter: brightness(1.02); }
 .hx-btn--primary:active{ transform: translateY(1px); }
 
-/* secondary (outline) */
+/* secondary: neutral outline */
 .hx-btn--secondary{
   background: #fff;
   color: var(--hx-ink);
