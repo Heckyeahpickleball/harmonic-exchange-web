@@ -240,7 +240,7 @@ export default function ChapterPage() {
         }
         if (!cancelled) setPosts(pList);
 
-        // offers (same as before)
+        // offers
         const { data: oRows } = await supabase
           .from('offers')
           .select('id,title,status,created_at,owner_id')
@@ -271,7 +271,6 @@ export default function ChapterPage() {
 
     return () => {
       cancelled = true;
-      // revoke previews on unmount
       previewUrls.forEach((u) => URL.revokeObjectURL(u));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -479,6 +478,64 @@ export default function ChapterPage() {
       setMsg(e?.message ?? 'Could not post.');
     } finally {
       setPosting(false);
+    }
+  }
+
+  // --- add: createEvent (this was missing and broke Vercel build)
+  async function createEvent() {
+    if (!group) return;
+    setMsg('');
+    setCreatingEvent(true);
+    try {
+      if (!evTitle.trim() || !evStart) {
+        setMsg('Title and start time are required.');
+        setCreatingEvent(false);
+        return;
+      }
+      const starts_at = toIsoLocal(evStart);
+      const ends_at = evEnd ? toIsoLocal(evEnd) : null;
+
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth.user) {
+        router.push('/signin?next=' + encodeURIComponent(`/chapters/${group.slug}`));
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('group_events')
+        .insert({
+          group_id: group.id,
+          title: evTitle.trim(),
+          description: evDesc.trim() || null,
+          starts_at,
+          ends_at,
+          is_online: evOnline,
+          location: evOnline ? null : (evLocation.trim() || null),
+        })
+        .select('id,title,description,starts_at,ends_at,location,is_online')
+        .single();
+
+      if (error) throw error;
+
+      setEvents(prev =>
+        [...prev, { ...data!, rsvp_count: 0, i_rsvped: false }].sort(
+          (a, b) => +new Date(a.starts_at) - +new Date(b.starts_at)
+        )
+      );
+
+      // reset form
+      setEvTitle('');
+      setEvDesc('');
+      setEvStart('');
+      setEvEnd('');
+      setEvOnline(false);
+      setEvLocation('');
+      setShowEventForm(false);
+    } catch (e: any) {
+      console.error(e);
+      setMsg(e?.message ?? 'Failed to create event.');
+    } finally {
+      setCreatingEvent(false);
     }
   }
 
@@ -732,7 +789,7 @@ export default function ChapterPage() {
                   </div>
                 )}
                 <div className="mt-3">
-                  <Link href={`/post/${p.id}`} className="hx-btn hx-btn--outline-primary">Open thread</Link>
+                  <Link href={`/post/${p.id}`} className="hx-btn hx-btn--outline-primary">See Comments</Link>
                 </div>
               </li>
             ))}
