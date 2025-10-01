@@ -1,4 +1,9 @@
-/* HX v1.2 — Chapter detail with inline composer & event creator */
+/* HX v1.3 — Chapter detail
+   + Anchors can Edit About (save to groups.about)
+   + Composer supports text and/or images (<=6)
+   + Robust post insert: retry on columns content|text|body
+   + Avoid selecting 'content' explicitly to dodge schema-cache errors
+*/
 
 'use client';
 
@@ -39,6 +44,15 @@ type EventRow = {
   i_rsvped?: boolean;
 };
 
+type PostRow = {
+  id: string;
+  created_at: string;
+  owner_id: string;
+  images?: string[] | null;
+  // allow any text field name; we’ll read at runtime:
+  [key: string]: any;
+};
+
 type PostPreview = {
   id: string;
   content: string | null;
@@ -75,11 +89,16 @@ export default function ChapterPage() {
   const [offers, setOffers] = useState<OfferPreview[]>([]);
   const [offerQ, setOfferQ] = useState('');
 
-  // Composer states
+  // Composer (text + images)
   const [postText, setPostText] = useState('');
+  const [postImages, setPostImages] = useState<File[]>([]);
   const [posting, setPosting] = useState(false);
 
-  // Event creation states (anchors only)
+  // About editing (anchors)
+  const [editingAbout, setEditingAbout] = useState(false);
+  const [aboutDraft, setAboutDraft] = useState('');
+
+  // Event creation (anchors)
   const [showEventForm, setShowEventForm] = useState(false);
   const [evTitle, setEvTitle] = useState('');
   const [evDesc, setEvDesc] = useState('');
@@ -111,9 +130,12 @@ export default function ChapterPage() {
           notFound();
           return;
         }
-        if (!cancelled) setGroup(gRow as Group);
+        if (!cancelled) {
+          setGroup(gRow as Group);
+          setAboutDraft((gRow as Group).about ?? '');
+        }
 
-        // members + membership flags
+        // members + flags
         const { data: gm } = await supabase
           .from('group_members')
           .select('profile_id,role')
@@ -134,7 +156,6 @@ export default function ChapterPage() {
         }
 
         if (!cancelled) {
-          // anchors first
           memberList.sort((a, b) => (a.role === 'anchor' && b.role !== 'anchor' ? -1 : 1));
           setMembers(memberList);
           const mine = uid ? memberList.find((m) => m.profile_id === uid) : undefined;
@@ -173,23 +194,27 @@ export default function ChapterPage() {
         }
         if (!cancelled) setEvents(listEvents);
 
-        // posts scoped by group
+        // posts scoped by group — DO NOT explicitly select 'content' to avoid schema-cache errors
         const { data: pRows } = await supabase
           .from('posts')
-          .select('id,content,created_at,owner_id,images,pinned,group_id')
+          .select('*') // we’ll read content|text|body at runtime
           .eq('group_id', gRow.id)
           .order('pinned', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false })
           .limit(20);
 
         let postList: PostPreview[] =
-          (pRows || []).map((p: any) => ({
-            id: p.id,
-            content: p.content ?? null,
-            created_at: p.created_at,
-            owner_id: p.owner_id,
-            image_count: Array.isArray(p.images) ? p.images.length : undefined,
-          })) ?? [];
+          (pRows || []).map((p: PostRow) => {
+            const c = (p as any).content ?? (p as any).text ?? (p as any).body ?? null;
+            const imgs = Array.isArray(p.images) ? p.images : null;
+            return {
+              id: p.id,
+              content: c,
+              created_at: p.created_at,
+              owner_id: p.owner_id,
+              image_count: imgs ? imgs.length : undefined,
+            };
+          }) ?? [];
 
         if (postList.length) {
           const ownerIds = Array.from(new Set(postList.map((p) => p.owner_id)));
@@ -236,14 +261,13 @@ export default function ChapterPage() {
   }, [slug]);
 
   const anchors = useMemo(() => members.filter((m) => m.role === 'anchor'), [members]);
-
   const filteredOffers = useMemo(() => {
     const q = offerQ.trim().toLowerCase();
     if (!q) return offers;
     return offers.filter((o) => o.title.toLowerCase().includes(q));
   }, [offers, offerQ]);
 
-  // Actions
+  // Membership
   async function joinChapter() {
     if (!group) return;
     setMsg('');
@@ -285,6 +309,7 @@ export default function ChapterPage() {
     }
   }
 
+  // RSVP
   async function toggleRsvp(eventId: string, current: boolean | undefined) {
     if (!group) return;
     setMsg('');
@@ -323,6 +348,48 @@ export default function ChapterPage() {
     }
   }
 
+  // Helpers
+  function toIsoLocal(dt: string) {
+    const d = new Date(dt);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString();
+  }
+
+  // Edit About (anchors)
+  async function saveAbout() {
+    if (!group) return;
+    setMsg('');
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth.user) { router.push('/signin'); return; }
+      const about = aboutDraft.trim() || null;
+      const { error } = await supabase.from('groups').update({ about }).eq('id', group.id);
+      if (error) throw error;
+      setGroup((g) => (g ? { ...g, about } : g));
+      setEditingAbout(false);
+    } catch (e: any) {
+      console.error(e);
+      setMsg(e?.message ?? 'Failed to save About.');
+    }
+  }
+
+  // Upload images to storage and return an array of storage paths
+  async function uploadImages(uid: string, files: File[]): Promise<string[]> {
+    if (!files.length) return [];
+    const up = supabase.storage.from('post-media');
+    const paths: string[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const ext = f.name.includes('.') ? f.name.split('.').pop() : 'jpg';
+      const key = `posts/${uid}/${Date.now()}_${i}.${ext}`;
+      const { error } = await up.upload(key, f, { upsert: false });
+      if (error) throw error;
+      // We store the storage path (consistent with your existing posts.images)
+      paths.push(key);
+    }
+    return paths;
+  }
+
+  // Create post (text and/or images) with robust column fallback
   async function createPost() {
     if (!group) return;
     setMsg('');
@@ -333,22 +400,75 @@ export default function ChapterPage() {
         router.push('/signin?next=' + encodeURIComponent(`/chapters/${group.slug}`));
         return;
       }
+
       const content = postText.trim();
-      if (!content) { setMsg('Please write something to share.'); setPosting(false); return; }
+      if (!content && postImages.length === 0) {
+        setMsg('Share a message or add at least one image.'); setPosting(false); return;
+      }
 
-      const { data, error } = await supabase
-        .from('posts')
-        .insert({ owner_id: auth.user.id, content, group_id: group.id })
-        .select('id,content,created_at,owner_id')
-        .single();
-      if (error) throw error;
+      // Upload images first (if any)
+      const imagePaths = await uploadImages(auth.user.id, postImages);
 
-      // enrich with display name
-      const { data: prof } = await supabase.from('profiles').select('id,display_name').eq('id', auth.user.id).maybeSingle();
+      // Build base payload
+      const base: any = {
+        owner_id: auth.user.id,
+        group_id: group.id,
+        images: imagePaths.length ? imagePaths : null,
+      };
+
+      // Try content/text/body in order
+      const tries = ['content', 'text', 'body'] as const;
+      let lastErr: any = null;
+      let inserted: any = null;
+
+      for (const field of tries) {
+        try {
+          const payload = { ...base, ...(content ? { [field]: content } : {}) };
+          const { data, error } = await supabase
+            .from('posts')
+            .insert(payload)
+            .select('*') // don’t name columns; read content later
+            .single();
+          if (error) throw error;
+          inserted = data;
+          lastErr = null;
+          break;
+        } catch (e: any) {
+          lastErr = e;
+          // If it’s an undefined_column-like error, try next field; otherwise stop
+          const msg: string = e?.message || '';
+          if (!/column .* does not exist|undefined column|schema cache/i.test(msg)) break;
+        }
+      }
+
+      if (lastErr && !inserted) throw lastErr;
+
+      const p = inserted as PostRow;
+      const textValue = (p as any).content ?? (p as any).text ?? (p as any).body ?? null;
+      const imgs = Array.isArray(p.images) ? p.images : null;
+
+      // Enrich with display name for immediate UI
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('id,display_name')
+        .eq('id', auth.user.id)
+        .maybeSingle();
       const owner_name = (prof as any)?.display_name ?? auth.user.id.slice(0, 8);
 
-      setPosts((prev) => [{ id: data!.id, content: data!.content, created_at: data!.created_at, owner_id: data!.owner_id, owner_name }, ...prev]);
+      setPosts((prev) => [
+        {
+          id: p.id,
+          content: textValue,
+          created_at: p.created_at,
+          owner_id: p.owner_id,
+          owner_name,
+          image_count: imgs ? imgs.length : undefined,
+        },
+        ...prev,
+      ]);
+
       setPostText('');
+      setPostImages([]);
     } catch (e: any) {
       console.error(e);
       setMsg(e?.message ?? 'Failed to share to chapter.');
@@ -357,13 +477,7 @@ export default function ChapterPage() {
     }
   }
 
-  function toIsoLocal(dt: string) {
-    // datetime-local -> ISO string in local time
-    // dt is like "2025-05-18T18:00"
-    const d = new Date(dt);
-    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString();
-  }
-
+  // Create event
   async function createEvent() {
     if (!group) return;
     setMsg('');
@@ -401,7 +515,6 @@ export default function ChapterPage() {
         { ...data!, rsvp_count: 0, i_rsvped: false }
       ].sort((a, b) => +new Date(a.starts_at) - +new Date(b.starts_at)));
 
-      // reset form
       setEvTitle(''); setEvDesc(''); setEvStart(''); setEvEnd(''); setEvOnline(false); setEvLocation('');
       setShowEventForm(false);
     } catch (e: any) {
@@ -447,13 +560,38 @@ export default function ChapterPage() {
           </div>
         </div>
 
-        {/* About — shows the seeded recommended text by default */}
-        {group.about && (
-          <div className="mt-4">
-            <h3 className="mb-2 text-sm font-semibold text-gray-700">About this chapter</h3>
-            <p className="max-w-prose whitespace-pre-wrap text-gray-800">{group.about}</p>
+        {/* About + edit for anchors */}
+        <div className="mt-4">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-700">About this chapter</h3>
+            {isAnchor && !editingAbout && (
+              <button onClick={() => setEditingAbout(true)} className="hx-btn hx-btn--outline-primary text-xs px-2 py-1">
+                Edit About
+              </button>
+            )}
           </div>
-        )}
+
+          {!editingAbout ? (
+            group.about ? (
+              <p className="max-w-prose whitespace-pre-wrap text-gray-800">{group.about}</p>
+            ) : (
+              <p className="text-sm text-gray-600">No description yet.</p>
+            )
+          ) : (
+            <div className="rounded border p-3">
+              <textarea
+                className="w-full rounded border px-3 py-2 min-h-[160px]"
+                value={aboutDraft}
+                onChange={(e)=>setAboutDraft(e.target.value)}
+                placeholder="Write a short, welcoming description for your chapter."
+              />
+              <div className="mt-2 flex gap-2">
+                <button onClick={saveAbout} className="hx-btn hx-btn--primary">Save</button>
+                <button onClick={() => { setEditingAbout(false); setAboutDraft(group.about ?? ''); }} className="hx-btn hx-btn--secondary">Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Anchors */}
         {anchors.length > 0 && (
@@ -568,7 +706,35 @@ export default function ChapterPage() {
               onChange={(e)=>setPostText(e.target.value)}
               placeholder="What would you like to offer or reflect on?"
             />
-            <div className="mt-2">
+
+            {/* Images */}
+            <div className="mt-3">
+              <label className="block text-sm font-medium">Add images (optional, up to 6)</label>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  const max = 6;
+                  setPostImages(files.slice(0, max));
+                }}
+                className="mt-1"
+              />
+              {postImages.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {postImages.map((f, i) => (
+                    <div key={i} className="rounded border p-1">
+                      {/* preview */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img alt={f.name} src={URL.createObjectURL(f)} className="h-16 w-16 object-cover rounded" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3">
               <button onClick={createPost} disabled={posting} className="hx-btn hx-btn--primary">
                 {posting ? 'Posting…' : 'Post'}
               </button>
