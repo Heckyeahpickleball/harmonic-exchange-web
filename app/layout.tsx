@@ -1,95 +1,18 @@
+// app/layout.tsx
 'use client';
 
 import './globals.css';
-import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import NotificationsBell from '@/components/NotificationsBell';
-import MessagesUnreadBadge from '@/components/MessagesUnreadBadge';
-import { supabase } from '@/lib/supabaseClient';
+import { ReactNode } from 'react';
+import ClientHeaderNav from '@/components/ClientHeaderNav';
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const [uid, setUid] = useState<string | null>(null);
-  const [role, setRole] = useState<string | null>(null);
-
-  // load once and keep in sync with auth changes
-  useEffect(() => {
-    let mounted = true;
-
-    async function readUser() {
-      const { data: auth } = await supabase.auth.getUser();
-      const id = auth?.user?.id ?? null;
-      if (!mounted) return;
-      setUid(id);
-
-      if (!id) {
-        setRole(null);
-        return;
-      }
-      const { data } = await supabase.from('profiles').select('role').eq('id', id).single();
-      if (mounted) setRole(data?.role ?? null);
-    }
-
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      // user signed in/out elsewhere -> refresh header
-      readUser().catch(() => {});
-    });
-
-    readUser().catch(() => {});
-
-    return () => {
-      mounted = false;
-      sub.subscription.unsubscribe();
-    };
-  }, []);
-
-  async function handleSignOut() {
-    await supabase.auth.signOut();
-    // simplest way to refresh client state
-    if (typeof window !== 'undefined') window.location.href = '/';
-  }
-
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body className="min-h-screen font-sans bg-background text-foreground">
         <header className="border-b">
-          <nav className="mx-auto flex max-w-5xl items-center justify-between gap-4 p-3">
-            <div className="flex items-center gap-4">
-              <Link className="hover:underline" href="/">Home</Link>
-              <Link className="hover:underline" href="/offers">Browse</Link>
-              <Link className="hover:underline" href="/offers/new">New Offer</Link>
-              <Link className="hover:underline" href="/offers/mine">My Offers</Link>
-
-              <span className="flex items-center">
-                <Link className="hover:underline" href="/messages">Messages</Link>
-                <MessagesUnreadBadge />
-              </span>
-
-              <Link className="hover:underline" href="/exchanges">Exchanges</Link>
-              <Link className="hover:underline" href="/profile">Profile</Link>
-              {(role === 'admin' || role === 'moderator') && (
-                <Link className="hover:underline" href="/admin">Admin</Link>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3">
-              {uid ? (
-                <>
-                  <NotificationsBell />
-                  <button
-                    onClick={handleSignOut}
-                    className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
-                    aria-label="Sign out"
-                  >
-                    Sign out
-                  </button>
-                </>
-              ) : (
-                <Link className="rounded border px-2 py-1 text-sm hover:bg-gray-50" href="/sign-in">
-                  Sign In
-                </Link>
-              )}
-            </div>
-          </nav>
+          <div className="mx-auto max-w-5xl px-3">
+            <ClientHeaderNav />
+          </div>
         </header>
         <main className="mx-auto max-w-5xl p-4">{children}</main>
       </body>

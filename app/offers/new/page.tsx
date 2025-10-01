@@ -14,7 +14,6 @@ type OfferType = 'product' | 'service' | 'time' | 'knowledge' | 'other';
 export default function NewOfferPage() {
   const router = useRouter();
 
-  // form fields
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [offerType, setOfferType] = useState<OfferType>('service');
@@ -24,16 +23,13 @@ export default function NewOfferPage() {
   const [images, setImages] = useState<string[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
 
-  // tag source
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [loadingTags, setLoadingTags] = useState(true);
 
-  // ui
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
-  // load tags
   useEffect(() => {
     let cancel = false;
     (async () => {
@@ -47,9 +43,7 @@ export default function NewOfferPage() {
         setLoadingTags(false);
       }
     })();
-    return () => {
-      cancel = true;
-    };
+    return () => { cancel = true; };
   }, []);
 
   async function onSubmit(e: React.FormEvent) {
@@ -57,14 +51,11 @@ export default function NewOfferPage() {
     setSubmitting(true);
     setErr('');
     setMsg('');
-
     try {
-      // auth
       const { data: auth } = await supabase.auth.getUser();
       const userId = auth.user?.id;
       if (!userId) throw new Error('You must be signed in.');
 
-      // create as PENDING; admins/mods will approve
       const { data: inserted, error: insErr } = await supabase
         .from('offers')
         .insert({
@@ -84,7 +75,6 @@ export default function NewOfferPage() {
 
       const offerId = inserted!.id as string;
 
-      // attach tags (ignore duplicates)
       if (tags.length > 0) {
         const rows = tags.map(t => ({ offer_id: offerId, tag_id: t.id }));
         const { error: tagErr } = await supabase
@@ -93,10 +83,9 @@ export default function NewOfferPage() {
         if (tagErr) throw tagErr;
       }
 
-      // go to the new offer detail (will show "pending approval" badge)
       router.push(`/offers/${offerId}`);
     } catch (e: any) {
-      setErr(e?.message ?? 'Something went wrong creating the offer.');
+      setErr(e?.message ?? 'Something went wrong creating the offering.');
     } finally {
       setSubmitting(false);
     }
@@ -104,7 +93,7 @@ export default function NewOfferPage() {
 
   return (
     <section className="max-w-3xl">
-      <h2 className="mb-3 text-2xl font-bold">New Offer</h2>
+      <h2 className="mb-3 text-2xl font-bold">Share Your Gifts</h2>
 
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
@@ -188,9 +177,9 @@ export default function NewOfferPage() {
         <button
           type="submit"
           disabled={submitting}
-          className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
+          className="hx-btn hx-btn--brand disabled:opacity-50"
         >
-          {submitting ? 'Creating…' : 'Create'}
+          {submitting ? 'Sharing…' : 'Share Your Gifts'}
         </button>
 
         {msg && <p className="text-sm text-green-700">{msg}</p>}
@@ -198,8 +187,8 @@ export default function NewOfferPage() {
       </form>
 
       <div className="pt-4">
-        <Link href="/offers" className="underline text-sm">
-          ← Back to Browse
+        <Link href="/offers" className="hx-link text-sm">
+          ← Back to Offerings
         </Link>
       </div>
     </section>

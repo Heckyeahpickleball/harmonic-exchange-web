@@ -4,50 +4,57 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import NotificationsBell from '@/components/NotificationsBell';
+import MessagesUnreadBadge from '@/components/MessagesUnreadBadge';
+
+type Role = 'user' | 'moderator' | 'admin';
 
 export default function ClientHeaderNav() {
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [uid, setUid] = useState<string | null>(null);
+  const [role, setRole] = useState<Role>('user');
 
   useEffect(() => {
-    let active = true;
     (async () => {
-      const { data: auth } = await supabase.auth.getUser();
-      const uid = auth?.user?.id;
-      if (!uid) {
-        if (active) setIsAdmin(false);
-        return;
-      }
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', uid)
-        .single();
+      const { data } = await supabase.auth.getUser();
+      const u = data?.user?.id ?? null;
+      setUid(u);
 
-      if (active) {
-        const role = (prof?.role ?? 'user') as string;
-        setIsAdmin(role === 'admin' || role === 'moderator');
+      if (u) {
+        const { data: p } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', u)
+          .single();
+        if (p?.role) setRole(p.role as Role);
       }
     })();
-    return () => {
-      active = false;
-    };
   }, []);
 
   return (
-    <nav className="mx-auto flex max-w-5xl items-center justify-between gap-4 p-3">
-      <div className="flex items-center gap-4">
-        <Link href="/">Home</Link>
-        <Link href="/offers">Browse</Link>
-        <Link href="/offers/new">New Offer</Link>
-        <Link href="/offers/mine">My Offers</Link>
-        <Link href="/messages">Messages</Link>
-        <Link href="/exchanges">Exchanges</Link>
-        <Link href="/profile">Profile</Link>
-        {isAdmin && <Link href="/admin">Admin</Link>}
+    <nav className="flex items-center justify-between gap-3 py-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <Link href="/" className="underline-offset-4 hover:underline">Home</Link>
+        <Link href="/browse" className="underline-offset-4 hover:underline">Offerings</Link>
+        <Link href="/offers/new" className="underline-offset-4 hover:underline">Share My Value</Link>
+        <Link href="/offers/mine" className="underline-offset-4 hover:underline">My Offers</Link>
+
+        <Link href="/messages" className="underline-offset-4 hover:underline">
+          Inbox <MessagesUnreadBadge />
+        </Link>
+
+        <Link href="/exchanges" className="underline-offset-4 hover:underline">Exchanges</Link>
+        <Link href="/profile" className="underline-offset-4 hover:underline">Profile</Link>
+        {role === 'admin' && (
+          <Link href="/admin" className="underline-offset-4 hover:underline">Admin</Link>
+        )}
       </div>
-      <div className="flex items-center gap-4">
-        <Link href="/sign-in">Sign In</Link>
+
+      <div className="flex items-center gap-2">
         <NotificationsBell />
+        {!uid ? (
+          <Link href="/sign-in" className="rounded border px-2 py-1 text-sm hover:bg-gray-50">
+            Sign In
+          </Link>
+        ) : null}
       </div>
     </nav>
   );
