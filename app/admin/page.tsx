@@ -153,6 +153,19 @@ function AdminContent() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
 
+  // Small helper to surface useful errors
+  function showError(e: any, fallback = 'Something went wrong.') {
+    const m =
+      e?.message ||
+      e?.error?.message ||
+      e?.details ||
+      (typeof e === 'string' ? e : '') ||
+      JSON.stringify(e || {}, null, 2) ||
+      fallback;
+    setMsg(m);
+    console.error(e);
+  }
+
   // Load current user
   useEffect(() => {
     (async () => {
@@ -248,7 +261,6 @@ function AdminContent() {
         }
 
         if (tab === 'chapters') {
-          // tolerate older schemas by selecting columns individually
           const { data, error } = await supabase
             .from('groups')
             .select('id,name,slug,city,country,status,created_by,created_at,about')
@@ -321,8 +333,7 @@ function AdminContent() {
           );
         }
       } catch (e: any) {
-        console.error(e);
-        setMsg(e?.message ?? 'Failed to load admin data.');
+        showError(e, 'Failed to load admin data.');
       } finally {
         setLoading(false);
       }
@@ -390,8 +401,7 @@ function AdminContent() {
       });
       setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, status: next } : u)));
     } catch (e: any) {
-      console.error(e);
-      setMsg(e?.message ?? 'Failed to set status');
+      showError(e, 'Failed to set status');
     }
   }
 
@@ -406,8 +416,7 @@ function AdminContent() {
       if (error) throw error;
       setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, role: next } : u)));
     } catch (e: any) {
-      console.error(e);
-      setMsg(e?.message ?? 'Failed to change role');
+      showError(e, 'Failed to change role');
     }
   }
 
@@ -429,8 +438,7 @@ function AdminContent() {
       if (error) throw error;
       setUsers((prev) => prev.filter((u) => u.id !== id));
     } catch (e: any) {
-      console.error(e);
-      setMsg(e?.message ?? 'Failed to delete user');
+      showError(e, 'Failed to delete user');
     }
   }
 
@@ -451,8 +459,7 @@ function AdminContent() {
       await supabase.rpc('admin_offer_set_status', { p_offer_id: id, p_status: next, p_reason: reason });
       setOffers((prev) => prev.map((o) => (o.id === id ? { ...o, status: next } : o)));
     } catch (e: any) {
-      console.error(e);
-      setMsg(e?.message ?? 'Failed to set offer status');
+      showError(e, 'Failed to set offer status');
     }
   }
 
@@ -471,15 +478,28 @@ function AdminContent() {
     const reason = prompt(`Reason for setting chapter status to ${next}? (optional)`) || null;
 
     try {
-      const { error } = await supabase
-        .from('groups')
-        .update({ status: next })
-        .eq('id', id);
+      // Try RPC (SECURITY DEFINER) first if present
+      const rpc = await supabase.rpc('admin_group_set_status', {
+        p_group_id: id,
+        p_status: next,
+        p_reason: reason,
+      });
+      if (rpc.error && !/function .* does not exist/i.test(rpc.error.message || '')) {
+        // RPC exists but failed (probably lack of admin or other SQL err)
+        throw rpc.error;
+      }
+      if (!rpc.error) {
+        setGroups((prev) => prev.map((g) => (g.id === id ? { ...g, status: next } : g)));
+        return;
+      }
+
+      // Fallback: direct update (requires the RLS policy)
+      const { error } = await supabase.from('groups').update({ status: next }).eq('id', id);
       if (error) throw error;
 
       setGroups((prev) => prev.map((g) => (g.id === id ? { ...g, status: next } : g)));
 
-      // Optional: log an admin action if your RPC/table exists
+      // Optional: log an admin action if your table exists
       try {
         await supabase.from('admin_actions').insert({
           admin_profile_id: me?.id,
@@ -490,8 +510,7 @@ function AdminContent() {
         });
       } catch { /* non-blocking */ }
     } catch (e: any) {
-      console.error(e);
-      setMsg(e?.message ?? 'Failed to update chapter');
+      showError(e, 'Failed to update chapter');
     }
   }
 
@@ -542,7 +561,7 @@ function AdminContent() {
         </div>
       </div>
 
-      {msg && <p className="text-sm text-amber-700">{msg}</p>}
+      {msg && <p className="text-sm text-amber-700 whitespace-pre-wrap">{msg}</p>}
       {loading && <p className="text-sm text-gray-600">Loading…</p>}
 
       {/* USERS TAB */}
