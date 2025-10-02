@@ -1,89 +1,80 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
-type OfferRow = {
+type Offer = {
   id: string;
-  title: string;
-  status: string;
-  thumb_url: string | null;
-  created_at: string;
+  title: string | null;
+  images?: string[] | null;
 };
 
 export default function OffersCarousel({ groupId }: { groupId: string }) {
   const supabase = createClientComponentClient();
-  const [offers, setOffers] = useState<OfferRow[]>([]);
-  const [index, setIndex] = useState(0);
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [i, setI] = useState(0);
 
   useEffect(() => {
-    let mounted = true;
+    let cancelled = false;
     (async () => {
       const { data, error } = await supabase
         .from('offers')
-        .select('id,title,status,thumb_url,created_at')
+        .select('id,title,images')
         .eq('group_id', groupId)
         .eq('status', 'active')
         .order('created_at', { ascending: false })
-        .limit(24);
-      if (mounted) {
-        if (error) console.error(error);
-        setOffers(data ?? []);
+        .limit(12);
+
+      if (!cancelled && !error && data) {
+        setOffers(data);
       }
     })();
-    return () => { mounted = false; };
+    return () => { cancelled = true; };
   }, [groupId, supabase]);
-
-  const visible = useMemo(() => {
-    if (offers.length <= 3) return offers;
-    return [0,1,2].map(i => offers[(index + i) % offers.length]);
-  }, [offers, index]);
 
   if (!offers.length) return null;
 
+  const prev = () => setI((p) => (p === 0 ? offers.length - 1 : p - 1));
+  const next = () => setI((p) => (p === offers.length - 1 ? 0 : p + 1));
+
+  const active = offers[i];
+
   return (
-    <section className="mt-6 rounded-2xl border p-4">
+    <div className="mt-6 rounded-2xl border p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Chapter offers</h3>
-        <a className="text-sm underline" href={`/offers?group=${groupId}`}>See all</a>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <button
-          className="rounded-full border px-3 py-1"
-          onClick={() => setIndex((p) => (p - 1 + offers.length) % offers.length)}
-          aria-label="Previous"
-        >‹</button>
-
-        <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {visible.map((o) => (
-            <a key={o.id} href={`/offers/${o.id}`} className="group rounded-xl border p-3 hover:shadow-sm">
-              <div className="flex items-center gap-3">
-                <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-neutral-100">
-                  {o.thumb_url ? (
-                    <Image src={o.thumb_url} alt="" fill className="object-cover" />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-xs text-neutral-500">
-                      No image
-                    </div>
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <div className="truncate font-medium">{o.title}</div>
-                  <div className="text-xs capitalize text-neutral-500">{o.status}</div>
-                </div>
-              </div>
-            </a>
-          ))}
+        <h3 className="text-lg font-semibold">Chapter offerings</h3>
+        <div className="space-x-2">
+          <button onClick={prev} className="rounded-full border px-3 py-1">‹</button>
+          <button onClick={next} className="rounded-full border px-3 py-1">›</button>
+          <a href="/exchange?scope=local" className="ml-2 rounded-full border px-3 py-1">
+            See all
+          </a>
         </div>
-
-        <button
-          className="rounded-full border px-3 py-1"
-          onClick={() => setIndex((p) => (p + 1) % offers.length)}
-          aria-label="Next"
-        >›</button>
       </div>
-    </section>
+
+      <div className="grid grid-cols-[96px_1fr] gap-4 items-center">
+        <div className="relative h-24 w-24 overflow-hidden rounded-lg border bg-white">
+          {active?.images?.[0] ? (
+            <Image
+              src={active.images[0]}
+              alt={active.title ?? 'Offer image'}
+              fill
+              className="object-cover"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
+              No image
+            </div>
+          )}
+        </div>
+        <div className="truncate">
+          <div className="text-base font-medium">{active.title ?? 'Untitled offer'}</div>
+          <div className="mt-1 text-sm text-gray-500">
+            {i + 1} / {offers.length}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
