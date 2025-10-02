@@ -109,7 +109,6 @@ export default function OfferCard({ offer, mine = false, onDeleted }: Props) {
 
         {/* Actions */}
         <div className="flex flex-wrap gap-2">
-          {/* View = outline, Ask = primary (pops), Delete = secondary outline */}
           <Link href={href} className="hx-btn hx-btn--outline-primary text-sm">
             View
           </Link>
