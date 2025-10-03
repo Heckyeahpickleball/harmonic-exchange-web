@@ -4,8 +4,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, notFound } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-
-// Reuse your inline-thread component from profiles
 import PostItem from '@/components/PostItem';
 
 type GroupStatus = 'pending' | 'active' | 'suspended' | 'archived';
@@ -42,14 +40,11 @@ type OfferPreview = {
   created_at: string;
   owner_id: string;
   owner_name?: string | null;
-
-  // NEW for thumbnails
   images?: string[] | null;
   cover_image?: string | null;
   thumb?: string | null;
 };
 
-// Shape expected by components/PostItem.tsx
 type FeedPost = {
   id: string;
   profile_id: string;
@@ -76,7 +71,6 @@ export default function ChapterPage() {
   const [offers, setOffers] = useState<OfferPreview[]>([]);
   const [offerQ, setOfferQ] = useState('');
 
-  // POSTS (composer state + list used by PostItem)
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [postText, setPostText] = useState('');
   const [postFiles, setPostFiles] = useState<File[]>([]);
@@ -84,11 +78,9 @@ export default function ChapterPage() {
   const [posting, setPosting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // About editor
   const [editingAbout, setEditingAbout] = useState(false);
   const [aboutDraft, setAboutDraft] = useState('');
 
-  // Event creation
   const [showEventForm, setShowEventForm] = useState(false);
   const [evTitle, setEvTitle] = useState('');
   const [evDesc, setEvDesc] = useState('');
@@ -98,10 +90,8 @@ export default function ChapterPage() {
   const [evLocation, setEvLocation] = useState('');
   const [creatingEvent, setCreatingEvent] = useState(false);
 
-  // NEW: carousel track
   const offerTrackRef = useRef<HTMLDivElement | null>(null);
 
-  // helpers
   function toIsoLocal(dt: string) {
     const d = new Date(dt);
     return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString();
@@ -119,14 +109,12 @@ export default function ChapterPage() {
     if (Array.isArray(arr)) return arr.map(String);
     return [String(arr)];
   }
-  // NEW: pick an offer thumbnail
   function offerThumb(o: { cover_image?: string | null; images?: string[] | null }): string | null {
     const candidate = o.cover_image ?? (Array.isArray(o.images) ? o.images[0] : null);
     if (!candidate) return null;
     return isStoragePath(candidate) ? publicUrlForPath(String(candidate)) : String(candidate);
   }
 
-  // load
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -142,15 +130,12 @@ export default function ChapterPage() {
           .eq('slug', slug)
           .maybeSingle();
         if (gErr) throw gErr;
-        if (!gRow || (gRow.status !== 'active' && uid !== gRow.created_by)) {
-          notFound(); return;
-        }
+        if (!gRow || (gRow.status !== 'active' && uid !== gRow.created_by)) { notFound(); return; }
         if (!cancelled) {
           setGroup(gRow as Group);
           setAboutDraft((gRow as Group).about ?? '');
         }
 
-        // members
         const { data: gm } = await supabase
           .from('group_members')
           .select('profile_id,role')
@@ -172,7 +157,6 @@ export default function ChapterPage() {
           setIsAnchor(mine?.role === 'anchor' || uid === gRow.created_by);
         }
 
-        // EVENTS — unchanged logic (only events with this chapter's group_id)
         const { data: eRows } = await supabase
           .from('group_events')
           .select('id,title,description,starts_at,ends_at,location,is_online')
@@ -195,7 +179,6 @@ export default function ChapterPage() {
         }
         if (!cancelled) setEvents(eList);
 
-        // POSTS for this group (shape for PostItem)
         const { data: pRows, error: pErr } = await supabase
           .from('posts')
           .select('id,profile_id,body,created_at,images,group_id,profiles(display_name)')
@@ -209,7 +192,6 @@ export default function ChapterPage() {
         }));
         if (!cancelled) setPosts(pList);
 
-        // OFFERS (now select images/cover_image and compute thumb)
         const { data: oRows } = await supabase
           .from('offers')
           .select('id,title,status,created_at,owner_id,images,cover_image')
@@ -244,7 +226,6 @@ export default function ChapterPage() {
     return offers.filter((o) => o.title.toLowerCase().includes(q));
   }, [offers, offerQ]);
 
-  // membership
   async function joinChapter() {
     if (!group) return;
     setMsg('');
@@ -270,7 +251,6 @@ export default function ChapterPage() {
     } catch (e: any) { setMsg(e?.message ?? 'Failed to leave chapter.'); }
   }
 
-  // About
   async function saveAbout() {
     if (!group) return;
     setMsg('');
@@ -284,17 +264,13 @@ export default function ChapterPage() {
     } catch (e: any) { setMsg(e?.message ?? 'Failed to save About.'); }
   }
 
-  // composer helpers
-  function refreshPreviews(files: File[]) {
-    previewUrls.forEach((u) => URL.revokeObjectURL(u));
-    setPreviewUrls(files.map((f) => URL.createObjectURL(f)));
-  }
   function removeImageAt(i: number) {
     const next = postFiles.slice(); next.splice(i, 1);
-    setPostFiles(next); refreshPreviews(next);
+    setPostFiles(next);
+    setPreviewUrls(next.map((f) => URL.createObjectURL(f)));
   }
   function clearAllImages() {
-    setPostFiles([]); refreshPreviews([]);
+    setPostFiles([]); setPreviewUrls([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
   async function uploadToPostMedia(file: File): Promise<string> {
@@ -318,7 +294,6 @@ export default function ChapterPage() {
       const urls: string[] = [];
       for (const f of postFiles) urls.push(await uploadToPostMedia(f));
 
-      // insert & then re-fetch the inserted post including profiles for PostItem
       const { data: inserted, error: insErr } = await supabase
         .from('posts')
         .insert({ profile_id: auth.user.id, body: text || null, images: urls, group_id: group.id })
@@ -348,7 +323,6 @@ export default function ChapterPage() {
     }
   }
 
-  // events
   async function createEvent() {
     if (!group) return;
     setMsg(''); setCreatingEvent(true);
@@ -368,8 +342,7 @@ export default function ChapterPage() {
         .single();
       if (error) throw error;
       setEvents((prev) =>
-        [...prev, { ...data!, rsvp_count: 0, i_rsvped: false }]
-          .sort((a, b) => +new Date(a.starts_at) - +new Date(b.starts_at))
+        [...prev, { ...data!, rsvp_count: 0, i_rsvped: false }].sort((a, b) => +new Date(a.starts_at) - +new Date(b.starts_at))
       );
       setEvTitle(''); setEvDesc(''); setEvStart(''); setEvEnd(''); setEvOnline(false); setEvLocation(''); setShowEventForm(false);
     } catch (e: any) { setMsg(e?.message ?? 'Failed to create event.'); }
@@ -411,7 +384,7 @@ export default function ChapterPage() {
           </div>
         </div>
 
-        {/* About (editable) */}
+        {/* About */}
         <div className="mt-4">
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-700">About this chapter</h3>
@@ -449,50 +422,34 @@ export default function ChapterPage() {
           </div>
         )}
 
-        {/* NEW — Local offers carousel */}
+        {/* Offers carousel (simple, no external component/imports) */}
         {offers.length > 0 && (
           <div className="mt-6">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-700">Local offerings</h3>
               <div className="flex items-center gap-2">
-                <button
-                  aria-label="Scroll left"
-                  className="rounded border px-2 py-1 text-sm"
-                  onClick={() => { const el = offerTrackRef.current; if (el) el.scrollBy({ left: -320, behavior: 'smooth' }); }}
-                >
+                <button aria-label="Scroll left" className="rounded border px-2 py-1 text-sm"
+                        onClick={() => { const el = offerTrackRef.current; if (el) el.scrollBy({ left: -320, behavior: 'smooth' }); }}>
                   ‹
                 </button>
-                <button
-                  aria-label="Scroll right"
-                  className="rounded border px-2 py-1 text-sm"
-                  onClick={() => { const el = offerTrackRef.current; if (el) el.scrollBy({ left: 320, behavior: 'smooth' }); }}
-                >
+                <button aria-label="Scroll right" className="rounded border px-2 py-1 text-sm"
+                        onClick={() => { const el = offerTrackRef.current; if (el) el.scrollBy({ left: 320, behavior: 'smooth' }); }}>
                   ›
                 </button>
-                <Link
-                  href={`/browse?city=${encodeURIComponent(group.city || '')}${group.id ? `&group=${group.id}` : ''}`}
-                  className="ml-2 hx-btn hx-btn--outline-primary"
-                >
+                <Link href={`/browse?city=${encodeURIComponent(group.city || '')}${group.id ? `&group=${group.id}` : ''}`}
+                      className="ml-2 hx-btn hx-btn--outline-primary">
                   See all
                 </Link>
               </div>
             </div>
-            <div
-              ref={offerTrackRef}
-              className="flex gap-3 overflow-x-auto"
-              style={{ scrollSnapType: 'x mandatory' }}
-            >
+            <div ref={offerTrackRef} className="flex gap-3 overflow-x-auto" style={{ scrollSnapType: 'x mandatory' }}>
               {offers.map((o) => (
-                <Link
-                  key={o.id}
-                  href={`/offers/${o.id}`}
-                  className="min-w-[280px] max-w-[280px] rounded border p-3 hover:shadow"
-                  style={{ scrollSnapAlign: 'start' }}
-                >
+                <Link key={o.id} href={`/offers/${o.id}`}
+                      className="min-w-[280px] max-w-[280px] rounded border p-3 hover:shadow"
+                      style={{ scrollSnapAlign: 'start' }}>
                   <div className="flex items-start gap-3">
                     <div className="min-w-16 max-w-16 h-16 rounded overflow-hidden border">
                       {o.thumb ? (
-                        // eslint-disable-next-line @next/next/no-img-element
                         <img src={o.thumb} alt="" className="h-full w-full object-cover" />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center text-xs text-gray-500 bg-gray-50">No image</div>
@@ -591,7 +548,7 @@ export default function ChapterPage() {
         )}
       </section>
 
-      {/* Posts – inline threads */}
+      {/* Posts */}
       <section className="hx-card p-4 sm:p-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Recent posts</h2>
@@ -634,7 +591,6 @@ export default function ChapterPage() {
                 <div className="mt-2 grid grid-cols-6 gap-2">
                   {previewUrls.map((url, i) => (
                     <div key={i} className="relative rounded border">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={url} alt="" className="h-16 w-full rounded object-cover" />
                       <button
                         type="button"
@@ -708,7 +664,6 @@ export default function ChapterPage() {
                   </div>
                   <div className="ml-2 h-16 w-24 shrink-0 overflow-hidden rounded border">
                     {o.thumb ? (
-                      // eslint-disable-next-line @next/next/no-img-element
                       <img src={o.thumb} alt="" className="h-full w-full object-cover" />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-xs text-gray-500 bg-gray-50">No image</div>
