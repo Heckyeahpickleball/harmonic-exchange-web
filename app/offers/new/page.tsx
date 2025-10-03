@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
@@ -50,7 +50,10 @@ export default function NewOfferPage() {
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [offerType, setOfferType] = useState<OfferType>('service');
+
+  // Start with empty '' so the select shows a "Select" placeholder
+  const [offerType, setOfferType] = useState<OfferType | ''>('');
+
   const [isOnline, setIsOnline] = useState(false);
   const [city, setCity] = useState('');
   const [country, setCountry] = useState('');
@@ -112,6 +115,15 @@ export default function NewOfferPage() {
     setErr('');
     setMsg('');
     try {
+      // Basic client-side guards for required fields
+      if (!title.trim()) throw new Error('Title is required.');
+      if (!description.trim()) throw new Error('Description is required.');
+      if (!offerType) throw new Error('Please select a type.');
+      if (!isOnline) {
+        if (!country.trim()) throw new Error('Country is required for local offers.');
+        if (!city.trim()) throw new Error('City is required for local offers.');
+      }
+
       const { data: auth } = await supabase.auth.getUser();
       const userId = auth.user?.id;
       if (!userId) throw new Error('You must be signed in.');
@@ -124,8 +136,8 @@ export default function NewOfferPage() {
         .insert({
           owner_id: userId,
           title: title.trim(),
-          description: description.trim() || null,
-          offer_type: offerType,
+          description: description.trim(),
+          offer_type: offerType as OfferType,
           is_online: isOnline,
           city: normalizedCity,
           country: normalizedCountry,
@@ -163,34 +175,45 @@ export default function NewOfferPage() {
       <h2 className="mb-3 text-2xl font-bold">Share Your Gifts</h2>
 
       <form onSubmit={onSubmit} className="space-y-4">
+        {/* Title (required) */}
         <div>
-          <label className="block text-sm font-medium">Title</label>
+          <label className="block text-sm font-medium">Title <span className="text-red-600">*</span></label>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             required
+            aria-invalid={!title.trim() ? true : undefined}
             className="w-full rounded border px-3 py-2"
           />
         </div>
 
+        {/* Description (required) */}
         <div>
-          <label className="block text-sm font-medium">Description</label>
+          <label className="block text-sm font-medium">Description <span className="text-red-600">*</span></label>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={5}
+            required
+            aria-invalid={!description.trim() ? true : undefined}
             className="w-full rounded border px-3 py-2"
           />
+          <p className="mt-1 text-xs text-gray-500">Describe what you’re offering and how people can engage.</p>
         </div>
 
+        {/* Type + Online + Location */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {/* Type (required, with 'Select' placeholder) */}
           <div>
-            <label className="block text-sm font-medium">Type</label>
+            <label className="block text-sm font-medium">Type <span className="text-red-600">*</span></label>
             <select
               value={offerType}
-              onChange={(e) => setOfferType(e.target.value as OfferType)}
-              className="w-full rounded border px-3 py-2"
+              onChange={(e) => setOfferType(e.target.value as OfferType | '')}
+              required
+              aria-invalid={!offerType ? true : undefined}
+              className="w-full rounded border px-3 py-2 text-gray-700"
             >
+              <option value="" disabled>Select</option>
               <option value="product">product</option>
               <option value="service">service</option>
               <option value="time">time</option>
@@ -199,6 +222,7 @@ export default function NewOfferPage() {
             </select>
           </div>
 
+          {/* Online toggle + Location (Country/City required unless Online) */}
           <div className="sm:col-span-2 flex flex-wrap items-end gap-3">
             <label className="inline-flex items-center gap-2 text-sm">
               <input
@@ -209,17 +233,18 @@ export default function NewOfferPage() {
               Online
             </label>
 
-            {/* Location (hidden when Online) */}
             {!isOnline && (
               <>
-                {/* Country with type-ahead */}
+                {/* Country (required, type-ahead) */}
                 <div className="grow">
-                  <label className="block text-xs text-gray-600">Country</label>
+                  <label className="block text-xs text-gray-600">Country <span className="text-red-600">*</span></label>
                   <input
                     list="hx-countries"
                     value={country}
                     onChange={(e) => setCountry(e.target.value)}
                     placeholder="Start typing to search…"
+                    required={!isOnline}
+                    aria-invalid={!isOnline && !country.trim() ? true : undefined}
                     className="w-full rounded border px-3 py-2"
                   />
                   <datalist id="hx-countries">
@@ -229,23 +254,27 @@ export default function NewOfferPage() {
                   </datalist>
                 </div>
 
-                {/* City (normalize on blur) */}
+                {/* City (required, title-cased) */}
                 <div className="grow">
-                  <label className="block text-xs text-gray-600">City</label>
+                  <label className="block text-xs text-gray-600">City <span className="text-red-600">*</span></label>
                   <input
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
                     onBlur={() => setCity((c) => titleCaseCity(c))}
                     placeholder="City"
+                    required={!isOnline}
+                    aria-invalid={!isOnline && !city.trim() ? true : undefined}
                     className="w-full rounded border px-3 py-2"
                   />
                 </div>
               </>
             )}
           </div>
+
           <p className="sm:col-span-3 text-xs text-gray-500">{locationHelper}</p>
         </div>
 
+        {/* Tags (optional) */}
         <div>
           <label className="block text-sm font-medium">Tags</label>
           <TagMultiSelect
@@ -255,12 +284,14 @@ export default function NewOfferPage() {
             placeholder={loadingTags ? 'Loading tags…' : 'Type to search, press Enter to add'}
           />
           <p className="mt-1 text-xs text-gray-500">
-            Add a few relevant tags (e.g., coaching, education, childcare, web-development).
+            Add a few relevant tags (e.g., coaching, education, childcare, web-development). Optional.
           </p>
         </div>
 
+        {/* Images (optional) */}
         <UploadImages value={images} onChange={setImages} />
 
+        {/* Submit */}
         <button
           type="submit"
           disabled={submitting}
