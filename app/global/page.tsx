@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import CityOffersRail, { CityOffer } from '@/components/CityOffersRail';
 import PostItem from '@/components/PostItem';
+import PostComposer from '@/components/PostComposer';
 
 type FeedPost = {
   id: string;
@@ -13,24 +14,45 @@ type FeedPost = {
   created_at: string;
   images?: string[] | null;
   profiles?: { display_name: string | null } | null;
+  group_id?: string | null;
 };
 
 export default function GlobalExchangePage() {
+  const [meId, setMeId] = useState<string | null>(null);
+
   const [offers, setOffers] = useState<CityOffer[] | null>(null);
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [msg, setMsg] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
+
+    function shuffle<T>(arr: T[]): T[] {
+      // Fisher–Yates in-place shuffle
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
     (async () => {
       try {
-        // OFFERS: all active (local + online), newest first, de-duped
+        setLoading(true);
+        setMsg('');
+
+        // who am I?
+        const { data: auth } = await supabase.auth.getUser();
+        const uid = auth.user?.id ?? null;
+        if (!cancelled) setMeId(uid);
+
+        // OFFERS: all active (local + online), random order each load
         const { data: oRows } = await supabase
           .from('offers')
           .select('id,title,images,owner_id,created_at,status')
           .eq('status', 'active')
-          .order('created_at', { ascending: false })
-          .limit(64);
+          .limit(96); // grab a good chunk
 
         const merged = (oRows || []) as any[];
 
@@ -38,6 +60,7 @@ export default function GlobalExchangePage() {
         const { data: owners } = ownerIds.length
           ? await supabase.from('profiles').select('id,display_name').in('id', ownerIds)
           : { data: [] as any[] };
+
         const nameById = new Map<string, string | null>();
         for (const p of (owners || []) as any[]) nameById.set(p.id, p.display_name ?? null);
 
@@ -60,12 +83,14 @@ export default function GlobalExchangePage() {
           };
         });
 
-        if (!cancelled) setOffers(list);
+        const randomized = shuffle(list.slice()); // new randomized order
+        if (!cancelled) setOffers(randomized);
 
-        // POSTS: latest across everything (chapter/global), newest first
+        // POSTS: **only global** (group_id IS NULL), newest first
         const { data: pRows } = await supabase
           .from('posts')
-          .select('id,profile_id,body,created_at,images,profiles(display_name)')
+          .select('id,profile_id,body,created_at,images,group_id,profiles(display_name)')
+          .is('group_id', null) // <- global only
           .order('created_at', { ascending: false })
           .limit(50);
 
@@ -90,10 +115,13 @@ export default function GlobalExchangePage() {
       } catch (e: any) {
         console.error(e);
         if (!cancelled) setMsg(e?.message ?? 'Failed to load Global Exchange.');
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
+
     return () => {
-      // nothing to clean
+      cancelled = true;
     };
   }, []);
 
@@ -107,31 +135,50 @@ export default function GlobalExchangePage() {
         </div>
       </header>
 
-      {/* Global offers carousel */}
+      {/* Global offers carousel (randomized each load) */}
       {offers && offers.length > 0 ? (
         <div className="hx-card p-4">
           <CityOffersRail
             offers={offers}
-            title="Latest offerings from the community"
+            title="Offerings from across the community"
             seeAllHref="/browse"
           />
         </div>
       ) : (
-        <div className="hx-card p-6 text-sm text-gray-600">No offers yet.</div>
+        <div className="hx-card p-6 text-sm text-gray-600">
+          {loading ? 'Loading offers…' : 'No offers yet.'}
+        </div>
       )}
 
-      {/* Global posts feed */}
+      {/* Composer (global scope) */}
+      <section className="hx-card p-4 sm:p-6">
+        <h2 className="mb-3 text-lg font-semibold">Share with the whole community</h2>
+        {meId ? (
+          <PostComposer
+            profileId={meId}
+            groupId={null} // <- GLOBAL
+            onPost={(row) => setPosts((prev) => [row as FeedPost, ...prev])}
+          />
+        ) : (
+          <div className="flex items-center justify-between rounded border p-3">
+            <p className="text-sm text-gray-600">Sign in to post.</p>
+            <Link href="/sign-in" className="hx-btn hx-btn--outline-primary">Sign in</Link>
+          </div>
+        )}
+      </section>
+
+      {/* Global posts feed (only group_id = NULL) */}
       <section className="hx-card p-4 sm:p-6">
         <h2 className="mb-3 text-lg font-semibold">Latest posts</h2>
         {posts.length === 0 ? (
-          <p className="text-sm text-gray-600">No posts yet.</p>
+          <p className="text-sm text-gray-600">{loading ? 'Loading posts…' : 'No posts yet.'}</p>
         ) : (
           <div className="space-y-3">
             {posts.map((p) => (
               <PostItem
                 key={p.id}
                 post={{ ...p, body: p.body ?? '', images: p.images ?? [] }}
-                me={null}
+                me={meId} // <- enable author delete + comment controls
                 onDeleted={() => setPosts((prev) => prev.filter((x) => x.id !== p.id))}
               />
             ))}
