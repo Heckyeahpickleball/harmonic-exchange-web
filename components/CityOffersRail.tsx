@@ -27,6 +27,9 @@ export default function CityOffersRail({
     el.scrollBy({ left: dx, behavior: 'smooth' });
   };
 
+  // With the smaller card widths, a ~360px step feels natural.
+  const STEP = 360;
+
   return (
     <div className="mt-6">
       <div className="mb-3 flex items-center justify-between">
@@ -41,14 +44,14 @@ export default function CityOffersRail({
       <div className="relative">
         <button
           aria-label="Previous"
-          onClick={() => scrollBy(-520)}
+          onClick={() => scrollBy(-STEP)}
           className="absolute left-0 top-1/2 z-10 -translate-y-1/2 rounded-full border bg-white/90 px-2 py-1 shadow"
         >
           ‹
         </button>
         <button
           aria-label="Next"
-          onClick={() => scrollBy(520)}
+          onClick={() => scrollBy(STEP)}
           className="absolute right-0 top-1/2 z-10 -translate-y-1/2 rounded-full border bg-white/90 px-2 py-1 shadow"
         >
           ›
@@ -65,11 +68,11 @@ export default function CityOffersRail({
               <Link
                 key={o.id}
                 href={`/offers/${o.id}`}
-                className="group w-[260px] flex-shrink-0 scroll-ml-4 scroll-snap-start"
+                className="group w-[200px] md:w-[220px] flex-shrink-0 scroll-ml-4 scroll-snap-start"
               >
                 <div className="rounded-xl border bg-white shadow-sm transition group-hover:shadow-md">
-                  {/* 16:9 media area */}
-                  <div className="relative aspect-[16/9] w-full overflow-hidden rounded-t-xl bg-neutral-100">
+                  {/* 4:3 media area for consistent thumbnails */}
+                  <div className="relative aspect-[4/3] w-full overflow-hidden rounded-t-xl bg-neutral-100">
                     {img ? (
                       <img
                         src={img}
@@ -85,12 +88,12 @@ export default function CityOffersRail({
                   </div>
 
                   <div className="p-3">
-                    <div className="line-clamp-1 font-medium">{o.title}</div>
-                    <div className="mt-1 line-clamp-1 text-xs text-gray-600">
+                    <div className="line-clamp-1 font-medium text-sm">{o.title}</div>
+                    <div className="mt-1 line-clamp-1 text-[11px] text-gray-600">
                       {o.owner_display_name ? `by ${o.owner_display_name}` : ''}
                     </div>
                     <div className="mt-3">
-                      <span className="hx-btn hx-btn--primary inline-block text-xs">Ask to Receive</span>
+                      <span className="hx-btn hx-btn--primary inline-block text-xs px-3 py-1">Ask to Receive</span>
                     </div>
                   </div>
                 </div>
