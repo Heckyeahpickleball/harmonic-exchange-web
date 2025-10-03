@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import { COUNTRIES, canonicalizeCountry } from '@/lib/countries';
 
 function slugify(s: string) {
   return s
@@ -13,20 +14,6 @@ function slugify(s: string) {
     .replace(/-+/g, '-')
     .toLowerCase();
 }
-
-// ISO-ish country list (names only). Keep small and sensible; can expand later.
-const COUNTRIES = [
-  'Afghanistan','Albania','Algeria','Argentina','Armenia','Australia','Austria','Bangladesh','Belgium','Bolivia',
-  'Bosnia and Herzegovina','Brazil','Bulgaria','Canada','Chile','China','Colombia','Costa Rica','Croatia','Cuba',
-  'Cyprus','Czechia','Denmark','Dominican Republic','Ecuador','Egypt','El Salvador','Estonia','Finland','France',
-  'Georgia','Germany','Ghana','Greece','Guatemala','Honduras','Hungary','Iceland','India','Indonesia','Iran',
-  'Iraq','Ireland','Israel','Italy','Jamaica','Japan','Jordan','Kenya','Kuwait','Latvia','Lebanon','Lithuania',
-  'Luxembourg','Malaysia','Malta','Mexico','Moldova','Morocco','Nepal','Netherlands','New Zealand','Nigeria',
-  'North Macedonia','Norway','Pakistan','Panama','Paraguay','Peru','Philippines','Poland','Portugal','Qatar',
-  'Romania','Russia','Saudi Arabia','Serbia','Singapore','Slovakia','Slovenia','South Africa','South Korea',
-  'Spain','Sri Lanka','Sweden','Switzerland','Taiwan','Tanzania','Thailand','Tunisia','Turkey','Uganda',
-  'Ukraine','United Arab Emirates','United Kingdom','United States','Uruguay','Venezuela','Vietnam','Zambia','Zimbabwe'
-];
 
 function buildRecommendedAbout(city?: string, country?: string) {
   const where = [city?.trim(), country?.trim()].filter(Boolean).join(', ');
@@ -58,6 +45,29 @@ export default function StartChapterPage() {
   const [msg, setMsg] = useState<string>('');
   const [busy, setBusy] = useState(false);
 
+  // Prefill from profile
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth.user?.id ?? null;
+      if (!uid) return;
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('country, city')
+        .eq('id', uid)
+        .maybeSingle();
+      if (!cancel && prof) {
+        const ctry = canonicalizeCountry(prof.country);
+        const cty = prof.city ? titleCaseCity(prof.city) : '';
+        setCountry(ctry || '');
+        setCity(cty);
+        setAbout(buildRecommendedAbout(cty, ctry || undefined));
+      }
+    })();
+    return () => { cancel = true; };
+  }, []);
+
   // Live preview of auto-name
   const autoName = useMemo(() => `Harmonic Exchange — ${city || 'City'}`, [city]);
 
@@ -82,7 +92,7 @@ export default function StartChapterPage() {
       }
 
       const normalizedCity = titleCaseCity(city.trim());
-      const normalizedCountry = country.trim();
+      const normalizedCountry = canonicalizeCountry(country) ?? country.trim();
 
       // Auto-name uses the normalized city
       const name = `Harmonic Exchange — ${normalizedCity}`;
@@ -142,21 +152,21 @@ export default function StartChapterPage() {
       </p>
 
       <form onSubmit={onSubmit} className="mt-8 hx-card p-5 space-y-4">
-        {/* Country first (dropdown), then City (normalized) */}
+        {/* Country first (type-ahead), then City (normalized) */}
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <label className="block text-sm font-medium">Country</label>
-            <select
+            <input
+              list="hx-countries"
               className="mt-1 w-full rounded border px-3 py-2"
               value={country}
               onChange={(e)=>setCountry(e.target.value)}
+              placeholder="Start typing to search…"
               required
-            >
-              <option value="">Select a country…</option>
-              {COUNTRIES.map(c => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+            />
+            <datalist id="hx-countries">
+              {COUNTRIES.map(c => <option key={c} value={c} />)}
+            </datalist>
           </div>
 
           <div className="sm:col-span-2">

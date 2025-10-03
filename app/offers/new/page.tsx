@@ -6,13 +6,12 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import TagMultiSelect from '@/components/TagMultiSelect';
 import UploadImages from '@/components/UploadImages';
+import { COUNTRIES, canonicalizeCountry } from '@/lib/countries';
 
 type Tag = { id: number; name: string };
 type OfferType = 'product' | 'service' | 'time' | 'knowledge' | 'other';
 
-// Curated tag catalog to ensure *many* useful tags are available.
-// On load, we upsert anything missing into public.tags so TagMultiSelect has a rich set.
-// (De-duped, case-insensitive by name.)
+// Curated tag catalog (auto-seeded into public.tags).
 const EXTENDED_TAGS = [
   // Services
   'coaching','mentoring','therapy','listening','counseling','tutoring','teaching','editing','proofreading',
@@ -65,40 +64,40 @@ export default function NewOfferPage() {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
-  // Seed + load tags once
+  // Prefill from profile + seed tags
   useEffect(() => {
     let cancel = false;
     (async () => {
-      setLoadingTags(true);
-
-      // 1) Fetch existing tags
-      const { data: existing, error: fetchErr } = await supabase
-        .from('tags')
-        .select('id, name');
-      if (fetchErr) {
-        // even if it fails, we still try to render a minimal UI
-        if (!cancel) setLoadingTags(false);
-        return;
+      // Prefill
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth.user?.id ?? null;
+      if (uid) {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('country, city')
+          .eq('id', uid)
+          .maybeSingle();
+        if (!cancel && prof) {
+          const ctry = canonicalizeCountry(prof.country);
+          setCountry(ctry || '');
+          setCity(prof.city ? titleCaseCity(prof.city) : '');
+        }
       }
 
+      // Seed + load tags
+      setLoadingTags(true);
+      const { data: existing } = await supabase.from('tags').select('id, name');
       const existingNames = new Set((existing || []).map(t => String(t.name).toLowerCase()));
       const toInsert = EXTENDED_TAGS
         .filter(n => !existingNames.has(n.toLowerCase()))
         .map(n => ({ name: n }));
-
-      // 2) If any new tags are needed, upsert them
       if (toInsert.length > 0) {
-        await supabase
-          .from('tags')
-          .upsert(toInsert, { onConflict: 'name' }); // assumes UNIQUE(name)
+        await supabase.from('tags').upsert(toInsert, { onConflict: 'name' });
       }
-
-      // 3) Load final list (sorted)
       const { data: finalList } = await supabase
         .from('tags')
         .select('id, name')
         .order('name', { ascending: true });
-
       if (!cancel) {
         setAllTags((finalList || []) as Tag[]);
         setLoadingTags(false);
@@ -118,7 +117,7 @@ export default function NewOfferPage() {
       if (!userId) throw new Error('You must be signed in.');
 
       const normalizedCity = isOnline ? null : (city ? titleCaseCity(city.trim()) : null);
-      const normalizedCountry = isOnline ? null : (country ? country.trim() : null);
+      const normalizedCountry = isOnline ? null : canonicalizeCountry(country) ?? null;
 
       const { data: inserted, error: insErr } = await supabase
         .from('offers')
@@ -155,8 +154,6 @@ export default function NewOfferPage() {
     }
   }
 
-  // Derived UI
-  const locationDisabled = isOnline;
   const locationHelper = isOnline
     ? 'Online offering — no location needed.'
     : 'Set your country and normalized city so this appears in the matching chapter.';
@@ -212,22 +209,37 @@ export default function NewOfferPage() {
               Online
             </label>
 
-            {/* Location (disabled when Online) */}
+            {/* Location (hidden when Online) */}
             {!isOnline && (
               <>
-                <input
-                  value={country}
-                  onChange={(e) => setCountry(e.target.value)}
-                  placeholder="Country"
-                  className="grow rounded border px-3 py-2"
-                />
-                <input
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  onBlur={() => setCity(c => titleCaseCity(c))}
-                  placeholder="City"
-                  className="grow rounded border px-3 py-2"
-                />
+                {/* Country with type-ahead */}
+                <div className="grow">
+                  <label className="block text-xs text-gray-600">Country</label>
+                  <input
+                    list="hx-countries"
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                    placeholder="Start typing to search…"
+                    className="w-full rounded border px-3 py-2"
+                  />
+                  <datalist id="hx-countries">
+                    {COUNTRIES.map((c) => (
+                      <option key={c} value={c} />
+                    ))}
+                  </datalist>
+                </div>
+
+                {/* City (normalize on blur) */}
+                <div className="grow">
+                  <label className="block text-xs text-gray-600">City</label>
+                  <input
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    onBlur={() => setCity((c) => titleCaseCity(c))}
+                    placeholder="City"
+                    className="w-full rounded border px-3 py-2"
+                  />
+                </div>
               </>
             )}
           </div>
