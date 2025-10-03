@@ -48,6 +48,11 @@ export default function ClientHeaderNav() {
       <div className="flex flex-wrap items-center gap-3">
         <Link href="/" className="underline-offset-4 hover:underline">Home</Link>
 
+        {/* NEW: Global Exchange (no dropdown) */}
+        <Link href="/global" className="hx-btn hx-btn--secondary text-sm px-3 py-2">
+          Global Exchange
+        </Link>
+
         {/* Exchange menu */}
         <div className="relative">
           <button
@@ -104,7 +109,7 @@ export default function ClientHeaderNav() {
               <Link href="/chapters" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
                 Explore Chapters
               </Link>
-              {/* keep the existing route you use for starting a chapter */}
+              {/* keep your existing start route */}
               <Link href="/chapters/start" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
                 Start a Chapter
               </Link>

@@ -43,12 +43,15 @@ export default function HomePage() {
             <span className="hx-btn hx-btn--outline-primary">Checking…</span>
           ) : user ? (
             <>
-              <Link href="/offers/new" className="hx-btn hx-btn--outline-primary">Share My Value</Link>
+              <Link href="/offers/new" className="hx-btn hx-btn--outline-primary">New Offer</Link>
               <Link href="/profile" className="hx-btn hx-btn--outline-primary">Create Space</Link>
             </>
           ) : (
             <Link href="/sign-in" className="hx-btn hx-btn--outline-primary">Join the Community</Link>
           )}
+          {/* Quick access to About & Guidelines on this page */}
+          <Link href="#about" className="hx-btn hx-btn--secondary">About</Link>
+          <Link href="#guidelines" className="hx-btn hx-btn--secondary">Community Guidelines</Link>
         </div>
       </section>
 
@@ -61,7 +64,7 @@ export default function HomePage() {
             </h2>
             <p className="mx-auto mt-2 max-w-2xl text-[var(--hx-muted)]">
               Harmonic Exchange is a post-currency, gift-first way of sharing value. People offer
-              <strong> time</strong>, <strong> products</strong>, <strong> services</strong>, <strong> presence</strong>,
+              <strong> time</strong>, <strong> products</strong>, <strong> services</strong>, <strong> education</strong>, <strong> coaching</strong>, <strong> presence</strong>,
               and <strong> creativity</strong>. Everything is given freely and received with dignity.
             </p>
           </div>
@@ -70,6 +73,17 @@ export default function HomePage() {
 
       {/* Wave ABOVE the Why section (white background) */}
       <WaveDivider />
+
+      {/* “About the Movement” */}
+      <section id="about" className="bg-white">
+        <div className="mx-auto max-w-6xl px-4 pt-8 pb-10 sm:pt-10 sm:pb-12">
+          <h3 className="text-center text-2xl font-bold">About the Movement</h3>
+          <p className="mx-auto mt-3 max-w-3xl text-center text-[var(--hx-muted)]">
+            Harmonic Exchange explores a world where human value flows freely—guided by resonance, trust, and mutual care.
+            We’re prototyping a community-led, post-currency practice where people connect, offer, and receive without obligation or tallying.
+          </p>
+        </div>
+      </section>
 
       {/* “Why” as a 2-column block on cream */}
       <section style={{ background: 'var(--hx-cream)' }}>
@@ -88,9 +102,8 @@ export default function HomePage() {
           <div>
             <h3 className="hx-heading-title text-2xl font-bold">Why Harmonic Exchange is different</h3>
             <div className="hx-heading-accent" />
-            <p className="mt-4 mx-auto max-w-prose text-center font-semibold text-[var(--hx-muted)]">
-              This isn’t bartering or transactional. It’s a flow economy where value is shared, not counted,
-              and guided by resonance, trust, and intuitive reciprocity.
+            <p className="mt-4 mx-auto max-w-prose text-center font-semibold text[--hx-muted] text-[var(--hx-muted)]">
+              This isn’t bartering or transactional. It’s a flow economy where value is shared—not counted—and guided by resonance, trust, and intuitive reciprocity.
             </p>
 
             <div className="mt-6 space-y-4">
@@ -123,7 +136,7 @@ export default function HomePage() {
             <Step
               n="1"
               title="Share My Value"
-              body="Create an offering with a short description and image. Offerings can be time, products, services, presence, or creativity."
+              body="Create an offering with a short description and image. Offerings can be time, products, services, education, coaching, presence, or creativity."
             />
             <Step
               n="2"
@@ -144,10 +157,10 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Agreements — brand gradient */}
-      <section className="hx-section hx-section--brand">
+      {/* Community Guidelines — brand gradient */}
+      <section id="guidelines" className="hx-section hx-section--brand">
         <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
-          <h3 className="text-center text-2xl font-bold text-white">Community agreements</h3>
+          <h3 className="text-center text-2xl font-bold text-white">Community Guidelines</h3>
           <ul className="mx-auto mt-6 max-w-3xl list-disc space-y-2 pl-6 text-white/90">
             <li>Honor consent, boundaries, and safety—always.</li>
             <li>Use clear, kind communication.</li>
@@ -163,7 +176,7 @@ export default function HomePage() {
       </section>
 
       <footer className="border-t">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-6 text-sm text-[var(--hx-muted)]">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-6 text-sm text[--hx-muted] text-[var(--hx-muted)]">
           <span>© {new Date().getFullYear()} Harmonic Exchange</span>
           <div className="flex gap-4">
             <Link href="/browse" className="hx-link">Offerings</Link>
