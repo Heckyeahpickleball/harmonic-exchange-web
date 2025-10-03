@@ -68,8 +68,7 @@ export default function ChapterPage() {
   const [isAnchor, setIsAnchor] = useState(false);
 
   const [events, setEvents] = useState<EventRow[]>([]);
-  const [offers, setOffers] = useState<OfferPreview[]>([]);
-  const [offerQ, setOfferQ] = useState('');
+  const [offers, setOffers] = useState<OfferPreview[]>([]); // offers explicitly attached to this chapter
 
   // Auto-populated carousel under About (local + online)
   const [cityOffers, setCityOffers] = useState<CityOffer[] | null>(null);
@@ -148,10 +147,7 @@ export default function ChapterPage() {
         }
 
         // 2) Members
-        const { data: gm } = await supabase
-          .from('group_members')
-          .select('profile_id,role')
-          .eq('group_id', gRow.id);
+        const { data: gm } = await supabase.from('group_members').select('profile_id,role').eq('group_id', gRow.id);
         const ids = (gm || []).map((r: any) => r.profile_id);
         const { data: profs } = ids.length
           ? await supabase.from('profiles').select('id,display_name').in('id', ids)
@@ -217,7 +213,7 @@ export default function ChapterPage() {
         );
         if (!cancelled) setPosts(pList);
 
-        // 5) Offers explicitly attached to this group (kept list below)
+        // 5) Offers explicitly attached to this group (kept scroller below)
         const { data: oRows } = await supabase
           .from('offers')
           .select('id,title,status,created_at,owner_id,images')
@@ -251,24 +247,40 @@ export default function ChapterPage() {
           if (hasCity && hasCountry) {
             const { data, error } = await supabase
               .from('offers')
-              .select('id,title,images,owner_id,created_at,city,country,status,online')
+              .select('id,title,images,owner_id,created_at,city,country,status')
               .eq('status', 'active')
               .ilike('city', (gRow.city || '').trim())
               .ilike('country', (gRow.country || '').trim())
               .limit(50);
-            if (error) throw error;
-            localRows = data || [];
+            if (!error) localRows = data || [];
           }
 
-          const { data: onlineRows, error: onErr } = await supabase
-            .from('offers')
-            .select('id,title,images,owner_id,created_at,city,country,status,online')
-            .eq('status', 'active')
-            .eq('online', true)
-            .limit(50);
-          if (onErr) throw onErr;
+          // Try online=true; if that column name doesn't exist, fall back to is_online=true.
+          let onlineRows: any[] = [];
+          {
+            const baseSelect = 'id,title,images,owner_id,created_at,city,country,status';
+            const tryOnline = await supabase
+              .from('offers')
+              .select(baseSelect)
+              .eq('status', 'active')
+              // @ts-ignore — first try 'online', may fail on some schemas
+              .eq('online', true)
+              .limit(50);
+            if (!tryOnline.error) {
+              onlineRows = tryOnline.data || [];
+            } else {
+              const tryIsOnline = await supabase
+                .from('offers')
+                .select(baseSelect)
+                .eq('status', 'active')
+                // @ts-ignore — fallback for schemas using 'is_online'
+                .eq('is_online', true)
+                .limit(50);
+              if (!tryIsOnline.error) onlineRows = tryIsOnline.data || [];
+            }
+          }
 
-          const allRows = [...localRows, ...(onlineRows || [])];
+          const allRows = [...localRows, ...onlineRows];
 
           // De-dupe by id, newest first
           const byId = new Map<string, any>();
@@ -316,11 +328,6 @@ export default function ChapterPage() {
   }, [slug]);
 
   const anchors = useMemo(() => members.filter((m) => m.role === 'anchor'), [members]);
-  const filteredOffers = useMemo(() => {
-    const q = offerQ.trim().toLowerCase();
-    if (!q) return offers;
-    return offers.filter((o) => o.title.toLowerCase().includes(q));
-  }, [offers, offerQ]);
 
   async function joinChapter() {
     if (!group) return;
@@ -459,56 +466,6 @@ export default function ChapterPage() {
     }
   }
 
-  async function createEvent() {
-    if (!group) return;
-    setMsg('');
-    setCreatingEvent(true);
-    try {
-      if (!evTitle.trim() || !evStart) {
-        setMsg('Title and start time are required.');
-        setCreatingEvent(false);
-        return;
-      }
-      const starts_at = toIsoLocal(evStart);
-      const ends_at = evEnd ? toIsoLocal(evEnd) : null;
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) {
-        router.push('/signin?next=' + encodeURIComponent(`/chapters/${group.slug}`));
-        return;
-      }
-      const { data, error } = await supabase
-        .from('group_events')
-        .insert({
-          group_id: group.id,
-          title: evTitle.trim(),
-          description: evDesc.trim() || null,
-          starts_at,
-          ends_at,
-          is_online: evOnline,
-          location: evOnline ? null : (evLocation.trim() || null),
-        })
-        .select('id,title,description,starts_at,ends_at,location,is_online')
-        .single();
-      if (error) throw error;
-      setEvents((prev) =>
-        [...prev, { ...data!, rsvp_count: 0, i_rsvped: false }].sort(
-          (a, b) => +new Date(a.starts_at) - +new Date(b.starts_at)
-        )
-      );
-      setEvTitle('');
-      setEvDesc('');
-      setEvStart('');
-      setEvEnd('');
-      setEvOnline(false);
-      setEvLocation('');
-      setShowEventForm(false);
-    } catch (e: any) {
-      setMsg(e?.message ?? 'Failed to create event.');
-    } finally {
-      setCreatingEvent(false);
-    }
-  }
-
   if (loading) return <div className="max-w-5xl p-4 text-sm text-gray-600">Loading chapter…</div>;
   if (!group) {
     return (
@@ -602,6 +559,9 @@ export default function ChapterPage() {
             </div>
           )}
         </div>
+
+        {/* Soft separation so the carousel feels like its own block */}
+        <div className="mt-4 border-t border-neutral-200" />
 
         {/* Auto-populated carousel (Local + Online) */}
         {cityOffers && cityOffers.length > 0 && (
@@ -871,55 +831,6 @@ export default function ChapterPage() {
             ))
           )}
         </div>
-      </section>
-
-      {/* Offers list with right-side thumbnails */}
-      <section className="hx-card p-4 sm:p-6">
-        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg font-semibold">Chapter offerings</h2>
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600">Filter</label>
-            <input
-              value={offerQ}
-              onChange={(e) => setOfferQ(e.target.value)}
-              className="rounded border px-2 py-1 text-sm"
-              placeholder="Search titles…"
-            />
-          </div>
-        </div>
-
-        {filteredOffers.length === 0 ? (
-          <p className="text-sm text-gray-600">No active offerings yet.</p>
-        ) : (
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {filteredOffers.map((o) => (
-              <li key={o.id} className="rounded border p-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex-1">
-                    <div className="font-medium">{o.title}</div>
-                    <div className="mt-1 text-sm text-gray-600">
-                      by {o.owner_name || o.owner_id.slice(0, 8)} • {new Date(o.created_at).toLocaleDateString()}
-                    </div>
-                    <div className="mt-3">
-                      <Link href={`/offers/${o.id}`} className="hx-btn hx-btn--primary">
-                        Ask to Receive
-                      </Link>
-                    </div>
-                  </div>
-                  <div className="ml-2 h-16 w-24 shrink-0 overflow-hidden rounded border">
-                    {o.thumb ? (
-                      <img src={o.thumb} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-xs text-gray-500 bg-gray-50">
-                        No image
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
       </section>
 
       {msg && <p className="text-sm text-amber-700">{msg}</p>}
