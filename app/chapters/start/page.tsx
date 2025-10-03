@@ -14,7 +14,20 @@ function slugify(s: string) {
     .toLowerCase();
 }
 
-// Recommended About template; we lightly interpolate the city if provided.
+// ISO-ish country list (names only). Keep small and sensible; can expand later.
+const COUNTRIES = [
+  'Afghanistan','Albania','Algeria','Argentina','Armenia','Australia','Austria','Bangladesh','Belgium','Bolivia',
+  'Bosnia and Herzegovina','Brazil','Bulgaria','Canada','Chile','China','Colombia','Costa Rica','Croatia','Cuba',
+  'Cyprus','Czechia','Denmark','Dominican Republic','Ecuador','Egypt','El Salvador','Estonia','Finland','France',
+  'Georgia','Germany','Ghana','Greece','Guatemala','Honduras','Hungary','Iceland','India','Indonesia','Iran',
+  'Iraq','Ireland','Israel','Italy','Jamaica','Japan','Jordan','Kenya','Kuwait','Latvia','Lebanon','Lithuania',
+  'Luxembourg','Malaysia','Malta','Mexico','Moldova','Morocco','Nepal','Netherlands','New Zealand','Nigeria',
+  'North Macedonia','Norway','Pakistan','Panama','Paraguay','Peru','Philippines','Poland','Portugal','Qatar',
+  'Romania','Russia','Saudi Arabia','Serbia','Singapore','Slovakia','Slovenia','South Africa','South Korea',
+  'Spain','Sri Lanka','Sweden','Switzerland','Taiwan','Tanzania','Thailand','Tunisia','Turkey','Uganda',
+  'Ukraine','United Arab Emirates','United Kingdom','United States','Uruguay','Venezuela','Vietnam','Zambia','Zimbabwe'
+];
+
 function buildRecommendedAbout(city?: string, country?: string) {
   const where = [city?.trim(), country?.trim()].filter(Boolean).join(', ');
   return (
@@ -26,21 +39,28 @@ New members are welcome to observe, share, or simply be present. Come as you are
   );
 }
 
+function titleCaseCity(s: string) {
+  return s
+    .toLowerCase()
+    .split(/[\s-]+/)
+    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(' ')
+    .replace(/\b(And|Of|The|De|Da|La|Le|Van|Von)\b/g, (m) => m.toLowerCase());
+}
+
 export default function StartChapterPage() {
   const router = useRouter();
   const [city, setCity] = useState('');
   const [country, setCountry] = useState('');
 
-  // Start with our recommended text; keep it editable.
   const [about, setAbout] = useState(buildRecommendedAbout('', ''));
   const [agree, setAgree] = useState(false);
   const [msg, setMsg] = useState<string>('');
   const [busy, setBusy] = useState(false);
 
   // Live preview of auto-name
-  const autoName = useMemo(() => `Harmonic Exchange- ${city || 'City'}`, [city]);
+  const autoName = useMemo(() => `Harmonic Exchange — ${city || 'City'}`, [city]);
 
-  // If the user clicks "Use recommended", rebuild using current city/country.
   function resetAboutToRecommended() {
     setAbout(buildRecommendedAbout(city, country));
   }
@@ -50,7 +70,8 @@ export default function StartChapterPage() {
     setMsg('');
 
     if (!agree) { setMsg('Please agree to the anchor commitment.'); return; }
-    if (!city || !country) { setMsg('City and country are required.'); return; }
+    if (!country) { setMsg('Country is required.'); return; }
+    if (!city) { setMsg('City is required.'); return; }
 
     setBusy(true);
     try {
@@ -60,11 +81,14 @@ export default function StartChapterPage() {
         return;
       }
 
-      // Auto-name
-      const name = `Harmonic Exchange- ${city.trim()}`;
+      const normalizedCity = titleCaseCity(city.trim());
+      const normalizedCountry = country.trim();
 
-      // Predictable unique slug: city-country[-n]
-      const baseSlug = slugify(`${city}-${country}`);
+      // Auto-name uses the normalized city
+      const name = `Harmonic Exchange — ${normalizedCity}`;
+
+      // slug: city-country lowercased (predictable)
+      const baseSlug = slugify(`${normalizedCity}-${normalizedCountry}`);
       let finalSlug = baseSlug;
       for (let i = 0; i < 12; i++) {
         const { data: exists } = await supabase
@@ -78,14 +102,14 @@ export default function StartChapterPage() {
 
       const insertPayload: any = {
         name,
-        city,
-        country,
+        city: normalizedCity,
+        country: normalizedCountry,
         about: about && about.trim().length ? about.trim() : null,
         slug: finalSlug,
         type: 'chapter',
         created_by: auth.user.id,
         anchor_agreed_at: new Date().toISOString(),
-        status: 'pending', // tolerated if column exists; ignored if not
+        status: 'pending',
       };
 
       const { data: gRow, error: gErr } = await supabase
@@ -95,14 +119,12 @@ export default function StartChapterPage() {
         .single();
       if (gErr) throw gErr;
 
-      // Creator becomes anchor
       await supabase.from('group_members').insert({
         group_id: gRow.id,
         profile_id: auth.user.id,
         role: 'anchor',
       });
 
-      // Redirect to chapter (creator can view even if pending)
       router.push(`/chapters/${gRow.slug}`);
     } catch (err: any) {
       console.error(err);
@@ -120,25 +142,36 @@ export default function StartChapterPage() {
       </p>
 
       <form onSubmit={onSubmit} className="mt-8 hx-card p-5 space-y-4">
-        {/* No "name" field — auto-named as "Harmonic Exchange- {city}" */}
+        {/* Country first (dropdown), then City (normalized) */}
         <div className="grid gap-4 sm:grid-cols-2">
-          <div>
+          <div className="sm:col-span-2">
+            <label className="block text-sm font-medium">Country</label>
+            <select
+              className="mt-1 w-full rounded border px-3 py-2"
+              value={country}
+              onChange={(e)=>setCountry(e.target.value)}
+              required
+            >
+              <option value="">Select a country…</option>
+              {COUNTRIES.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sm:col-span-2">
             <label className="block text-sm font-medium">City</label>
             <input
               className="mt-1 w-full rounded border px-3 py-2"
               value={city}
               onChange={(e)=>setCity(e.target.value)}
-              placeholder="Ottawa"
+              onBlur={() => setCity(c => titleCaseCity(c))}
+              placeholder="Start typing your city (e.g., Ottawa)"
+              required
             />
-          </div>
-          <div>
-            <label className="block text-sm font-medium">Country</label>
-            <input
-              className="mt-1 w-full rounded border px-3 py-2"
-              value={country}
-              onChange={(e)=>setCountry(e.target.value)}
-              placeholder="Canada"
-            />
+            <p className="mt-1 text-xs text-gray-600">
+              We normalize city names (e.g., “new york” → “New York”) so your offers map to the correct chapter.
+            </p>
           </div>
         </div>
 

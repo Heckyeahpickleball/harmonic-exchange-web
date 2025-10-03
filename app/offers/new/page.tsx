@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
@@ -9,6 +9,42 @@ import UploadImages from '@/components/UploadImages';
 
 type Tag = { id: number; name: string };
 type OfferType = 'product' | 'service' | 'time' | 'knowledge' | 'other';
+
+// Curated tag catalog to ensure *many* useful tags are available.
+// On load, we upsert anything missing into public.tags so TagMultiSelect has a rich set.
+// (De-duped, case-insensitive by name.)
+const EXTENDED_TAGS = [
+  // Services
+  'coaching','mentoring','therapy','listening','counseling','tutoring','teaching','editing','proofreading',
+  'translation','legal-advice','tax-help','accounting','career-support','resume-review','job-search',
+  // Education
+  'education','workshops','classes','skill-share','study-group','language-exchange','music-lessons',
+  // Wellness
+  'yoga','meditation','breathwork','somatics','reiki','massage','nutrition','fitness','qigong',
+  // Tech & creative
+  'web-development','design','ux','ui','branding','copywriting','photography','video','audio','podcasting',
+  'illustration','3d','ai-art','no-code','automation','data','analytics','devops','it-support',
+  // Home & community
+  'childcare','pet-care','house-sitting','garden','composting','repair','handyman','cooking','baking',
+  'food-share','rideshare','moving-help',
+  // Products & making
+  'handmade','art','prints','zines','crafts','jewelry','woodworking','ceramics','clothing','upcycling',
+  // Presence & gifts
+  'presence','listening-circle','peer-support','circle-facilitation','conflict-resolution','mediation',
+  // Online / remote
+  'remote','online','asynchronous',
+  // Misc
+  'events','organizing','community-building','fundraising','grant-writing'
+];
+
+function titleCaseCity(s: string) {
+  return s
+    .toLowerCase()
+    .split(/[\s-]+/)
+    .map(w => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(' ')
+    .replace(/\b(And|Of|The|De|Da|La|Le|Van|Von)\b/g, (m) => m.toLowerCase());
+}
 
 export default function NewOfferPage() {
   const router = useRouter();
@@ -29,16 +65,42 @@ export default function NewOfferPage() {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
+  // Seed + load tags once
   useEffect(() => {
     let cancel = false;
     (async () => {
       setLoadingTags(true);
-      const { data, error } = await supabase
+
+      // 1) Fetch existing tags
+      const { data: existing, error: fetchErr } = await supabase
+        .from('tags')
+        .select('id, name');
+      if (fetchErr) {
+        // even if it fails, we still try to render a minimal UI
+        if (!cancel) setLoadingTags(false);
+        return;
+      }
+
+      const existingNames = new Set((existing || []).map(t => String(t.name).toLowerCase()));
+      const toInsert = EXTENDED_TAGS
+        .filter(n => !existingNames.has(n.toLowerCase()))
+        .map(n => ({ name: n }));
+
+      // 2) If any new tags are needed, upsert them
+      if (toInsert.length > 0) {
+        await supabase
+          .from('tags')
+          .upsert(toInsert, { onConflict: 'name' }); // assumes UNIQUE(name)
+      }
+
+      // 3) Load final list (sorted)
+      const { data: finalList } = await supabase
         .from('tags')
         .select('id, name')
         .order('name', { ascending: true });
+
       if (!cancel) {
-        if (!error && data) setAllTags(data as Tag[]);
+        setAllTags((finalList || []) as Tag[]);
         setLoadingTags(false);
       }
     })();
@@ -55,16 +117,19 @@ export default function NewOfferPage() {
       const userId = auth.user?.id;
       if (!userId) throw new Error('You must be signed in.');
 
+      const normalizedCity = isOnline ? null : (city ? titleCaseCity(city.trim()) : null);
+      const normalizedCountry = isOnline ? null : (country ? country.trim() : null);
+
       const { data: inserted, error: insErr } = await supabase
         .from('offers')
         .insert({
           owner_id: userId,
-          title,
-          description,
+          title: title.trim(),
+          description: description.trim() || null,
           offer_type: offerType,
           is_online: isOnline,
-          city: isOnline ? null : (city || null),
-          country: isOnline ? null : (country || null),
+          city: normalizedCity,
+          country: normalizedCountry,
           images,
           status: 'pending',
         })
@@ -89,6 +154,12 @@ export default function NewOfferPage() {
       setSubmitting(false);
     }
   }
+
+  // Derived UI
+  const locationDisabled = isOnline;
+  const locationHelper = isOnline
+    ? 'Online offering — no location needed.'
+    : 'Set your country and normalized city so this appears in the matching chapter.';
 
   return (
     <section className="max-w-3xl">
@@ -131,7 +202,7 @@ export default function NewOfferPage() {
             </select>
           </div>
 
-          <div className="sm:col-span-2 flex items-end gap-4">
+          <div className="sm:col-span-2 flex flex-wrap items-end gap-3">
             <label className="inline-flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -141,23 +212,26 @@ export default function NewOfferPage() {
               Online
             </label>
 
+            {/* Location (disabled when Online) */}
             {!isOnline && (
               <>
-                <input
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  placeholder="City"
-                  className="grow rounded border px-3 py-2"
-                />
                 <input
                   value={country}
                   onChange={(e) => setCountry(e.target.value)}
                   placeholder="Country"
                   className="grow rounded border px-3 py-2"
                 />
+                <input
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  onBlur={() => setCity(c => titleCaseCity(c))}
+                  placeholder="City"
+                  className="grow rounded border px-3 py-2"
+                />
               </>
             )}
           </div>
+          <p className="sm:col-span-3 text-xs text-gray-500">{locationHelper}</p>
         </div>
 
         <div>
@@ -168,12 +242,13 @@ export default function NewOfferPage() {
             onChange={setTags}
             placeholder={loadingTags ? 'Loading tags…' : 'Type to search, press Enter to add'}
           />
-          <p className="mt-1 text-xs text-gray-500">Tip: add a few relevant tags.</p>
+          <p className="mt-1 text-xs text-gray-500">
+            Add a few relevant tags (e.g., coaching, education, childcare, web-development).
+          </p>
         </div>
 
         <UploadImages value={images} onChange={setImages} />
 
-        {/* Submit — unified teal button styling */}
         <button
           type="submit"
           disabled={submitting}
