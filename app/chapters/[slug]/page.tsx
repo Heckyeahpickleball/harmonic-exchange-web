@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter, notFound } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import PostItem from '@/components/PostItem';
 import CityOffersRail, { CityOffer } from '@/components/CityOffersRail';
@@ -42,7 +42,6 @@ type OfferPreview = {
   owner_id: string;
   owner_name?: string | null;
   images?: string[] | null;
-  cover_image?: string | null;
   thumb?: string | null;
 };
 
@@ -72,7 +71,7 @@ export default function ChapterPage() {
   const [offers, setOffers] = useState<OfferPreview[]>([]);
   const [offerQ, setOfferQ] = useState('');
 
-  // NEW: city-matched offers to show under About
+  // Auto-populated carousel under About (local + online)
   const [cityOffers, setCityOffers] = useState<CityOffer[] | null>(null);
 
   const [posts, setPosts] = useState<FeedPost[]>([]);
@@ -104,9 +103,10 @@ export default function ChapterPage() {
     const p = (row as any).profiles;
     return { ...row, profiles: Array.isArray(p) ? (p?.[0] ?? null) : p ?? null };
   }
-  function isStoragePath(s: string) { return !!s && !/^https?:\/\//i.test(s); }
+  function isStoragePath(s: string) {
+    return !!s && !/^https?:\/\//i.test(s);
+  }
   function publicUrlForPath(path: string) {
-    // your images live in post-media
     return supabase.storage.from('post-media').getPublicUrl(path).data.publicUrl;
   }
   function normalizeImageList(arr: any): string[] {
@@ -114,8 +114,8 @@ export default function ChapterPage() {
     if (Array.isArray(arr)) return arr.map(String);
     return [String(arr)];
   }
-  function offerThumb(o: { cover_image?: string | null; images?: string[] | null }): string | null {
-    const candidate = o.cover_image ?? (Array.isArray(o.images) ? o.images[0] : null);
+  function offerThumb(o: { images?: string[] | null }): string | null {
+    const candidate = Array.isArray(o.images) && o.images.length > 0 ? o.images[0] : null;
     if (!candidate) return null;
     return isStoragePath(candidate) ? publicUrlForPath(String(candidate)) : String(candidate);
   }
@@ -123,26 +123,31 @@ export default function ChapterPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLoading(true); setMsg('');
+      setLoading(true);
+      setMsg('');
       try {
         const { data: auth } = await supabase.auth.getUser();
         const uid = auth.user?.id ?? null;
         if (!cancelled) setMeId(uid);
 
-        // Load group
+        // 1) Load group
         const { data: gRow, error: gErr } = await supabase
           .from('groups')
           .select('id,slug,name,about,city,country,status,created_by,created_at')
           .eq('slug', slug)
           .maybeSingle();
         if (gErr) throw gErr;
-        if (!gRow || (gRow.status !== 'active' && uid !== gRow.created_by)) { notFound(); return; }
+        if (!gRow) {
+          setMsg('Chapter not found.');
+          setLoading(false);
+          return;
+        }
         if (!cancelled) {
           setGroup(gRow as Group);
           setAboutDraft((gRow as Group).about ?? '');
         }
 
-        // Members
+        // 2) Members
         const { data: gm } = await supabase
           .from('group_members')
           .select('profile_id,role')
@@ -154,7 +159,9 @@ export default function ChapterPage() {
         const nameMap = new Map<string, string | null>();
         for (const p of (profs || []) as any[]) nameMap.set(p.id, p.display_name ?? null);
         const mList: Member[] = (gm || []).map((r: any) => ({
-          profile_id: r.profile_id, role: r.role, display_name: nameMap.get(r.profile_id) ?? null,
+          profile_id: r.profile_id,
+          role: r.role,
+          display_name: nameMap.get(r.profile_id) ?? null,
         }));
         mList.sort((a, b) => (a.role === 'anchor' && b.role !== 'anchor' ? -1 : 1));
         if (!cancelled) {
@@ -164,7 +171,7 @@ export default function ChapterPage() {
           setIsAnchor(mine?.role === 'anchor' || uid === gRow.created_by);
         }
 
-        // Events
+        // 3) Events
         const { data: eRows } = await supabase
           .from('group_events')
           .select('id,title,description,starts_at,ends_at,location,is_online')
@@ -177,8 +184,13 @@ export default function ChapterPage() {
           const eids = eList.map((e) => e.id);
           const [cRes, mRes] = await Promise.all([
             supabase.from('event_rsvps').select('event_id').in('event_id', eids),
-            uid ? supabase.from('event_rsvps').select('event_id').in('event_id', eids).eq('profile_id', uid)
-                : Promise.resolve({ data: [] as any[] }),
+            uid
+              ? supabase
+                  .from('event_rsvps')
+                  .select('event_id')
+                  .in('event_id', eids)
+                  .eq('profile_id', uid)
+              : Promise.resolve({ data: [] as any[] }),
           ]);
           const counts = new Map<string, number>();
           for (const r of ((cRes.data || []) as any[])) counts.set(r.event_id, (counts.get(r.event_id) || 0) + 1);
@@ -187,7 +199,7 @@ export default function ChapterPage() {
         }
         if (!cancelled) setEvents(eList);
 
-        // Posts (chapter feed)
+        // 4) Posts (chapter feed)
         const { data: pRows, error: pErr } = await supabase
           .from('posts')
           .select('id,profile_id,body,created_at,images,group_id,profiles(display_name)')
@@ -195,16 +207,20 @@ export default function ChapterPage() {
           .order('created_at', { ascending: false })
           .limit(50);
         if (pErr) throw pErr;
-        const pList: FeedPost[] = (pRows || []).map((row: any) => normalizeProfile({
-          ...row,
-          images: normalizeImageList(row.images).map((u: string) => (isStoragePath(u) ? publicUrlForPath(u) : u)),
-        }));
+        const pList: FeedPost[] = (pRows || []).map((row: any) =>
+          normalizeProfile({
+            ...row,
+            images: normalizeImageList(row.images).map((u: string) =>
+              isStoragePath(u) ? publicUrlForPath(u) : u
+            ),
+          })
+        );
         if (!cancelled) setPosts(pList);
 
-        // Offers attached to this group explicitly (unchanged)
+        // 5) Offers explicitly attached to this group (kept list below)
         const { data: oRows } = await supabase
           .from('offers')
-          .select('id,title,status,created_at,owner_id,images,cover_image')
+          .select('id,title,status,created_at,owner_id,images')
           .eq('group_id', gRow.id)
           .eq('status', 'active')
           .order('created_at', { ascending: false })
@@ -212,37 +228,70 @@ export default function ChapterPage() {
         let oList: OfferPreview[] = (oRows || []) as any[];
         if (oList.length) {
           const ids2 = Array.from(new Set(oList.map((o) => o.owner_id)));
-          const { data: profs3 } = await supabase.from('profiles').select('id,display_name').in('id', ids2);
+          const { data: profs3 } = await supabase
+            .from('profiles')
+            .select('id,display_name')
+            .in('id', ids2);
           const map3 = new Map<string, string | null>();
           for (const p of (profs3 || []) as any[]) map3.set(p.id, p.display_name ?? null);
-          oList = oList.map((o) => ({ ...o, owner_name: map3.get(o.owner_id) ?? null, thumb: offerThumb(o) }));
+          oList = oList.map((o) => ({
+            ...o,
+            owner_name: map3.get(o.owner_id) ?? null,
+            thumb: offerThumb(o),
+          }));
         }
         if (!cancelled) setOffers(oList);
 
-        // NEW: city-matched offers (auto population under About)
-        const hasCity = (gRow.city || '').trim().length > 0;
-        const hasCountry = (gRow.country || '').trim().length > 0;
-        if (hasCity && hasCountry) {
-          const { data: cityRows, error: cityErr } = await supabase
-            .from('offers')
-            .select('id,title,images,cover_image,owner_id,created_at,city,country,status')
-            .eq('status', 'active')
-            .ilike('city', (gRow.city || '').trim())
-            .ilike('country', (gRow.country || '').trim())
-            .order('created_at', { ascending: false })
-            .limit(24);
-          if (cityErr) throw cityErr;
+        // 6) Local (city+country) OR Online offers for the carousel
+        {
+          const hasCity = (gRow.city || '').trim().length > 0;
+          const hasCountry = (gRow.country || '').trim().length > 0;
 
-          const ownerIds = Array.from(new Set((cityRows || []).map((r: any) => r.owner_id)));
-          const { data: owners } = ownerIds.length
-            ? await supabase.from('profiles').select('id,display_name').in('id', ownerIds)
-            : { data: [] as any[] };
+          let localRows: any[] = [];
+          if (hasCity && hasCountry) {
+            const { data, error } = await supabase
+              .from('offers')
+              .select('id,title,images,owner_id,created_at,city,country,status,online')
+              .eq('status', 'active')
+              .ilike('city', (gRow.city || '').trim())
+              .ilike('country', (gRow.country || '').trim())
+              .limit(50);
+            if (error) throw error;
+            localRows = data || [];
+          }
+
+          const { data: onlineRows, error: onErr } = await supabase
+            .from('offers')
+            .select('id,title,images,owner_id,created_at,city,country,status,online')
+            .eq('status', 'active')
+            .eq('online', true)
+            .limit(50);
+          if (onErr) throw onErr;
+
+          const allRows = [...localRows, ...(onlineRows || [])];
+
+          // De-dupe by id, newest first
+          const byId = new Map<string, any>();
+          for (const row of allRows) {
+            const prev = byId.get(row.id);
+            if (!prev || +new Date(row.created_at) > +new Date(prev.created_at)) byId.set(row.id, row);
+          }
+          const merged = Array.from(byId.values())
+            .sort((a: any, b: any) => +new Date(b.created_at) - +new Date(a.created_at))
+            .slice(0, 24);
+
+          // Owner names
+          const ownerIds = Array.from(new Set(merged.map((r: any) => r.owner_id)));
+          const { data: owners } =
+            ownerIds.length
+              ? await supabase.from('profiles').select('id,display_name').in('id', ownerIds)
+              : { data: [] as any[] };
           const nameById = new Map<string, string | null>();
           for (const p of (owners || []) as any[]) nameById.set(p.id, p.display_name ?? null);
 
-          const cityList: CityOffer[] = (cityRows || []).map((row: any) => {
-            const cover = row.cover_image ?? (Array.isArray(row.images) ? row.images[0] : null);
-            const thumb_url = cover ? (isStoragePath(cover) ? publicUrlForPath(cover) : String(cover)) : null;
+          const cityList: CityOffer[] = merged.map((row: any) => {
+            const first = Array.isArray(row.images) && row.images.length ? row.images[0] : null;
+            const thumb_url = first ? (isStoragePath(first) ? publicUrlForPath(first) : String(first)) : null;
             return {
               id: row.id,
               title: row.title ?? 'Untitled offer',
@@ -252,8 +301,6 @@ export default function ChapterPage() {
           });
 
           if (!cancelled) setCityOffers(cityList);
-        } else {
-          if (!cancelled) setCityOffers(null);
         }
       } catch (e: any) {
         console.error(e);
@@ -262,7 +309,9 @@ export default function ChapterPage() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { previewUrls.forEach((u) => URL.revokeObjectURL(u)); };
+    return () => {
+      previewUrls.forEach((u) => URL.revokeObjectURL(u));
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
@@ -278,24 +327,44 @@ export default function ChapterPage() {
     setMsg('');
     try {
       const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) { router.push('/signin?next=' + encodeURIComponent(`/chapters/${group.slug}`)); return; }
-      const { error } = await supabase.from('group_members')
+      if (!auth.user) {
+        router.push('/signin?next=' + encodeURIComponent(`/chapters/${group.slug}`));
+        return;
+      }
+      const { error } = await supabase
+        .from('group_members')
         .insert({ group_id: group.id, profile_id: auth.user.id, role: 'member' });
       if (error) throw error;
       setIsMember(true);
-      setMembers((prev) => [...prev, { profile_id: auth.user.id, role: 'member', display_name: auth.user.user_metadata?.display_name ?? null }]);
-    } catch (e: any) { setMsg(e?.message ?? 'Failed to join chapter.'); }
+      setMembers((prev) => [
+        ...prev,
+        {
+          profile_id: auth.user.id,
+          role: 'member',
+          display_name: auth.user.user_metadata?.display_name ?? null,
+        },
+      ]);
+    } catch (e: any) {
+      setMsg(e?.message ?? 'Failed to join chapter.');
+    }
   }
   async function leaveChapter() {
     if (!group || !meId) return;
     setMsg('');
     if (!confirm('Leave this chapter?')) return;
     try {
-      const { error } = await supabase.from('group_members').delete().eq('group_id', group.id).eq('profile_id', meId);
+      const { error } = await supabase
+        .from('group_members')
+        .delete()
+        .eq('group_id', group.id)
+        .eq('profile_id', meId);
       if (error) throw error;
-      setIsMember(false); setIsAnchor(false);
+      setIsMember(false);
+      setIsAnchor(false);
       setMembers((prev) => prev.filter((m) => m.profile_id !== meId));
-    } catch (e: any) { setMsg(e?.message ?? 'Failed to leave chapter.'); }
+    } catch (e: any) {
+      setMsg(e?.message ?? 'Failed to leave chapter.');
+    }
   }
 
   async function saveAbout() {
@@ -303,41 +372,60 @@ export default function ChapterPage() {
     setMsg('');
     try {
       const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) { router.push('/signin'); return; }
+      if (!auth.user) {
+        router.push('/signin');
+        return;
+      }
       const about = aboutDraft.trim() || null;
       const { error } = await supabase.from('groups').update({ about }).eq('id', group.id);
       if (error) throw error;
-      setGroup((g) => (g ? { ...g, about } : g)); setEditingAbout(false);
-    } catch (e: any) { setMsg(e?.message ?? 'Failed to save About.'); }
+      setGroup((g) => (g ? { ...g, about } : g));
+      setEditingAbout(false);
+    } catch (e: any) {
+      setMsg(e?.message ?? 'Failed to save About.');
+    }
   }
 
   function removeImageAt(i: number) {
-    const next = postFiles.slice(); next.splice(i, 1);
+    const next = postFiles.slice();
+    next.splice(i, 1);
     setPostFiles(next);
     setPreviewUrls(next.map((f) => URL.createObjectURL(f)));
   }
   function clearAllImages() {
-    setPostFiles([]); setPreviewUrls([]);
+    setPostFiles([]);
+    setPreviewUrls([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
   async function uploadToPostMedia(file: File): Promise<string> {
     const { data: auth } = await supabase.auth.getUser();
-    const uid = auth.user?.id; if (!uid) throw new Error('Not signed in');
+    const uid = auth.user?.id;
+    if (!uid) throw new Error('Not signed in');
     const key = `${uid}/${Date.now()}_${file.name}`;
     const { error } = await supabase.storage.from('post-media').upload(key, file, {
-      cacheControl: '3600', upsert: true, contentType: file.type || 'image/*',
+      cacheControl: '3600',
+      upsert: true,
+      contentType: file.type || 'image/*',
     });
     if (error) throw error;
     return supabase.storage.from('post-media').getPublicUrl(key).data.publicUrl;
   }
   async function createPost() {
     if (!group) return;
-    setMsg(''); setPosting(true);
+    setMsg('');
+    setPosting(true);
     try {
       const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) { router.push('/signin?next=' + encodeURIComponent(`/chapters/${group.slug}`)); return; }
+      if (!auth.user) {
+        router.push('/signin?next=' + encodeURIComponent(`/chapters/${group.slug}`));
+        return;
+      }
       const text = postText.trim();
-      if (!text && postFiles.length === 0) { setMsg('Share a message or add at least one image.'); setPosting(false); return; }
+      if (!text && postFiles.length === 0) {
+        setMsg('Share a message or add at least one image.');
+        setPosting(false);
+        return;
+      }
       const urls: string[] = [];
       for (const f of postFiles) urls.push(await uploadToPostMedia(f));
 
@@ -362,7 +450,8 @@ export default function ChapterPage() {
         setPosts((prev) => [normalized, ...prev]);
       }
 
-      setPostText(''); clearAllImages();
+      setPostText('');
+      clearAllImages();
     } catch (e: any) {
       setMsg(e?.message ?? 'Could not post.');
     } finally {
@@ -372,28 +461,52 @@ export default function ChapterPage() {
 
   async function createEvent() {
     if (!group) return;
-    setMsg(''); setCreatingEvent(true);
+    setMsg('');
+    setCreatingEvent(true);
     try {
-      if (!evTitle.trim() || !evStart) { setMsg('Title and start time are required.'); setCreatingEvent(false); return; }
+      if (!evTitle.trim() || !evStart) {
+        setMsg('Title and start time are required.');
+        setCreatingEvent(false);
+        return;
+      }
       const starts_at = toIsoLocal(evStart);
       const ends_at = evEnd ? toIsoLocal(evEnd) : null;
       const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) { router.push('/signin?next=' + encodeURIComponent(`/chapters/${group.slug}`)); return; }
+      if (!auth.user) {
+        router.push('/signin?next=' + encodeURIComponent(`/chapters/${group.slug}`));
+        return;
+      }
       const { data, error } = await supabase
         .from('group_events')
         .insert({
-          group_id: group.id, title: evTitle.trim(), description: evDesc.trim() || null,
-          starts_at, ends_at, is_online: evOnline, location: evOnline ? null : (evLocation.trim() || null),
+          group_id: group.id,
+          title: evTitle.trim(),
+          description: evDesc.trim() || null,
+          starts_at,
+          ends_at,
+          is_online: evOnline,
+          location: evOnline ? null : (evLocation.trim() || null),
         })
         .select('id,title,description,starts_at,ends_at,location,is_online')
         .single();
       if (error) throw error;
       setEvents((prev) =>
-        [...prev, { ...data!, rsvp_count: 0, i_rsvped: false }].sort((a, b) => +new Date(a.starts_at) - +new Date(b.starts_at))
+        [...prev, { ...data!, rsvp_count: 0, i_rsvped: false }].sort(
+          (a, b) => +new Date(a.starts_at) - +new Date(b.starts_at)
+        )
       );
-      setEvTitle(''); setEvDesc(''); setEvStart(''); setEvEnd(''); setEvOnline(false); setEvLocation(''); setShowEventForm(false);
-    } catch (e: any) { setMsg(e?.message ?? 'Failed to create event.'); }
-    finally { setCreatingEvent(false); }
+      setEvTitle('');
+      setEvDesc('');
+      setEvStart('');
+      setEvEnd('');
+      setEvOnline(false);
+      setEvLocation('');
+      setShowEventForm(false);
+    } catch (e: any) {
+      setMsg(e?.message ?? 'Failed to create event.');
+    } finally {
+      setCreatingEvent(false);
+    }
   }
 
   if (loading) return <div className="max-w-5xl p-4 text-sm text-gray-600">Loading chapter…</div>;
@@ -402,7 +515,9 @@ export default function ChapterPage() {
       <div className="max-w-5xl p-4">
         <h1 className="text-xl font-semibold">Chapter not found</h1>
         <p className="mt-2 text-gray-600">The chapter you’re looking for doesn’t exist or isn’t public.</p>
-        <Link href="/chapters" className="mt-4 inline-block hx-btn hx-btn--outline-primary">Back to Chapters</Link>
+        <Link href="/chapters" className="mt-4 inline-block hx-btn hx-btn--outline-primary">
+          Back to Chapters
+        </Link>
       </div>
     );
   }
@@ -415,7 +530,15 @@ export default function ChapterPage() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold">{group.name}</h1>
             <div className="mt-1 text-sm text-gray-600">
-              {group.city || group.country ? (<>{group.city}{group.city && group.country ? ', ' : ''}{group.country}</>) : 'Location: —'}
+              {group.city || group.country ? (
+                <>
+                  {group.city}
+                  {group.city && group.country ? ', ' : ''}
+                  {group.country}
+                </>
+              ) : (
+                'Location: —'
+              )}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -423,10 +546,14 @@ export default function ChapterPage() {
               <>
                 <span className="rounded-full border px-3 py-1 text-sm">Member</span>
                 {isAnchor && <span className="rounded-full border px-3 py-1 text-sm">Anchor</span>}
-                <button onClick={leaveChapter} className="hx-btn hx-btn--outline-primary">Leave</button>
+                <button onClick={leaveChapter} className="hx-btn hx-btn--outline-primary">
+                  Leave
+                </button>
               </>
             ) : (
-              <button onClick={joinChapter} className="hx-btn hx-btn--primary">Join</button>
+              <button onClick={joinChapter} className="hx-btn hx-btn--primary">
+                Join
+              </button>
             )}
           </div>
         </div>
@@ -436,31 +563,54 @@ export default function ChapterPage() {
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-700">About this chapter</h3>
             {isAnchor && !editingAbout && (
-              <button onClick={() => setEditingAbout(true)} className="hx-btn hx-btn--outline-primary text-xs px-2 py-1">Edit About</button>
+              <button
+                onClick={() => setEditingAbout(true)}
+                className="hx-btn hx-btn--outline-primary text-xs px-2 py-1"
+              >
+                Edit About
+              </button>
             )}
           </div>
           {!editingAbout ? (
-            group.about ? <p className="max-w-prose whitespace-pre-wrap text-gray-800">{group.about}</p>
-                        : <p className="text-sm text-gray-600">No description yet.</p>
+            group.about ? (
+              <p className="max-w-prose whitespace-pre-wrap text-gray-800">{group.about}</p>
+            ) : (
+              <p className="text-sm text-gray-600">No description yet.</p>
+            )
           ) : (
             <div className="rounded border p-3">
-              <textarea className="w-full rounded border px-3 py-2 min-h-[160px]"
-                        value={aboutDraft} onChange={(e) => setAboutDraft(e.target.value)}
-                        placeholder="Write a short, welcoming description." />
+              <textarea
+                className="w-full rounded border px-3 py-2 min-h-[160px]"
+                value={aboutDraft}
+                onChange={(e) => setAboutDraft(e.target.value)}
+                placeholder="Write a short, welcoming description."
+              />
               <div className="mt-2 flex gap-2">
-                <button onClick={saveAbout} className="hx-btn hx-btn--primary">Save</button>
-                <button onClick={() => { setEditingAbout(false); setAboutDraft(group.about ?? ''); }} className="hx-btn hx-btn--secondary">Cancel</button>
+                <button onClick={saveAbout} className="hx-btn hx-btn--primary">
+                  Save
+                </button>
+                <button
+                  onClick={() => {
+                    setEditingAbout(false);
+                    setAboutDraft(group.about ?? '');
+                  }}
+                  className="hx-btn hx-btn--secondary"
+                >
+                  Cancel
+                </button>
               </div>
             </div>
           )}
         </div>
 
-        {/* NEW: City-matched offers carousel (immediately under About) */}
+        {/* Auto-populated carousel (Local + Online) */}
         {cityOffers && cityOffers.length > 0 && (
           <CityOffersRail
             offers={cityOffers}
-            title={`Local offerings in ${group.city}`}
-            seeAllHref={`/browse?city=${encodeURIComponent(group.city || '')}&country=${encodeURIComponent(group.country || '')}`}
+            title={`Local & online offerings${group.city ? ` in ${group.city}` : ''}`}
+            seeAllHref={`/browse?city=${encodeURIComponent(group.city || '')}&country=${encodeURIComponent(
+              group.country || ''
+            )}&online=true`}
           />
         )}
 
@@ -478,33 +628,50 @@ export default function ChapterPage() {
           </div>
         )}
 
-        {/* Existing simple offer scroller for group-attached offers (kept) */}
+        {/* Existing scroller for offers explicitly shared to this chapter */}
         {offers.length > 0 && (
           <div className="mt-6">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-700">Offers shared in this chapter</h3>
               <div className="flex items-center gap-2">
-                <button aria-label="Scroll left" className="rounded border px-2 py-1 text-sm"
-                        onClick={() => { const el = offerTrackRef.current; if (el) el.scrollBy({ left: -320, behavior: 'smooth' }); }}>
+                <button
+                  aria-label="Scroll left"
+                  className="rounded border px-2 py-1 text-sm"
+                  onClick={() => {
+                    const el = offerTrackRef.current;
+                    if (el) el.scrollBy({ left: -320, behavior: 'smooth' });
+                  }}
+                >
                   ‹
                 </button>
-                <button aria-label="Scroll right" className="rounded border px-2 py-1 text-sm"
-                        onClick={() => { const el = offerTrackRef.current; if (el) el.scrollBy({ left: 320, behavior: 'smooth' }); }}>
+                <button
+                  aria-label="Scroll right"
+                  className="rounded border px-2 py-1 text-sm"
+                  onClick={() => {
+                    const el = offerTrackRef.current;
+                    if (el) el.scrollBy({ left: 320, behavior: 'smooth' });
+                  }}
+                >
                   ›
                 </button>
               </div>
             </div>
             <div ref={offerTrackRef} className="flex gap-3 overflow-x-auto" style={{ scrollSnapType: 'x mandatory' }}>
               {offers.map((o) => (
-                <Link key={o.id} href={`/offers/${o.id}`}
-                      className="min-w-[280px] max-w-[280px] rounded border p-3 hover:shadow"
-                      style={{ scrollSnapAlign: 'start' }}>
+                <Link
+                  key={o.id}
+                  href={`/offers/${o.id}`}
+                  className="min-w-[280px] max-w-[280px] rounded border p-3 hover:shadow"
+                  style={{ scrollSnapAlign: 'start' }}
+                >
                   <div className="flex items-start gap-3">
                     <div className="min-w-16 max-w-16 h-16 rounded overflow-hidden border">
                       {o.thumb ? (
                         <img src={o.thumb} alt="" className="h-full w-full object-cover" />
                       ) : (
-                        <div className="flex h-full w-full items-center justify-center text-xs text-gray-500 bg-gray-50">No image</div>
+                        <div className="flex h-full w-full items-center justify-center text-xs text-gray-500 bg-gray-50">
+                          No image
+                        </div>
                       )}
                     </div>
                     <div className="flex-1">
@@ -537,31 +704,56 @@ export default function ChapterPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium">Title</label>
-                <input className="mt-1 w-full rounded border px-3 py-2" value={evTitle} onChange={(e)=>setEvTitle(e.target.value)} placeholder="Share Circle — May"/>
+                <input
+                  className="mt-1 w-full rounded border px-3 py-2"
+                  value={evTitle}
+                  onChange={(e) => setEvTitle(e.target.value)}
+                  placeholder="Share Circle — May"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium">Starts</label>
-                <input type="datetime-local" className="mt-1 w-full rounded border px-3 py-2" value={evStart} onChange={(e)=>setEvStart(e.target.value)} />
+                <input
+                  type="datetime-local"
+                  className="mt-1 w-full rounded border px-3 py-2"
+                  value={evStart}
+                  onChange={(e) => setEvStart(e.target.value)}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium">Ends (optional)</label>
-                <input type="datetime-local" className="mt-1 w-full rounded border px-3 py-2" value={evEnd} onChange={(e)=>setEvEnd(e.target.value)} />
+                <input
+                  type="datetime-local"
+                  className="mt-1 w-full rounded border px-3 py-2"
+                  value={evEnd}
+                  onChange={(e) => setEvEnd(e.target.value)}
+                />
               </div>
               <div className="sm:col-span-2 flex items-center gap-3">
                 <label className="inline-flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={evOnline} onChange={(e)=>setEvOnline(e.target.checked)} />
+                  <input type="checkbox" checked={evOnline} onChange={(e) => setEvOnline(e.target.checked)} />
                   Online event
                 </label>
                 {!evOnline && (
                   <>
                     <label className="text-sm">Location</label>
-                    <input className="rounded border px-2 py-1 text-sm flex-1" value={evLocation} onChange={(e)=>setEvLocation(e.target.value)} placeholder="Community Hall, 123 Main…" />
+                    <input
+                      className="rounded border px-2 py-1 text-sm flex-1"
+                      value={evLocation}
+                      onChange={(e) => setEvLocation(e.target.value)}
+                      placeholder="Community Hall, 123 Main…"
+                    />
                   </>
                 )}
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium">Description (optional)</label>
-                <textarea className="mt-1 w-full rounded border px-3 py-2 min-h-[100px]" value={evDesc} onChange={(e)=>setEvDesc(e.target.value)} placeholder="What to expect, what to bring…" />
+                <textarea
+                  className="mt-1 w-full rounded border px-3 py-2 min-h-[100px]"
+                  value={evDesc}
+                  onChange={(e) => setEvDesc(e.target.value)}
+                  placeholder="What to expect, what to bring…"
+                />
               </div>
             </div>
             <div className="mt-3">
@@ -585,9 +777,7 @@ export default function ChapterPage() {
                       {new Date(e.starts_at).toLocaleString()}
                       {e.ends_at ? <> – {new Date(e.ends_at).toLocaleString()}</> : null}
                     </div>
-                    <div className="text-sm text-gray-600">
-                      {e.is_online ? 'Online' : e.location || 'Location TBA'}
-                    </div>
+                    <div className="text-sm text-gray-600">{e.is_online ? 'Online' : e.location || 'Location TBA'}</div>
                     {e.description && <p className="mt-2 text-sm text-gray-800 whitespace-pre-wrap">{e.description}</p>}
                   </div>
                   <div className="flex items-center gap-2">
@@ -711,14 +901,18 @@ export default function ChapterPage() {
                       by {o.owner_name || o.owner_id.slice(0, 8)} • {new Date(o.created_at).toLocaleDateString()}
                     </div>
                     <div className="mt-3">
-                      <Link href={`/offers/${o.id}`} className="hx-btn hx-btn--primary">Ask to Receive</Link>
+                      <Link href={`/offers/${o.id}`} className="hx-btn hx-btn--primary">
+                        Ask to Receive
+                      </Link>
                     </div>
                   </div>
                   <div className="ml-2 h-16 w-24 shrink-0 overflow-hidden rounded border">
                     {o.thumb ? (
                       <img src={o.thumb} alt="" className="h-full w-full object-cover" />
                     ) : (
-                      <div className="flex h-full w-full items-center justify-center text-xs text-gray-500 bg-gray-50">No image</div>
+                      <div className="flex h-full w-full items-center justify-center text-xs text-gray-500 bg-gray-50">
+                        No image
+                      </div>
                     )}
                   </div>
                 </div>
