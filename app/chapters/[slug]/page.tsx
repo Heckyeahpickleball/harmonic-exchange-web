@@ -466,6 +466,48 @@ export default function ChapterPage() {
     }
   }
 
+  async function createEvent() {
+    if (!group) return;
+    setMsg('');
+    setCreatingEvent(true);
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth.user) {
+        router.push('/signin?next=' + encodeURIComponent(`/chapters/${group.slug}`));
+        return;
+      }
+      if (!evTitle.trim() || !evStart) {
+        setMsg('Event title and start time are required.');
+        setCreatingEvent(false);
+        return;
+      }
+      const eventData = {
+        group_id: group.id,
+        title: evTitle.trim(),
+        description: evDesc.trim() || null,
+        starts_at: toIsoLocal(evStart),
+        ends_at: evEnd ? toIsoLocal(evEnd) : null,
+        location: evOnline ? null : evLocation.trim() || null,
+        is_online: evOnline,
+      };
+      const { error } = await supabase.from('group_events').insert(eventData);
+      if (error) throw error;
+      setShowEventForm(false);
+      setEvTitle('');
+      setEvDesc('');
+      setEvStart('');
+      setEvEnd('');
+      setEvOnline(false);
+      setEvLocation('');
+      // Optionally, reload events
+      router.refresh();
+    } catch (e: any) {
+      setMsg(e?.message ?? 'Could not create event.');
+    } finally {
+      setCreatingEvent(false);
+    }
+  }
+
   if (loading) return <div className="max-w-5xl p-4 text-sm text-gray-600">Loading chapter…</div>;
   if (!group) {
     return (
