@@ -27,8 +27,8 @@ export default function CityOffersRail({
     el.scrollBy({ left: dx, behavior: 'smooth' });
   };
 
-  // With the smaller card widths, a ~360px step feels natural.
-  const STEP = 360;
+  // Smaller cards -> smaller step feels natural
+  const STEP = 260;
 
   return (
     <div className="mt-6">
@@ -68,11 +68,11 @@ export default function CityOffersRail({
               <Link
                 key={o.id}
                 href={`/offers/${o.id}`}
-                className="group w-[200px] md:w-[220px] flex-shrink-0 scroll-ml-4 scroll-snap-start"
+                className="group w-[150px] flex-shrink-0 scroll-ml-4 scroll-snap-start"
               >
                 <div className="rounded-xl border bg-white shadow-sm transition group-hover:shadow-md">
-                  {/* 4:3 media area for consistent thumbnails */}
-                  <div className="relative aspect-[4/3] w-full overflow-hidden rounded-t-xl bg-neutral-100">
+                  {/* 1:1 square thumbnail for consistent previews */}
+                  <div className="relative aspect-square w-full overflow-hidden rounded-t-xl bg-neutral-100">
                     {img ? (
                       <img
                         src={img}
@@ -81,19 +81,19 @@ export default function CityOffersRail({
                         className="h-full w-full object-cover"
                       />
                     ) : (
-                      <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
+                      <div className="flex h-full w-full items-center justify-center text-[11px] text-gray-400">
                         No image
                       </div>
                     )}
                   </div>
 
-                  <div className="p-3">
-                    <div className="line-clamp-1 font-medium text-sm">{o.title}</div>
+                  <div className="p-2">
+                    <div className="line-clamp-1 font-medium text-[13px]">{o.title}</div>
                     <div className="mt-1 line-clamp-1 text-[11px] text-gray-600">
                       {o.owner_display_name ? `by ${o.owner_display_name}` : ''}
                     </div>
-                    <div className="mt-3">
-                      <span className="hx-btn hx-btn--primary inline-block text-xs px-3 py-1">Ask to Receive</span>
+                    <div className="mt-2">
+                      <span className="hx-btn hx-btn--primary inline-block text-[11px] px-2 py-1">Ask to Receive</span>
                     </div>
                   </div>
                 </div>
