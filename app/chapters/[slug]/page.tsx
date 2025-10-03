@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter, notFound } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import PostItem from '@/components/PostItem';
+import CityOffersRail, { CityOffer } from '@/components/CityOffersRail';
 
 type GroupStatus = 'pending' | 'active' | 'suspended' | 'archived';
 type Group = {
@@ -71,6 +72,9 @@ export default function ChapterPage() {
   const [offers, setOffers] = useState<OfferPreview[]>([]);
   const [offerQ, setOfferQ] = useState('');
 
+  // NEW: city-matched offers to show under About
+  const [cityOffers, setCityOffers] = useState<CityOffer[] | null>(null);
+
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [postText, setPostText] = useState('');
   const [postFiles, setPostFiles] = useState<File[]>([]);
@@ -100,8 +104,9 @@ export default function ChapterPage() {
     const p = (row as any).profiles;
     return { ...row, profiles: Array.isArray(p) ? (p?.[0] ?? null) : p ?? null };
   }
-  function isStoragePath(s: string) { return !/^https?:\/\//i.test(s); }
+  function isStoragePath(s: string) { return !!s && !/^https?:\/\//i.test(s); }
   function publicUrlForPath(path: string) {
+    // your images live in post-media
     return supabase.storage.from('post-media').getPublicUrl(path).data.publicUrl;
   }
   function normalizeImageList(arr: any): string[] {
@@ -124,6 +129,7 @@ export default function ChapterPage() {
         const uid = auth.user?.id ?? null;
         if (!cancelled) setMeId(uid);
 
+        // Load group
         const { data: gRow, error: gErr } = await supabase
           .from('groups')
           .select('id,slug,name,about,city,country,status,created_by,created_at')
@@ -136,6 +142,7 @@ export default function ChapterPage() {
           setAboutDraft((gRow as Group).about ?? '');
         }
 
+        // Members
         const { data: gm } = await supabase
           .from('group_members')
           .select('profile_id,role')
@@ -157,6 +164,7 @@ export default function ChapterPage() {
           setIsAnchor(mine?.role === 'anchor' || uid === gRow.created_by);
         }
 
+        // Events
         const { data: eRows } = await supabase
           .from('group_events')
           .select('id,title,description,starts_at,ends_at,location,is_online')
@@ -179,6 +187,7 @@ export default function ChapterPage() {
         }
         if (!cancelled) setEvents(eList);
 
+        // Posts (chapter feed)
         const { data: pRows, error: pErr } = await supabase
           .from('posts')
           .select('id,profile_id,body,created_at,images,group_id,profiles(display_name)')
@@ -192,6 +201,7 @@ export default function ChapterPage() {
         }));
         if (!cancelled) setPosts(pList);
 
+        // Offers attached to this group explicitly (unchanged)
         const { data: oRows } = await supabase
           .from('offers')
           .select('id,title,status,created_at,owner_id,images,cover_image')
@@ -208,6 +218,43 @@ export default function ChapterPage() {
           oList = oList.map((o) => ({ ...o, owner_name: map3.get(o.owner_id) ?? null, thumb: offerThumb(o) }));
         }
         if (!cancelled) setOffers(oList);
+
+        // NEW: city-matched offers (auto population under About)
+        const hasCity = (gRow.city || '').trim().length > 0;
+        const hasCountry = (gRow.country || '').trim().length > 0;
+        if (hasCity && hasCountry) {
+          const { data: cityRows, error: cityErr } = await supabase
+            .from('offers')
+            .select('id,title,images,cover_image,owner_id,created_at,city,country,status')
+            .eq('status', 'active')
+            .ilike('city', (gRow.city || '').trim())
+            .ilike('country', (gRow.country || '').trim())
+            .order('created_at', { ascending: false })
+            .limit(24);
+          if (cityErr) throw cityErr;
+
+          const ownerIds = Array.from(new Set((cityRows || []).map((r: any) => r.owner_id)));
+          const { data: owners } = ownerIds.length
+            ? await supabase.from('profiles').select('id,display_name').in('id', ownerIds)
+            : { data: [] as any[] };
+          const nameById = new Map<string, string | null>();
+          for (const p of (owners || []) as any[]) nameById.set(p.id, p.display_name ?? null);
+
+          const cityList: CityOffer[] = (cityRows || []).map((row: any) => {
+            const cover = row.cover_image ?? (Array.isArray(row.images) ? row.images[0] : null);
+            const thumb_url = cover ? (isStoragePath(cover) ? publicUrlForPath(cover) : String(cover)) : null;
+            return {
+              id: row.id,
+              title: row.title ?? 'Untitled offer',
+              owner_display_name: nameById.get(row.owner_id) ?? null,
+              thumb_url,
+            } as CityOffer;
+          });
+
+          if (!cancelled) setCityOffers(cityList);
+        } else {
+          if (!cancelled) setCityOffers(null);
+        }
       } catch (e: any) {
         console.error(e);
         if (!cancelled) setMsg(e?.message ?? 'Failed to load chapter.');
@@ -408,6 +455,15 @@ export default function ChapterPage() {
           )}
         </div>
 
+        {/* NEW: City-matched offers carousel (immediately under About) */}
+        {cityOffers && cityOffers.length > 0 && (
+          <CityOffersRail
+            offers={cityOffers}
+            title={`Local offerings in ${group.city}`}
+            seeAllHref={`/browse?city=${encodeURIComponent(group.city || '')}&country=${encodeURIComponent(group.country || '')}`}
+          />
+        )}
+
         {/* Anchors */}
         {anchors.length > 0 && (
           <div className="mt-6">
@@ -422,11 +478,11 @@ export default function ChapterPage() {
           </div>
         )}
 
-        {/* Offers carousel (simple, no external component/imports) */}
+        {/* Existing simple offer scroller for group-attached offers (kept) */}
         {offers.length > 0 && (
           <div className="mt-6">
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-700">Local offerings</h3>
+              <h3 className="text-sm font-semibold text-gray-700">Offers shared in this chapter</h3>
               <div className="flex items-center gap-2">
                 <button aria-label="Scroll left" className="rounded border px-2 py-1 text-sm"
                         onClick={() => { const el = offerTrackRef.current; if (el) el.scrollBy({ left: -320, behavior: 'smooth' }); }}>
@@ -436,10 +492,6 @@ export default function ChapterPage() {
                         onClick={() => { const el = offerTrackRef.current; if (el) el.scrollBy({ left: 320, behavior: 'smooth' }); }}>
                   ›
                 </button>
-                <Link href={`/browse?city=${encodeURIComponent(group.city || '')}${group.id ? `&group=${group.id}` : ''}`}
-                      className="ml-2 hx-btn hx-btn--outline-primary">
-                  See all
-                </Link>
               </div>
             </div>
             <div ref={offerTrackRef} className="flex gap-3 overflow-x-auto" style={{ scrollSnapType: 'x mandatory' }}>
