@@ -27,7 +27,6 @@ export default function CityOffersRail({
     el.scrollBy({ left: dx, behavior: 'smooth' });
   };
 
-  // Smaller cards -> smaller step feels natural
   const STEP = 260;
 
   return (
@@ -71,14 +70,14 @@ export default function CityOffersRail({
                 className="group w-[150px] flex-shrink-0 scroll-ml-4 scroll-snap-start"
               >
                 <div className="rounded-xl border bg-white shadow-sm transition group-hover:shadow-md">
-                  {/* 1:1 square thumbnail for consistent previews */}
-                  <div className="relative aspect-square w-full overflow-hidden rounded-t-xl bg-neutral-100">
+                  {/* Fixed 150x150 square thumbnail */}
+                  <div className="relative w-full h-[150px] overflow-hidden rounded-t-xl bg-neutral-100">
                     {img ? (
                       <img
                         src={img}
                         alt=""
                         loading="lazy"
-                        className="h-full w-full object-cover"
+                        className="absolute inset-0 h-full w-full object-cover"
                       />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-[11px] text-gray-400">
@@ -93,7 +92,9 @@ export default function CityOffersRail({
                       {o.owner_display_name ? `by ${o.owner_display_name}` : ''}
                     </div>
                     <div className="mt-2">
-                      <span className="hx-btn hx-btn--primary inline-block text-[11px] px-2 py-1">Ask to Receive</span>
+                      <span className="hx-btn hx-btn--primary inline-block text-[11px] px-2 py-1">
+                        Ask to Receive
+                      </span>
                     </div>
                   </div>
                 </div>
