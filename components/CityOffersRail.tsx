@@ -44,14 +44,14 @@ export default function CityOffersRail({
         <button
           aria-label="Previous"
           onClick={() => scrollBy(-STEP)}
-          className="absolute left-0 top-1/2 z-10 -translate-y-1/2 rounded-full border bg-white/90 px-2 py-1 shadow"
+          className="absolute left-0 top-1/2 z-10 -translate-y-1/2 rounded-full border bg-white/90 px-2 py-1 shadow hover:bg-white"
         >
           ‹
         </button>
         <button
           aria-label="Next"
           onClick={() => scrollBy(STEP)}
-          className="absolute right-0 top-1/2 z-10 -translate-y-1/2 rounded-full border bg-white/90 px-2 py-1 shadow"
+          className="absolute right-0 top-1/2 z-10 -translate-y-1/2 rounded-full border bg-white/90 px-2 py-1 shadow hover:bg-white"
         >
           ›
         </button>
@@ -67,17 +67,24 @@ export default function CityOffersRail({
               <Link
                 key={o.id}
                 href={`/offers/${o.id}`}
-                className="group w-[150px] flex-shrink-0 scroll-ml-4 scroll-snap-start"
+                className="group w-[150px] flex-shrink-0 scroll-ml-4 scroll-snap-start focus:outline-none"
               >
-                <div className="rounded-xl border bg-white shadow-sm transition group-hover:shadow-md">
-                  {/* Fixed 150x150 square thumbnail */}
-                  <div className="relative w-full h-[150px] overflow-hidden rounded-t-xl bg-neutral-100">
+                <div className="rounded-xl border bg-white shadow-sm transition duration-200 group-hover:shadow-lg">
+                  {/* Fixed 150x150 square thumbnail with brand ring & hover zoom */}
+                  <div
+                    className="
+                      relative w-full h-[150px] overflow-hidden rounded-t-xl bg-neutral-100
+                      ring-1 ring-emerald-700/25 transition
+                      group-hover:ring-emerald-700/55 group-focus:ring-emerald-700/55
+                      focus-within:ring-emerald-700/55
+                    "
+                  >
                     {img ? (
                       <img
                         src={img}
                         alt=""
                         loading="lazy"
-                        className="absolute inset-0 h-full w-full object-cover"
+                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                       />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-[11px] text-gray-400">
