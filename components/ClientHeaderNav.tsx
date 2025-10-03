@@ -13,9 +13,10 @@ export default function ClientHeaderNav() {
   const [role, setRole] = useState<Role>('user');
   const [busy, setBusy] = useState(false);
 
-  // local menu state
-  const [openExplore, setOpenExplore] = useState(false);
-  const [openMove, setOpenMove] = useState(false);
+  // dropdown state
+  const [openExchange, setOpenExchange] = useState(false);
+  const [openChapters, setOpenChapters] = useState(false);
+  const [openProfile, setOpenProfile] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -47,77 +48,96 @@ export default function ClientHeaderNav() {
       <div className="flex flex-wrap items-center gap-3">
         <Link href="/" className="underline-offset-4 hover:underline">Home</Link>
 
-        {/* Explore menu */}
+        {/* Exchange menu */}
         <div className="relative">
           <button
             className="hx-btn hx-btn--secondary text-sm px-3 py-2"
             onClick={() => {
-              setOpenExplore((v) => !v);
-              setOpenMove(false);
+              setOpenExchange(v => !v);
+              setOpenChapters(false);
+              setOpenProfile(false);
             }}
             aria-haspopup="menu"
-            aria-expanded={openExplore}
+            aria-expanded={openExchange}
           >
-            Explore
+            Exchange
           </button>
-          {openExplore && (
+          {openExchange && (
             <div
               className="absolute z-50 mt-2 w-56 hx-card p-2"
               role="menu"
-              onMouseLeave={() => setOpenExplore(false)}
+              onMouseLeave={() => setOpenExchange(false)}
             >
               <Link href="/browse" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
-                Offerings
+                Browse Offers
               </Link>
               <Link href="/offers/new" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
-                Share My Value
-              </Link>
-              <Link href="/offers/mine" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
-                My Offers
+                New Offer
               </Link>
               <Link href="/exchanges" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
-                Exchanges
-              </Link>
-              <Link href="/messages" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
-                Inbox <span className="ml-1 align-middle"><MessagesUnreadBadge /></span>
-              </Link>
-              <Link href="/profile" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
-                Profile
+                My Exchanges
               </Link>
             </div>
           )}
         </div>
 
-        {/* Movement menu */}
+        {/* Local Chapters menu */}
         <div className="relative">
           <button
             className="hx-btn hx-btn--secondary text-sm px-3 py-2"
             onClick={() => {
-              setOpenMove((v) => !v);
-              setOpenExplore(false);
+              setOpenChapters(v => !v);
+              setOpenExchange(false);
+              setOpenProfile(false);
             }}
             aria-haspopup="menu"
-            aria-expanded={openMove}
+            aria-expanded={openChapters}
           >
-            Movement
+            Local Chapters
           </button>
-          {openMove && (
+          {openChapters && (
             <div
               className="absolute z-50 mt-2 w-60 hx-card p-2"
               role="menu"
-              onMouseLeave={() => setOpenMove(false)}
+              onMouseLeave={() => setOpenChapters(false)}
             >
-              <Link href="/about" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
-                About the Movement
-              </Link>
               <Link href="/chapters" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
-                Local Chapters
+                Explore Chapters
               </Link>
+              {/* keep the existing route you use for starting a chapter */}
               <Link href="/chapters/start" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
                 Start a Chapter
               </Link>
-              <Link href="/guidelines" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
-                Community Guidelines
+            </div>
+          )}
+        </div>
+
+        {/* Profile menu */}
+        <div className="relative">
+          <button
+            className="hx-btn hx-btn--secondary text-sm px-3 py-2"
+            onClick={() => {
+              setOpenProfile(v => !v);
+              setOpenExchange(false);
+              setOpenChapters(false);
+            }}
+            aria-haspopup="menu"
+            aria-expanded={openProfile}
+          >
+            Profile
+          </button>
+          {openProfile && (
+            <div
+              className="absolute z-50 mt-2 w-56 hx-card p-2"
+              role="menu"
+              onMouseLeave={() => setOpenProfile(false)}
+            >
+              <Link href="/profile" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                My Profile
+              </Link>
+              {/* your Inbox currently lives at /messages */}
+              <Link href="/messages" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                Inbox <span className="ml-1 align-middle"><MessagesUnreadBadge /></span>
               </Link>
             </div>
           )}
