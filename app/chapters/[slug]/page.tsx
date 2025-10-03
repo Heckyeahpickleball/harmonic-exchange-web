@@ -68,10 +68,8 @@ export default function ChapterPage() {
   const [isAnchor, setIsAnchor] = useState(false);
 
   const [events, setEvents] = useState<EventRow[]>([]);
-  const [offers, setOffers] = useState<OfferPreview[]>([]); // offers explicitly attached to this chapter
-
-  // Auto-populated carousel under About (local + online)
-  const [cityOffers, setCityOffers] = useState<CityOffer[] | null>(null);
+  const [offers, setOffers] = useState<OfferPreview[]>([]); // fetched but not rendered
+  const [cityOffers, setCityOffers] = useState<CityOffer[] | null>(null); // carousel under About
 
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [postText, setPostText] = useState('');
@@ -213,7 +211,7 @@ export default function ChapterPage() {
         );
         if (!cancelled) setPosts(pList);
 
-        // 5) Offers explicitly attached to this group (kept scroller below)
+        // 5) Offers explicitly attached to this group (fetched but not rendered)
         const { data: oRows } = await supabase
           .from('offers')
           .select('id,title,status,created_at,owner_id,images')
@@ -255,7 +253,7 @@ export default function ChapterPage() {
             if (!error) localRows = data || [];
           }
 
-          // Try online=true; if that column name doesn't exist, fall back to is_online=true.
+          // Try 'online', fallback to 'is_online'
           let onlineRows: any[] = [];
           {
             const baseSelect = 'id,title,images,owner_id,created_at,city,country,status';
@@ -263,7 +261,7 @@ export default function ChapterPage() {
               .from('offers')
               .select(baseSelect)
               .eq('status', 'active')
-              // @ts-ignore — first try 'online', may fail on some schemas
+              // @ts-ignore
               .eq('online', true)
               .limit(50);
             if (!tryOnline.error) {
@@ -273,7 +271,7 @@ export default function ChapterPage() {
                 .from('offers')
                 .select(baseSelect)
                 .eq('status', 'active')
-                // @ts-ignore — fallback for schemas using 'is_online'
+                // @ts-ignore
                 .eq('is_online', true)
                 .limit(50);
               if (!tryIsOnline.error) onlineRows = tryIsOnline.data || [];
@@ -302,7 +300,8 @@ export default function ChapterPage() {
           for (const p of (owners || []) as any[]) nameById.set(p.id, p.display_name ?? null);
 
           const cityList: CityOffer[] = merged.map((row: any) => {
-            const first = Array.isArray(row.images) && row.images.length ? row.images[0] : null;
+            const imgs = Array.isArray(row.images) ? row.images : [];
+            const first = imgs.length ? imgs[0] : null;
             const thumb_url = first ? (isStoragePath(first) ? publicUrlForPath(first) : String(first)) : null;
             return {
               id: row.id,
@@ -327,7 +326,7 @@ export default function ChapterPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
-  const anchors = useMemo(() => members.filter((m) => m.role === 'anchor'), [members]);
+  const anchors = useMemo(() => members.filter((m) => m.role === 'anchor'), [members]); // kept for now but not rendered
 
   async function joinChapter() {
     if (!group) return;
@@ -499,7 +498,6 @@ export default function ChapterPage() {
       setEvEnd('');
       setEvOnline(false);
       setEvLocation('');
-      // Optionally, reload events
       router.refresh();
     } catch (e: any) {
       setMsg(e?.message ?? 'Could not create event.');
@@ -605,7 +603,7 @@ export default function ChapterPage() {
         {/* Soft separation so the carousel feels like its own block */}
         <div className="mt-4 border-t border-neutral-200" />
 
-        {/* Auto-populated carousel (Local + Online) */}
+        {/* KEEP: Auto-populated carousel (Local + Online) */}
         {cityOffers && cityOffers.length > 0 && (
           <CityOffersRail
             offers={cityOffers}
@@ -616,78 +614,7 @@ export default function ChapterPage() {
           />
         )}
 
-        {/* Anchors */}
-        {anchors.length > 0 && (
-          <div className="mt-6">
-            <h3 className="mb-2 text-sm font-semibold text-gray-700">Anchors</h3>
-            <div className="flex flex-wrap gap-2">
-              {anchors.map((a) => (
-                <span key={a.profile_id} className="rounded-full border px-3 py-1 text-sm">
-                  {a.display_name || a.profile_id.slice(0, 8)}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Existing scroller for offers explicitly shared to this chapter */}
-        {offers.length > 0 && (
-          <div className="mt-6">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-700">Offers shared in this chapter</h3>
-              <div className="flex items-center gap-2">
-                <button
-                  aria-label="Scroll left"
-                  className="rounded border px-2 py-1 text-sm"
-                  onClick={() => {
-                    const el = offerTrackRef.current;
-                    if (el) el.scrollBy({ left: -320, behavior: 'smooth' });
-                  }}
-                >
-                  ‹
-                </button>
-                <button
-                  aria-label="Scroll right"
-                  className="rounded border px-2 py-1 text-sm"
-                  onClick={() => {
-                    const el = offerTrackRef.current;
-                    if (el) el.scrollBy({ left: 320, behavior: 'smooth' });
-                  }}
-                >
-                  ›
-                </button>
-              </div>
-            </div>
-            <div ref={offerTrackRef} className="flex gap-3 overflow-x-auto" style={{ scrollSnapType: 'x mandatory' }}>
-              {offers.map((o) => (
-                <Link
-                  key={o.id}
-                  href={`/offers/${o.id}`}
-                  className="min-w-[280px] max-w-[280px] rounded border p-3 hover:shadow"
-                  style={{ scrollSnapAlign: 'start' }}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="min-w-16 max-w-16 h-16 rounded overflow-hidden border">
-                      {o.thumb ? (
-                        <img src={o.thumb} alt="" className="h-full w-full object-cover" />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-xs text-gray-500 bg-gray-50">
-                          No image
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1">
-                      <div className="line-clamp-2 font-medium leading-snug">{o.title}</div>
-                      <div className="mt-1 text-xs text-gray-600">
-                        by {o.owner_name || o.owner_id.slice(0, 8)} • {new Date(o.created_at).toLocaleDateString()}
-                      </div>
-                    </div>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Anchors REMOVED */}
       </section>
 
       {/* Events */}
