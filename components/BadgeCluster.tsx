@@ -1,23 +1,59 @@
-// components/BadgeCluster.tsx
-"use client";
-import Badge from "@/components/Badge";
+'use client';
 
-type Props = {
-  tier: number;     // 1..6
-  stars: number;    // 1..5
-  label?: string;   // optional subtitle like "Level 34"
-  size?: number;    // px
-  className?: string;
+import * as React from 'react';
+import Image from 'next/image';
+
+export type ClusterBadge = {
+  badge_code: string;
+  label: string | null;
+  track: 'give' | 'receive' | 'streak' | 'milestone' | null;
+  tier: number | null;
+  icon: string | null;        // e.g. "/badges/give_rays_t1.png"
+  earned_at?: string | null;
 };
 
-export default function BadgeCluster({ tier, stars, label, size = 64, className }: Props) {
+type Props = {
+  badges: ClusterBadge[];
+  size?: number;   // px, default 28
+  gap?: number;    // px, default 8
+  showTitles?: boolean;
+};
+
+/**
+ * Renders a simple row of badge icons with optional titles.
+ * Assumes the icon path is a public path (under /public).
+ */
+export default function BadgeCluster({ badges, size = 28, gap = 8, showTitles = false }: Props) {
+  if (!badges || badges.length === 0) return null;
+
   return (
-    <div className={`flex items-center gap-3 ${className ?? ""}`}>
-      <Badge tier={tier} stars={stars} size={size} />
-      <div className="flex flex-col leading-tight">
-        <span className="font-medium">{`Tier ${tier}`}</span>
-        <span className="text-xs text-gray-500">{`${stars} star${stars > 1 ? "s" : ""}${label ? ` • ${label}` : ""}`}</span>
-      </div>
+    <div className="flex flex-wrap items-center" style={{ gap }}>
+      {badges.map((b) => {
+        const src = b.icon || '/badges/generic_badge.png';
+        const title =
+          b.label
+            ? `${b.label}${b.tier ? ` (T${b.tier})` : ''}`
+            : b.tier
+            ? `Tier ${b.tier}`
+            : 'Badge';
+
+        return (
+          <div
+            key={`${b.badge_code}-${b.earned_at ?? ''}`}
+            className="relative"
+            title={showTitles ? title : undefined}
+            aria-label={showTitles ? title : undefined}
+          >
+            <Image
+              src={src}
+              alt={b.label || 'badge'}
+              width={size}
+              height={size}
+              className="rounded-full shadow-sm border border-slate-200 object-contain bg-white"
+            />
+          </div>
+        );
+      })}
     </div>
   );
 }
