@@ -30,8 +30,11 @@ function Kebab({
   return (
     <div className="absolute right-0 z-10 mt-1 w-36 rounded border bg-white shadow">
       {items.map((it, i) => (
-        <button key={i} className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
-          onClick={() => { it.action(); onClose(); }}>
+        <button
+          key={i}
+          className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
+          onClick={() => { it.action(); onClose(); }}
+        >
           {it.label}
         </button>
       ))}
@@ -52,10 +55,21 @@ function ConfirmInline({
       <h3 className="mb-2 text-sm font-semibold">Confirm delete</h3>
       <p className="mb-3 text-sm text-gray-700">{text}</p>
       <div className="flex items-center gap-2">
-        <button ref={confirmBtnRef} className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
-          onClick={onConfirm} disabled={!!busy}>{busy ? 'Working…' : confirmLabel}</button>
-        <button className="rounded border px-3 py-1.5 text-sm font-medium disabled:opacity-60"
-          onClick={onCancel} disabled={!!busy}>{cancelLabel}</button>
+        <button
+          ref={confirmBtnRef}
+          className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+          onClick={onConfirm}
+          disabled={!!busy}
+        >
+          {busy ? 'Working…' : confirmLabel}
+        </button>
+        <button
+          className="rounded border px-3 py-1.5 text-sm font-medium disabled:opacity-60"
+          onClick={onCancel}
+          disabled={!!busy}
+        >
+          {cancelLabel}
+        </button>
       </div>
     </div>
   );
@@ -105,8 +119,7 @@ export default function PostItem({
         (payload) => {
           if (payload.eventType === 'INSERT') {
             const row = normalizeProfile(payload.new as CommentRow) as CommentRow;
-            // Guard: skip if we already know this comment ID
-            if (commentIdsRef.current.has(row.id)) return;
+            if (commentIdsRef.current.has(row.id)) return; // de-dupe
             commentIdsRef.current.add(row.id);
             setComments((prev) => [...prev, row].sort(byCreatedAtAsc));
             setCommentCount((c) => c + 1);
@@ -140,7 +153,6 @@ export default function PostItem({
       else {
         const normalized: CommentRow[] = (data || []).map((r: any) => normalizeProfile(r));
         setComments(normalized);
-        // initialize the known IDs set so realtime INSERT of existing rows won't duplicate
         commentIdsRef.current = new Set((normalized || []).map((r) => r.id));
       }
     }
@@ -201,7 +213,7 @@ export default function PostItem({
       if (error) throw error;
       const normalized = normalizeProfile(data) as CommentRow;
 
-      // NEW: mark this ID as seen BEFORE setting state to prevent realtime duplicate
+      // mark seen to prevent realtime duplicate
       commentIdsRef.current.add(normalized.id);
 
       setComments((prev) => [...prev, normalized].sort(byCreatedAtAsc));
@@ -222,7 +234,7 @@ export default function PostItem({
       <header className="mb-2 flex items-center justify-between text-sm text-gray-600">
         <div>
           <span className="font-medium">{post.profiles?.display_name ?? 'Someone'}</span>
-        <span className="mx-1">•</span>
+          <span className="mx-1">•</span>
           <time dateTime={post.created_at}>{new Date(post.created_at).toLocaleString()}</time>
         </div>
         {me === post.profile_id && (
@@ -374,7 +386,12 @@ function CommentItem({
       ) : null}
 
       {confirmDel && (
-        <ConfirmInline text="Delete this comment? This can’t be undone." onConfirm={reallyDelete} onCancel={() => setConfirmDel(false)} busy={busy}/>
+        <ConfirmInline
+          text="Delete this comment? This can’t be undone."
+          onConfirm={reallyDelete}
+          onCancel={() => setConfirmDel(false)}
+          busy={busy}
+        />
       )}
       {err && <p className="mt-1 text-sm text-red-600">{err}</p>}
     </div>
