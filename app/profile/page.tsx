@@ -42,6 +42,49 @@ type ExpandedBadge = {
   earned_at: string;     // timestamp
 };
 
+/** --- Small helpers for badge captions --- */
+const TIER_TO_COUNT: Record<'give'|'receive', Record<number, number>> = {
+  give:    { 1: 1, 2: 5, 3: 10, 4: 25, 5: 50, 6: 100 },
+  receive: { 1: 1, 2: 5, 3: 10, 4: 25, 5: 50, 6: 100 },
+};
+function captionForBadge(b: ExpandedBadge): string {
+  if (!b) return '';
+  if (b.track === 'give' || b.track === 'receive') {
+    const n = TIER_TO_COUNT[b.track][b.tier ?? 1] ?? (b.tier ?? 1);
+    const word = b.track === 'give' ? 'Giver' : 'Receiver';
+    return `${word} ×${n}`;
+  }
+  if (b.track === 'streak') {
+    // Today we only seed streak_7; if you add more later, map here.
+    return 'Streak ×7';
+  }
+  // fallback: show label or code
+  return b.label ?? b.badge_code;
+}
+
+/** Visual: single badge + caption */
+function BadgeWithCaption({ badge }: { badge: ExpandedBadge }) {
+  const size = 40; // px
+  return (
+    <div className="flex flex-col items-center" title={badge.label ?? badge.badge_code}>
+      <span className="inline-flex items-center justify-center rounded-full border bg-white overflow-hidden"
+            style={{ width: size, height: size }}>
+        <img
+          src={badge.icon ?? ''}
+          alt={badge.label ?? badge.badge_code}
+          width={size}
+          height={size}
+          className="h-full w-full object-contain"
+          style={{ display: 'block' }}
+        />
+      </span>
+      <span className="mt-1 text-[11px] leading-tight text-slate-600 text-center">
+        {captionForBadge(badge)}
+      </span>
+    </div>
+  );
+}
+
 export default function ProfilePage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -67,7 +110,7 @@ export default function ProfilePage() {
   const [offersLoading, setOffersLoading] = useState(false);
   const [offersMsg, setOffersMsg] = useState('');
 
-  // NEW: badges
+  // Badges
   const [badges, setBadges] = useState<ExpandedBadge[] | null>(null);
   const [badgesMsg, setBadgesMsg] = useState<string>('');
 
@@ -184,7 +227,7 @@ export default function ProfilePage() {
     };
   }, [userId]);
 
-  // NEW: Load badges for this profile (from the expanded view)
+  // Load badges for this profile (from the expanded view)
   useEffect(() => {
     if (!profile?.id) return;
     let cancelled = false;
@@ -315,8 +358,9 @@ export default function ProfilePage() {
             )}
           </div>
 
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div className="mt-2 md:mt-0 md:pl-24">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            {/* Left: name + meta */}
+            <div className="mt-2 md:mt-0 md:pl-24 md:flex-1">
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-semibold md:text-2xl">
                   {form.display_name || 'Unnamed'}
@@ -328,27 +372,9 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              {/* NEW: Badges row */}
-              {!!badges?.length && (
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  {badges.map((b) => (
-                    <img
-                      key={b.badge_code}
-                      src={b.icon ?? ''}
-                      alt={b.label ?? b.badge_code}
-                      title={`${b.label ?? b.badge_code}${b.tier ? ` (T${b.tier})` : ''}`}
-                      className="h-7 w-7 rounded-full border"
-                    />
-                  ))}
-                </div>
-              )}
-              {badgesMsg && <p className="mt-1 text-xs text-amber-700">{badgesMsg}</p>}
-
-              <div className="mt-2 text-sm text-gray-600">
+              <div className="mt-1 text-sm text-gray-600">
                 {form.area_city || form.area_country ? (
-                  <span>
-                    {[form.area_city, form.area_country].filter(Boolean).join(', ')}
-                  </span>
+                  <span>{[form.area_city, form.area_country].filter(Boolean).join(', ')}</span>
                 ) : (
                   <span>—</span>
                 )}
@@ -361,21 +387,33 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 md:self-center">
-              <button
-                onClick={() => setEditing(true)}
-                className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
-              >
-                Edit Profile
-              </button>
-              <button
-                type="button"
-                onClick={async () => { await supabase.auth.signOut(); location.href='/' }}
-                className="rounded border px-3 py-2 text-sm"
-              >
-                Sign Out
-              </button>
-            </div>
+            {/* Right: badge cluster */}
+            {!!badges?.length && (
+              <div className="md:pl-4">
+                <div className="flex flex-wrap items-start gap-4">
+                  {badges.map((b) => (
+                    <BadgeWithCaption key={b.badge_code} badge={b} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="mt-3 flex items-center gap-2 md:self-center">
+            <button
+              onClick={() => setEditing(true)}
+              className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
+            >
+              Edit Profile
+            </button>
+            <button
+              type="button"
+              onClick={async () => { await supabase.auth.signOut(); location.href='/' }}
+              className="rounded border px-3 py-2 text-sm"
+            >
+              Sign Out
+            </button>
           </div>
         </div>
       </div>
