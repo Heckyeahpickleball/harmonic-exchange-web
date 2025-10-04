@@ -14,14 +14,14 @@ type NotifType =
   | 'message'
   | 'offer_pending'
   | 'fulfillment_reminder'
-  | 'badge_awarded'          // NEW: celebratory badge
+  | 'badge_awarded'          // celebratory badge
   | 'system'
   | string;
 
 type Notif = {
   id: string;
   type: NotifType;
-  data: any;                 // expect { badge_id?, badge_name?, level?, image_url? } for badge_awarded
+  data: any;                 // { badge_code?, badge_name?, level?, track? } for badge_awarded
   created_at: string;
   read_at: string | null;
   profile_id: string;
@@ -31,7 +31,11 @@ type Notif = {
 export default function NotificationsBell() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [uid, setUid] = useState<string | null>(null);
+
+  // IMPORTANT: separate auth uid from profile id
+  const [authUid, setAuthUid] = useState<string | null>(null);
+  const [profileId, setProfileId] = useState<string | null>(null);
+
   const [rows, setRows] = useState<Notif[]>([]);
   const unread = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
 
@@ -102,7 +106,7 @@ export default function NotificationsBell() {
     const reqId = n.data?.request_id as string | undefined;
 
     if (n.type === 'badge_awarded') {
-      const name = n.data?.badge_name || 'New badge';
+      const name = n.data?.badge_name || n.data?.badge_code || 'New badge';
       const level = n.data?.level ? ` (Level ${n.data.level})` : '';
       return {
         text: `🎉 You earned a badge: ${name}${level}!`,
@@ -149,7 +153,7 @@ export default function NotificationsBell() {
 
   /* ---------- mark read helpers ---------- */
   async function markAllRead() {
-    if (!uid) return;
+    if (!profileId) return;
     const ids = rows.filter((r) => !r.read_at).map((r) => r.id);
     if (!ids.length) return;
     const now = new Date().toISOString();
@@ -170,30 +174,43 @@ export default function NotificationsBell() {
     // de-dupe: same profile + type + (offer_id|request_id|badge_id)
     const part =
       n.type === 'badge_awarded'
-        ? n.data?.badge_id ?? ''
+        ? n.data?.badge_id ?? n.data?.badge_code ?? ''
         : (n.data?.offer_id ?? '') + '|' + (n.data?.request_id ?? '');
     return `${n.profile_id}|${n.type}|${part}`;
   }
 
-  /* ---------- initial load + realtime ---------- */
+  /* ---------- initial load: resolve profile id, then load notifications ---------- */
   useEffect(() => {
     let alive = true;
     (async () => {
       const { data } = await supabase.auth.getUser();
       const u = data?.user?.id ?? null;
       if (!alive) return;
-      setUid(u);
+      setAuthUid(u);
       if (!u) return;
 
+      // fetch the profile row by uid -> get the PROFILE UUID
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('uid', u)              // <— your schema uses uid to link to auth.users.id
+        .maybeSingle();
+
+      const pid = prof?.id ?? null;
+      if (!alive) return;
+      setProfileId(pid);
+
+      if (!pid) return; // no profile row yet
+
+      // load recent notifications for this PROFILE id
       const { data: list } = await supabase
         .from('notifications')
         .select('id,type,data,created_at,read_at,profile_id')
-        .eq('profile_id', u)
+        .eq('profile_id', pid)
         .order('created_at', { ascending: false })
         .limit(50);
 
       const initial = (list || []) as Notif[];
-
       const seen = new Set<string>();
       const dedup: Notif[] = [];
       for (const n of initial) {
@@ -207,12 +224,12 @@ export default function NotificationsBell() {
 
       void Promise.allSettled([enrichOfferTitles(dedup), enrichRequesterNames(dedup)]);
 
-      // realtime
+      // realtime (watch this profile only)
       const chIns = supabase
         .channel('realtime:notifications:ins')
         .on(
           'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'notifications', filter: `profile_id=eq.${u}` },
+          { event: 'INSERT', schema: 'public', table: 'notifications', filter: `profile_id=eq.${pid}` },
           async (payload) => {
             const n = payload.new as Notif;
             const s = sig(n);
@@ -229,7 +246,7 @@ export default function NotificationsBell() {
         .channel('realtime:notifications:upd')
         .on(
           'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `profile_id=eq.${u}` },
+          { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `profile_id=eq.${pid}` },
           (payload) => {
             const upd = payload.new as Notif;
             setRows((prev) => prev.map((r) => (r.id === upd.id ? { ...r, read_at: upd.read_at ?? null, _fresh: false } : r)));
@@ -240,9 +257,10 @@ export default function NotificationsBell() {
       return () => {
         supabase.removeChannel(chIns);
         supabase.removeChannel(chUpd);
-        alive = false;
       };
     })();
+
+    return () => { alive = false; };
   }, []);
 
   /* ---------- close on outside click / ESC ---------- */
@@ -335,7 +353,7 @@ export default function NotificationsBell() {
                         {_celebrate && <span aria-hidden>🎊</span>}
                       </div>
                       <div className="mt-0.5 break-words font-medium">
-                        {_celebrate ? text : text}
+                        {text}
                       </div>
                       {_celebrate && n.data?.badge_name && (
                         <div className="mt-0.5 text-xs text-[var(--hx-muted)]">
