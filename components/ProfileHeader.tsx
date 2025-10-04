@@ -51,7 +51,7 @@ export default function ProfileHeader({ profile }: ProfileHeaderProps) {
         console.error('Badges load error:', error);
         setBadges([]);
       } else {
-        // This already matches ClusterBadge (badge_code, label, track, tier, icon, earned_at)
+        // This shape matches ClusterBadge (badge_code, label, track, tier, icon, earned_at)
         setBadges((data ?? []) as ClusterBadge[]);
       }
       setLoadingBadges(false);
@@ -117,15 +117,15 @@ export default function ProfileHeader({ profile }: ProfileHeaderProps) {
               ) : null}
             </div>
 
-            {/* Badges row (slightly larger than before) */}
+            {/* Badges row — sized up */}
             <div className="mt-2">
               {loadingBadges ? (
-                <div className="h-7 w-28 rounded bg-slate-100 animate-pulse" />
+                <div className="h-8 w-32 rounded bg-slate-100 animate-pulse" />
               ) : badges && badges.length > 0 ? (
                 <BadgeCluster
                   badges={badges}
-                  size={36}     // ⬅️ bumped up from tiny; adjust as you like (e.g., 32–40)
-                  gap={8}
+                  size={42}     {/* ⬅️ bumped up (try 40–44 if you want) */}
+                  gap={10}
                   showTitles={false}
                 />
               ) : null}
