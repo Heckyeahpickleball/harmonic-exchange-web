@@ -1,11 +1,10 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import type { Database } from '@/types/supabase';
-import BadgeCluster from '@/components/BadgeCluster';
+import BadgeCluster, { type ClusterBadge } from '@/components/BadgeCluster';
 
 type Profile = {
   id: string;
@@ -17,33 +16,28 @@ type Profile = {
   is_admin?: boolean | null;
 };
 
-type ExpandedBadge = {
-  badge_code: string;
-  label: string | null;
-  track: 'give' | 'receive' | 'streak' | 'milestone' | null;
-  tier: number | null;
-  icon: string | null;            // e.g. "/badges/give_rays_t1.png"
-  earned_at: string;              // timestamp
-};
-
 interface ProfileHeaderProps {
   profile: Profile;
-  isOwner?: boolean;
 }
 
-export default function ProfileHeader({ profile, isOwner = false }: ProfileHeaderProps) {
-  const supabase = useMemo(() => createClientComponentClient<Database>(), []);
-  const [badges, setBadges] = useState<ExpandedBadge[] | null>(null);
-  const [loadingBadges, setLoadingBadges] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+/**
+ * ProfileHeader
+ * - Shows cover, avatar, name/labels
+ * - Renders earned badges under the name using <BadgeCluster />
+ */
+export default function ProfileHeader({ profile }: ProfileHeaderProps) {
+  const supabase = useMemo(() => createClientComponentClient(), []);
+  const [badges, setBadges] = useState<ClusterBadge[]>([]);
+  const [loadingBadges, setLoadingBadges] = useState<boolean>(false);
 
-  // ---- Fetch badges for this profile
   useEffect(() => {
     let isMounted = true;
 
-    async function loadBadges() {
+    const loadBadges = async () => {
+      if (!profile?.id) return;
       setLoadingBadges(true);
-      setError(null);
+
+      // Read from the expanded, UI-friendly view
       const { data, error } = await supabase
         .from('profile_badges_expanded')
         .select('badge_code,label,track,tier,icon,earned_at')
@@ -51,120 +45,110 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
         .order('earned_at', { ascending: false });
 
       if (!isMounted) return;
+
       if (error) {
-        setError(error.message);
+        // Fail silently in UI, but log for devs
+        console.error('Badges load error:', error);
         setBadges([]);
       } else {
-        // Normalize icon paths (fallback to a generic)
-        const normalized = (data ?? []).map((b) => ({
-          ...b,
-          icon: b.icon ?? '/badges/generic_badge.png',
-        })) as ExpandedBadge[];
-        setBadges(normalized);
+        // This already matches ClusterBadge (badge_code, label, track, tier, icon, earned_at)
+        setBadges((data ?? []) as ClusterBadge[]);
       }
       setLoadingBadges(false);
-    }
+    };
 
-    if (profile?.id) loadBadges();
+    loadBadges();
     return () => {
       isMounted = false;
     };
   }, [supabase, profile?.id]);
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div className="w-full">
       {/* Cover */}
-      <div className="h-32 w-full bg-[url('/cover-default.jpg')] bg-cover bg-center" />
+      <div className="relative w-full h-48 rounded-t-2xl overflow-hidden bg-gradient-to-r from-amber-200 to-teal-700">
+        <Image
+          fill
+          src="/headers/harmonic-cover.jpg"
+          alt="Profile cover"
+          className="object-cover"
+          priority
+        />
+      </div>
 
       {/* Header row */}
-      <div className="px-4 sm:px-6 -mt-10 pb-4">
-        <div className="flex items-end gap-4">
-          <div className="h-20 w-20 rounded-full border-4 border-white overflow-hidden bg-slate-100 shrink-0">
-            {profile?.avatar_url ? (
-              <Image
-                src={profile.avatar_url}
-                alt={profile?.full_name || 'Avatar'}
-                width={80}
-                height={80}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="h-full w-full grid place-items-center text-slate-400 text-xl">🙂</div>
-            )}
+      <div className="bg-white rounded-b-2xl shadow-sm px-5 pb-5">
+        <div className="flex items-center -mt-8 gap-4">
+          {/* Avatar */}
+          <div className="relative h-16 w-16 rounded-full ring-4 ring-white overflow-hidden bg-slate-100">
+            <Image
+              src={profile?.avatar_url || '/avatars/default.png'}
+              alt={profile?.full_name || 'Profile avatar'}
+              fill
+              className="object-cover"
+            />
           </div>
 
+          {/* Name + meta */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-semibold truncate">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-xl font-semibold leading-tight">
                 {profile?.full_name || 'Member'}
               </h1>
               {profile?.is_admin ? (
-                <span className="text-xs rounded-full border px-2 py-0.5 bg-emerald-50 border-emerald-200 text-emerald-700">
-                  Admin
-                </span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-white">Admin</span>
               ) : null}
             </div>
 
-            <div className="mt-1 text-sm text-slate-600 flex flex-wrap items-center gap-x-3 gap-y-1">
-              {(profile?.city || profile?.country) && (
-                <span>
-                  {[profile.city, profile.country].filter(Boolean).join(', ')}
-                </span>
-              )}
-              {profile?.created_at && (
-                <span className="truncate">
-                  • Member since {new Date(profile.created_at).toLocaleDateString()}
-                </span>
-              )}
+            {/* Location + member since */}
+            <div className="text-sm text-slate-600 mt-0.5">
+              {profile?.city && profile?.country ? (
+                <>
+                  {profile.city}, {profile.country}
+                </>
+              ) : profile?.country ? (
+                <>{profile.country}</>
+              ) : null}
+              {profile?.created_at ? (
+                <>
+                  {profile?.city || profile?.country ? ' • ' : ''}
+                  Member since {new Date(profile.created_at).toLocaleDateString()}
+                </>
+              ) : null}
             </div>
 
-            {/* Badge Cluster */}
-            <div className="mt-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-medium text-slate-700">Badges</h2>
-                {isOwner && (
-                  <Link
-                    href="/profile/badges"
-                    className="text-xs text-emerald-700 hover:underline"
-                  >
-                    Learn how to earn
-                  </Link>
-                )}
-              </div>
-
-              <div className="mt-2">
-                {loadingBadges ? (
-                  <div className="text-sm text-slate-500">Loading badges…</div>
-                ) : error ? (
-                  <div className="text-sm text-rose-600">Couldn’t load badges: {error}</div>
-                ) : badges && badges.length > 0 ? (
-                  <BadgeCluster
-                    badges={badges}
-                    size={28}
-                    gap={8}
-                    // tooltips on hover
-                    showTitles
-                  />
-                ) : (
-                  <div className="text-sm text-slate-500">No badges yet.</div>
-                )}
-              </div>
+            {/* Badges row (slightly larger than before) */}
+            <div className="mt-2">
+              {loadingBadges ? (
+                <div className="h-7 w-28 rounded bg-slate-100 animate-pulse" />
+              ) : badges && badges.length > 0 ? (
+                <BadgeCluster
+                  badges={badges}
+                  size={36}     // ⬅️ bumped up from tiny; adjust as you like (e.g., 32–40)
+                  gap={8}
+                  showTitles={false}
+                />
+              ) : null}
             </div>
           </div>
 
-          {/* Owner actions */}
-          <div className="hidden sm:block">
-            {isOwner && (
-              <Link
-                href="/profile/edit"
-                className="inline-flex items-center rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50"
-              >
-                Edit Profile
-              </Link>
-            )}
+          {/* Actions */}
+          <div className="flex items-center gap-2">
+            <Link
+              href="/profile/edit"
+              className="px-3 py-1.5 rounded-md border text-sm hover:bg-slate-50"
+            >
+              Edit Profile
+            </Link>
+            <Link
+              href="/sign-out"
+              className="px-3 py-1.5 rounded-md border text-sm hover:bg-slate-50"
+            >
+              Sign Out
+            </Link>
           </div>
         </div>
       </div>
-    </section>
+    </div>
   );
 }
