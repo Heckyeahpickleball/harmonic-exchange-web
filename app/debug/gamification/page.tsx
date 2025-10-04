@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient'; // ✅ use alias, not ../../lib/...
+import { supabase } from '@/lib/supabaseClient'; // ✅ use alias
 
 type Row = Record<string, any>;
 

@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import type { Database } from '../types/supabase';
 import BadgeCluster from '@/components/BadgeCluster';
 
 type Profile = {
@@ -32,7 +31,8 @@ interface ProfileHeaderProps {
 }
 
 export default function ProfileHeader({ profile, isOwner = false }: ProfileHeaderProps) {
-  const supabase = useMemo(() => createClientComponentClient<Database>(), []);
+  // ✅ No Database generic — avoids the "../types/supabase" error
+  const supabase = useMemo(() => createClientComponentClient(), []);
   const [badges, setBadges] = useState<ExpandedBadge[] | null>(null);
   const [loadingBadges, setLoadingBadges] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
