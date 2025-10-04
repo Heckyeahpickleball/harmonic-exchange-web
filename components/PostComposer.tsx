@@ -9,6 +9,8 @@ type Props = {
   profileId: string;
   onPost?: (row: PostRow) => void; // let parent optimistically add
   limit?: number; // default 600
+  /** Optional: when provided, the post will be scoped to a chapter */
+  groupId?: string | null; // <-- NEW (pass null on Global page)
 };
 
 export type PostRow = {
@@ -38,7 +40,7 @@ function normalizePostRow(data: any): PostRow {
   };
 }
 
-export default function PostComposer({ profileId, onPost, limit = 600 }: Props) {
+export default function PostComposer({ profileId, onPost, limit = 600, groupId = null }: Props) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -85,11 +87,13 @@ export default function PostComposer({ profileId, onPost, limit = 600 }: Props) 
     setBusy(true);
     setErr('');
     try {
-      const payload = {
+      const payload: any = {
         profile_id: profileId,
         body: text.trim() || null,        // allow empty when images exist
         images: images.length ? images : null,
       };
+      // scope: null for global page, or specific chapter elsewhere
+      payload.group_id = groupId ?? null;
 
       const { data, error } = await supabase
         .from('posts')

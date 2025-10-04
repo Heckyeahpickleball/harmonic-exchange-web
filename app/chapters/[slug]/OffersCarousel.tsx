@@ -1,5 +1,9 @@
 'use client';
 
+// NOTE: This component is not referenced on the Chapter page anymore.
+// The new auto-populated rail is <CityOffersRail /> which pulls
+// city/country + online offers and shows a horizontal carousel.
+
 import { useEffect, useMemo, useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
