@@ -4,15 +4,14 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 /**
- * Make sure we only ever have ONE Supabase client in the browser.
- * This avoids re-connecting Realtime channels on re-renders/HMR
- * and keeps message switching feeling instant.
+ * One Supabase client in the browser (singleton).
+ * Avoids reconnecting Realtime channels on re-renders/HMR.
  */
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-// Augment the global type so TS lets us stash a singleton on window/globalThis.
+// Allow stashing a singleton on the global.
 declare global {
   // eslint-disable-next-line no-var
   var __HX_SUPABASE__: SupabaseClient | undefined;
@@ -20,8 +19,9 @@ declare global {
 
 function makeBrowserClient(): SupabaseClient {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    // This will surface quickly if env vars are missing in local or Vercel.
-    console.warn('Supabase env vars are missing: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY');
+    console.warn(
+      'Supabase env vars are missing: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY'
+    );
   }
 
   return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -30,10 +30,7 @@ function makeBrowserClient(): SupabaseClient {
       autoRefreshToken: true,
       detectSessionInUrl: true,
     },
-    // A tiny header is handy for tracing, optional:
     global: { headers: { 'x-client-info': 'harmonic-exchange-web' } },
-    // (optional) throttle server-sent events if you want:
-    // realtime: { params: { eventsPerSecond: 10 } },
   });
 }
 
@@ -41,7 +38,7 @@ function makeBrowserClient(): SupabaseClient {
 export const supabase: SupabaseClient =
   globalThis.__HX_SUPABASE__ ?? (globalThis.__HX_SUPABASE__ = makeBrowserClient());
 
-// Convenience getter if you prefer calling a function:
+// Convenience getter
 export function getSupabaseClient(): SupabaseClient {
   return supabase;
 }

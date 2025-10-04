@@ -1,51 +1,35 @@
 'use client';
 
-import Image from 'next/image';
 import * as React from 'react';
 
-export type BadgeProps = {
-  /** Path under /public, e.g. "/badges/give_t1.png" (or any absolute URL) */
+type Props = {
+  /** image url to show inside the round badge */
   icon: string;
-  /** Pixel size for the circular icon (both width & height) */
+  /** px size of the circle */
   size?: number;
-  /** Tooltip text for hover (optional) */
+  /** tooltip/title text */
   title?: string;
-  /** Visible caption rendered underneath (optional) */
-  caption?: string;
-  /** Extra classes on the wrapper */
   className?: string;
 };
 
-export default function Badge({
-  icon,
-  size = 40,
-  title,
-  caption,
-  className = '',
-}: BadgeProps) {
+export default function Badge({ icon, size = 40, title, className = '' }: Props) {
+  const s = Math.max(16, size);
   return (
-    <div className={['inline-flex flex-col items-center', className].join(' ')}>
-      <div
-        className="relative overflow-hidden rounded-full ring-1 ring-black/5 shadow-sm bg-white"
-        style={{ width: size, height: size }}
-        title={title}
-        aria-label={title}
-      >
-        {/* If you ever serve remote icons, you can swap to plain <img> */}
-        <Image
-          src={icon}
-          alt={title ?? 'Badge'}
-          width={size}
-          height={size}
-          className="h-full w-full object-cover"
-        />
-      </div>
-
-      {caption ? (
-        <div className="mt-1 text-[10px] leading-tight text-slate-600 text-center max-w-[84px]">
-          {caption}
-        </div>
-      ) : null}
+    <div
+      className={[
+        'inline-flex items-center justify-center rounded-full border bg-white shadow-sm',
+        className,
+      ].join(' ')}
+      style={{ width: s, height: s }}
+      title={title}
+      aria-label={title}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={icon}
+        alt={title || 'Badge'}
+        style={{ width: Math.floor(s * 0.78), height: Math.floor(s * 0.78) }}
+      />
     </div>
   );
 }

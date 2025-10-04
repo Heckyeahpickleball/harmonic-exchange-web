@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import type { Database } from '@/types/supabase';
+import type { Database } from '../types/supabase';
 import BadgeCluster from '@/components/BadgeCluster';
 
 type Profile = {
@@ -141,7 +141,6 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
                   <BadgeCluster
                     badges={badges}
                     size={28}
-                    gap={8}
                     // tooltips on hover
                     showTitles
                   />
