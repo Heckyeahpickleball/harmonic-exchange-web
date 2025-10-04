@@ -1,8 +1,9 @@
+// components/OfferCard.tsx
 'use client';
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 export type OfferRow = {
@@ -41,12 +42,30 @@ function StatusBadge({ status }: { status: OfferRow['status'] }) {
   );
 }
 
+function isLikelyValidUrl(u?: string | null) {
+  if (!u || typeof u !== 'string') return false;
+  try {
+    if (u.startsWith('data:')) return true;
+    const url = new URL(u);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    // allow app/public relative paths
+    return u.startsWith('/') || u.startsWith('./');
+  }
+}
+
 export default function OfferCard({ offer, mine = false, onDeleted }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const thumb =
+  const thumbRaw =
     Array.isArray(offer.images) && offer.images.length > 0 ? offer.images[0] : null;
+
+  const thumb = useMemo<string>(() => {
+    if (thumbRaw && isLikelyValidUrl(thumbRaw)) return thumbRaw as string;
+    // Use existing favicon as a guaranteed local fallback
+    return '/favicon.ico';
+  }, [thumbRaw]);
 
   async function handleDelete() {
     setErr(null);
@@ -68,28 +87,30 @@ export default function OfferCard({ offer, mine = false, onDeleted }: Props) {
 
   return (
     <article className="hx-card transition hover:shadow-md">
-      <Link href={href} className="block">
+      <Link href={href} className="block" prefetch={false}>
         <div className="relative h-48 w-full overflow-hidden rounded-t bg-gray-100">
-          {thumb ? (
-            <Image
-              src={thumb}
-              alt={offer.title}
-              fill
-              className="object-cover"
-              sizes="(max-width: 768px) 100vw, 50vw"
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-xs text-gray-400">
-              No image
-            </div>
-          )}
+          <Image
+            src={thumb}
+            alt={offer.title || 'Offer image'}
+            fill
+            className="object-cover"
+            sizes="(max-width: 768px) 100vw, 50vw"
+            unoptimized
+            onError={(e) => {
+              const el = e.target as HTMLImageElement | null;
+              if (el && el.getAttribute('src') !== '/favicon.ico') {
+                el.setAttribute('src', '/favicon.ico');
+              }
+            }}
+            draggable={false}
+          />
         </div>
       </Link>
 
       <div className="space-y-3 p-3">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <Link href={href} className="block text-base font-semibold hover:underline">
+            <Link href={href} className="block text-base font-semibold hover:underline" prefetch={false}>
               {offer.title}
             </Link>
             <div className="mt-0.5 text-xs text-gray-600">
@@ -98,7 +119,7 @@ export default function OfferCard({ offer, mine = false, onDeleted }: Props) {
             {offer.owner_name && offer.owner_id && (
               <div className="mt-0.5 text-xs text-gray-500">
                 by{' '}
-                <Link href={`/u/${offer.owner_id}`} className="hx-link">
+                <Link href={`/u/${offer.owner_id}`} className="hx-link" prefetch={false}>
                   {offer.owner_name}
                 </Link>
               </div>
@@ -107,14 +128,13 @@ export default function OfferCard({ offer, mine = false, onDeleted }: Props) {
           <StatusBadge status={offer.status} />
         </div>
 
-        {/* Actions */}
         <div className="flex flex-wrap gap-2">
-          <Link href={href} className="hx-btn hx-btn--outline-primary text-sm">
+          <Link href={href} className="hx-btn hx-btn--outline-primary text-sm" prefetch={false}>
             View
           </Link>
 
           {!mine && (
-            <Link href={href} className="hx-btn hx-btn--primary text-sm">
+            <Link href={href} className="hx-btn hx-btn--primary text-sm" prefetch={false}>
               Ask to Receive
             </Link>
           )}

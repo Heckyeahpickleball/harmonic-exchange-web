@@ -1,3 +1,4 @@
+// /components/RequestModal.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -38,8 +39,20 @@ export default function RequestModal({
   const remaining = maxLength - note.length;
   const canSend = !busy && note.trim().length > 0 && remaining >= 0;
 
+  async function handleSubmit() {
+    if (!canSend) return;
+    setErr('');
+    setBusy(true);
+    try {
+      await onSubmit(note.trim(), setBusy, setErr);
+    } finally {
+      // If parent didn't clear busy itself, clear it to avoid a stuck state.
+      setBusy(false);
+    }
+  }
+
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="dialog" aria-modal="true">
       <div className="w-full max-w-xl rounded-xl bg-white p-4 shadow-xl">
         <div className="mb-3">
           <h3 className="text-lg font-semibold">{title}</h3>
@@ -71,17 +84,13 @@ export default function RequestModal({
           {err && <div className="text-sm text-red-600">{err}</div>}
 
           <div className="flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={onCancel}
-              className="hx-btn hx-btn--ghost"
-            >
+            <button type="button" onClick={onCancel} className="hx-btn hx-btn--ghost">
               Cancel
             </button>
             <button
               type="button"
               disabled={!canSend}
-              onClick={() => onSubmit(note.trim(), setBusy, setErr)}
+              onClick={handleSubmit}
               className="hx-btn hx-btn--brand disabled:opacity-50"
             >
               {busy ? 'Sending…' : submitLabel}

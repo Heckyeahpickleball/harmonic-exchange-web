@@ -84,11 +84,12 @@ function MessageThread({
     setLoading(true);
     setErr(null);
     try {
+      // Use .in() for clarity instead of .or()
       const { data, error } = await supabase
         .from('notifications')
         .select('id, created_at, type, data')
         .eq('profile_id', me)
-        .or('type.eq.message,type.eq.message_received')
+        .in('type', ['message', 'message_received'])
         .contains('data', { request_id: req.id })
         .order('created_at', { ascending: true });
 
@@ -120,13 +121,18 @@ function MessageThread({
   }, [unread]);
 
   useEffect(() => {
-    loadThread();
+    let cancelled = false;
+    (async () => {
+      if (cancelled) return;
+      await loadThread();
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, req.id, me]);
 
   useEffect(() => {
-    if (!me) return;
-
     const channel = supabase
       .channel(`realtime:thread:${req.id}:${me}`)
       .on(
@@ -198,11 +204,11 @@ function MessageThread({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="rounded border px-3 py-1 text-sm hover:bg-gray-50 relative"
+        className="relative rounded border px-3 py-1 text-sm hover:bg-gray-50"
       >
         {open ? 'Hide messages' : 'Message'}
         {unread > 0 && !open && (
-          <span className="absolute -right-2 -top-2 rounded-full bg-amber-500 px-1 text-[11px] font-bold text-white min-w-[18px] text-center">
+          <span className="absolute -right-2 -top-2 min-w-[18px] rounded-full bg-amber-500 px-1 text-[11px] font-bold text-white text-center">
             {unread}
           </span>
         )}
@@ -220,9 +226,9 @@ function MessageThread({
               return (
                 <li
                   key={m.id}
-                  className={`max-w-[85%] rounded px-3 py-2 text-sm ${mine ? 'ml-auto bg-black text-white' : 'bg-gray-100'}`}
+                  className={`max-w-[85%] rounded px-3 py-2 text-sm ${mine ? 'ml-auto bg-gray-900 text-white' : 'bg-gray-100'}`}
                 >
-                  <div className="opacity-70 text-[11px]">{new Date(m.created_at).toLocaleString()}</div>
+                  <div className="text-[11px] opacity-70">{new Date(m.created_at).toLocaleString()}</div>
                   <div className="mt-1 whitespace-pre-wrap">{m.text}</div>
                 </li>
               );
@@ -251,15 +257,14 @@ function MessageThread({
 }
 
 function InboxContent() {
-  const searchParams = useSearchParams(); // allowed in client component
+  const searchParams = useSearchParams(); // client-safe; wrapped by Suspense in default export
   const [deepThread, setDeepThread] = useState<string | undefined>(undefined);
   const [tab, setTab] = useState<Tab>('received');
 
   useEffect(() => {
-    // read after mount to avoid SSR/CSR mismatch
     const t = searchParams.get('tab') as Tab | null;
     const th = searchParams.get('thread') || undefined;
-    if (t && (t === 'received' || t === 'sent')) setTab(t);
+    if (t === 'received' || t === 'sent') setTab(t);
     setDeepThread(th);
   }, [searchParams]);
 
@@ -293,6 +298,7 @@ function InboxContent() {
           `)
           .eq('offers.owner_id', uid)
           .order('created_at', { ascending: false });
+
         if (error) throw error;
         setItems((data || []) as unknown as ReqRow[]);
       } else {
@@ -305,6 +311,7 @@ function InboxContent() {
           `)
           .eq('requester_profile_id', uid)
           .order('created_at', { ascending: false });
+
         if (error) throw error;
         setItems((data || []) as unknown as ReqRow[]);
       }
@@ -318,7 +325,14 @@ function InboxContent() {
   }, [tab]);
 
   useEffect(() => {
-    load();
+    let cancelled = false;
+    (async () => {
+      if (cancelled) return;
+      await load();
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [load]);
 
   const received = useMemo(() => (tab === 'received' ? items : []), [tab, items]);
@@ -338,17 +352,27 @@ function InboxContent() {
 
   async function setStatus(req: ReqRow, next: Status) {
     setMsg('');
-    setItems((prev) => prev.map((r) => (r.id === req.id ? { ...r, status: next, updated_at: new Date().toISOString() } : r)));
+    setItems((prev) =>
+      prev.map((r) => (r.id === req.id ? { ...r, status: next, updated_at: new Date().toISOString() } : r))
+    );
 
     try {
-      const { error } = await supabase.from('requests').update({ status: next }).eq('id', req.id).select('id').single();
+      const { error } = await supabase
+        .from('requests')
+        .update({ status: next })
+        .eq('id', req.id)
+        .select('id')
+        .single();
       if (error) throw error;
 
       if (tab === 'received') {
         const requesterId = req.requester_profile_id;
-        if (next === 'accepted') await notify(requesterId, 'request_accepted', { request_id: req.id, offer_id: req.offer_id });
-        if (next === 'declined') await notify(requesterId, 'request_declined', { request_id: req.id, offer_id: req.offer_id });
-        if (next === 'fulfilled') await notify(requesterId, 'request_fulfilled', { request_id: req.id, offer_id: req.offer_id });
+        if (next === 'accepted')
+          await notify(requesterId, 'request_accepted', { request_id: req.id, offer_id: req.offer_id });
+        if (next === 'declined')
+          await notify(requesterId, 'request_declined', { request_id: req.id, offer_id: req.offer_id });
+        if (next === 'fulfilled')
+          await notify(requesterId, 'request_fulfilled', { request_id: req.id, offer_id: req.offer_id });
       } else if (tab === 'sent') {
         const ownerId = req.offers?.owner_id;
         if (next === 'withdrawn' && ownerId) {
@@ -399,19 +423,36 @@ function InboxContent() {
                     </Link>
                   </div>
                   <div className="mt-2 whitespace-pre-wrap text-sm">{r.note}</div>
-                  <div className="mt-2 text-xs">Status: <span className="font-semibold">{r.status}</span></div>
+                  <div className="mt-2 text-xs">
+                    Status: <span className="font-semibold">{r.status}</span>
+                  </div>
                   <MessageThread req={r} me={me} tab={tab} autoOpen={deepThread === r.id} />
                 </div>
 
                 <div className="flex flex-col gap-2">
                   {r.status === 'pending' && (
                     <>
-                      <button onClick={() => setStatus(r, 'accepted')} className="rounded bg-black px-3 py-1 text-sm text-white">Accept</button>
-                      <button onClick={() => setStatus(r, 'declined')} className="rounded border px-3 py-1 text-sm hover:bg-gray-50">Decline</button>
+                      <button
+                        onClick={() => setStatus(r, 'accepted')}
+                        className="rounded bg-black px-3 py-1 text-sm text-white"
+                      >
+                        Accept
+                      </button>
+                      <button
+                        onClick={() => setStatus(r, 'declined')}
+                        className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
+                      >
+                        Decline
+                      </button>
                     </>
                   )}
                   {r.status === 'accepted' && (
-                    <button onClick={() => setStatus(r, 'fulfilled')} className="rounded border px-3 py-1 text-sm hover:bg-gray-50">Mark Fulfilled</button>
+                    <button
+                      onClick={() => setStatus(r, 'fulfilled')}
+                      className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
+                    >
+                      Mark Fulfilled
+                    </button>
                   )}
                 </div>
               </div>
@@ -435,13 +476,20 @@ function InboxContent() {
                     </Link>
                   </div>
                   <div className="mt-2 whitespace-pre-wrap text-sm">{r.note}</div>
-                  <div className="mt-2 text-xs">Status: <span className="font-semibold">{r.status}</span></div>
+                  <div className="mt-2 text-xs">
+                    Status: <span className="font-semibold">{r.status}</span>
+                  </div>
                   <MessageThread req={r} me={me} tab={tab} autoOpen={deepThread === r.id} />
                 </div>
 
                 <div className="flex flex-col gap-2">
                   {r.status === 'pending' && (
-                    <button onClick={() => setStatus(r, 'withdrawn')} className="rounded border px-3 py-1 text-sm hover:bg-gray-50">Withdraw</button>
+                    <button
+                      onClick={() => setStatus(r, 'withdrawn')}
+                      className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
+                    >
+                      Withdraw
+                    </button>
                   )}
                 </div>
               </div>
@@ -454,7 +502,7 @@ function InboxContent() {
   );
 }
 
-// Suspense wrapper satisfies Next 15's requirement when a page uses useSearchParams().
+// Suspense wrapper satisfies Next 15 when using useSearchParams().
 export default function InboxPage() {
   return (
     <Suspense fallback={<div className="text-sm text-gray-600">Loading…</div>}>

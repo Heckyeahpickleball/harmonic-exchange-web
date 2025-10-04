@@ -39,6 +39,9 @@ export default function NotificationsBell() {
   const requesterCache = useRef(new Map<string, string>());
   const sigSeen = useRef<Set<string>>(new Set());
 
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
+
   /* ---------- enrichment helpers ---------- */
   async function enrichOfferTitles(notifs: Notif[]) {
     const missing = Array.from(
@@ -120,7 +123,7 @@ export default function NotificationsBell() {
       case 'message_received': {
         const snip = body ? `: ${body.slice(0, 80)}` : '';
         const on = offerTitle ? ` on “${offerTitle}”` : '';
-        return { text: `New message${on}${snip}`, href: reqId ? `/messages?thread=${reqId}` : '/messages' };
+        return { text: `New message${on}${snip}`, href: reqId ? `/inbox?thread=${reqId}` : '/inbox' };
       }
       case 'fulfillment_reminder': {
         const t = offerTitle ? ` “${offerTitle}”` : '';
@@ -155,13 +158,15 @@ export default function NotificationsBell() {
 
   function sig(n: Notif) {
     return `${n.profile_id}|${n.type}|${n.data?.offer_id ?? ''}|${n.data?.request_id ?? ''}`;
-    }
+  }
 
   /* ---------- initial load + realtime ---------- */
   useEffect(() => {
+    let alive = true;
     (async () => {
       const { data } = await supabase.auth.getUser();
       const u = data?.user?.id ?? null;
+      if (!alive) return;
       setUid(u);
       if (!u) return;
 
@@ -220,19 +225,43 @@ export default function NotificationsBell() {
       return () => {
         supabase.removeChannel(chIns);
         supabase.removeChannel(chUpd);
+        alive = false;
       };
     })();
   }, []);
 
+  /* ---------- close on outside click / ESC ---------- */
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      const root = rootRef.current;
+      if (!root) return;
+      const t = e.target as Node | null;
+      if (t && root.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
   /* ---------- UI ---------- */
   return (
-    <div className="relative">
-      {/* teal outline button */}
+    <div className="relative" ref={rootRef} style={{ pointerEvents: 'auto' }}>
       <button
+        type="button"
         className="hx-btn hx-btn--outline-primary text-sm px-3 py-2 relative"
         onClick={() => setOpen((v) => !v)}
         title="Notifications"
         aria-label="Open notifications"
+        aria-haspopup="menu"
+        aria-expanded={open}
       >
         <span aria-hidden>🔔</span>
         {unread > 0 && (
@@ -243,7 +272,15 @@ export default function NotificationsBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-[360px] max-w-[92vw] hx-card p-0">
+        <div
+          className="absolute right-0 z-[2000] mt-2 w-[360px] max-w-[92vw] hx-card p-0"
+          role="menu"
+          aria-label="Notifications"
+          style={{
+            // ensure panel doesn't block the whole page
+            pointerEvents: 'auto',
+          }}
+        >
           <div className="flex items-center justify-between border-b px-3 py-2">
             <strong className="text-sm">Notifications</strong>
             <button onClick={markAllRead} className="hx-btn hx-btn--secondary text-xs px-2 py-1">
@@ -251,8 +288,10 @@ export default function NotificationsBell() {
             </button>
           </div>
 
-          <ul className="max-h-[55vh] overflow-auto">
-            {rows.length === 0 && <li className="px-3 py-3 text-sm text-[var(--hx-muted)]">No notifications.</li>}
+          <ul ref={listRef} className="max-h-[55vh] overflow-auto">
+            {rows.length === 0 && (
+              <li className="px-3 py-3 text-sm text-[var(--hx-muted)]">No notifications.</li>
+            )}
 
             {rows.map((n) => {
               const { text, href } = label(n);

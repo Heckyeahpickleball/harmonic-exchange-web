@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import BadgeCluster, { type ClusterBadge } from '@/components/BadgeCluster';
 
+// ——— Minimal types we need (inline; no '@/types/supabase' import) ———
 type Profile = {
   id: string;
   full_name?: string | null;
@@ -20,135 +21,117 @@ interface ProfileHeaderProps {
   profile: Profile;
 }
 
-/**
- * ProfileHeader
- * - Shows cover, avatar, name/labels
- * - Renders earned badges under the name using <BadgeCluster />
- */
 export default function ProfileHeader({ profile }: ProfileHeaderProps) {
   const supabase = useMemo(() => createClientComponentClient(), []);
   const [badges, setBadges] = useState<ClusterBadge[]>([]);
-  const [loadingBadges, setLoadingBadges] = useState<boolean>(false);
 
   useEffect(() => {
     let isMounted = true;
 
-    const loadBadges = async () => {
-      if (!profile?.id) return;
-      setLoadingBadges(true);
-
-      // Read from the expanded, UI-friendly view
+    async function loadBadges() {
+      // Matches the SQL view we created: public.profile_badges_expanded
       const { data, error } = await supabase
         .from('profile_badges_expanded')
-        .select('badge_code,label,track,tier,icon,earned_at')
+        .select('badge_code, label, track, tier, icon, earned_at')
         .eq('profile_id', profile.id)
         .order('earned_at', { ascending: false });
 
       if (!isMounted) return;
 
-      if (error) {
-        // Fail silently in UI, but log for devs
-        console.error('Badges load error:', error);
-        setBadges([]);
-      } else {
-        // This shape matches ClusterBadge (badge_code, label, track, tier, icon, earned_at)
-        setBadges((data ?? []) as ClusterBadge[]);
+      if (!error && data) {
+        // data arrives as rows with the exact fields we select above
+        setBadges(
+          data.map((r) => ({
+            code: r.badge_code,
+            label: r.label ?? '',
+            track: (r.track as ClusterBadge['track']) ?? 'milestone',
+            tier: (r.tier as number | null) ?? null,
+            icon: r.icon ?? '/badges/give_rays_t1.png',
+            earned_at: r.earned_at,
+          }))
+        );
       }
-      setLoadingBadges(false);
-    };
+    }
 
-    loadBadges();
+    if (profile?.id) loadBadges();
     return () => {
       isMounted = false;
     };
-  }, [supabase, profile?.id]);
+  }, [profile?.id, supabase]);
+
+  const name = profile.full_name ?? 'Member';
 
   return (
-    <div className="w-full">
-      {/* Cover */}
-      <div className="relative w-full h-48 rounded-t-2xl overflow-hidden bg-gradient-to-r from-amber-200 to-teal-700">
+    <header className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      {/* Banner */}
+      <div className="relative h-40 w-full bg-gradient-to-r from-amber-100 via-emerald-100 to-sky-100">
         <Image
+          src="/cover.png"
+          alt=""
           fill
-          src="/headers/harmonic-cover.jpg"
-          alt="Profile cover"
-          className="object-cover"
           priority
+          className="object-cover opacity-80"
         />
       </div>
 
-      {/* Header row */}
-      <div className="bg-white rounded-b-2xl shadow-sm px-5 pb-5">
-        <div className="flex items-center -mt-8 gap-4">
-          {/* Avatar */}
-          <div className="relative h-16 w-16 rounded-full ring-4 ring-white overflow-hidden bg-slate-100">
+      {/* Row: avatar + name + actions */}
+      <div className="px-4 sm:px-6 -mt-10 pb-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
             <Image
-              src={profile?.avatar_url || '/avatars/default.png'}
-              alt={profile?.full_name || 'Profile avatar'}
-              fill
-              className="object-cover"
+              src={profile.avatar_url || '/avatar.png'}
+              alt={name}
+              width={64}
+              height={64}
+              className="rounded-full ring-2 ring-white shadow"
             />
-          </div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-xl font-semibold text-slate-900">{name}</h1>
 
-          {/* Name + meta */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl font-semibold leading-tight">
-                {profile?.full_name || 'Member'}
-              </h1>
-              {profile?.is_admin ? (
-                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-white">Admin</span>
-              ) : null}
-            </div>
-
-            {/* Location + member since */}
-            <div className="text-sm text-slate-600 mt-0.5">
-              {profile?.city && profile?.country ? (
-                <>
-                  {profile.city}, {profile.country}
-                </>
-              ) : profile?.country ? (
-                <>{profile.country}</>
-              ) : null}
-              {profile?.created_at ? (
-                <>
-                  {profile?.city || profile?.country ? ' • ' : ''}
-                  Member since {new Date(profile.created_at).toLocaleDateString()}
-                </>
-              ) : null}
-            </div>
-
-            {/* Badges row — sized up */}
-            <div className="mt-2">
-              {loadingBadges ? (
-                <div className="h-8 w-32 rounded bg-slate-100 animate-pulse" />
-              ) : badges && badges.length > 0 ? (
+              {/* ➜ Badges to the RIGHT of the name, with captions */}
+              {badges.length > 0 && (
                 <BadgeCluster
                   badges={badges}
-                  size={42}     {/* ⬅️ bumped up (try 40–44 if you want) */}
-                  gap={10}
+                  size={44}        // bump to 44px; tweak 40–48 to taste
+                  gap={12}
                   showTitles={false}
+                  className="ml-1"
                 />
-              ) : null}
+              )}
             </div>
           </div>
 
-          {/* Actions */}
           <div className="flex items-center gap-2">
             <Link
               href="/profile/edit"
-              className="px-3 py-1.5 rounded-md border text-sm hover:bg-slate-50"
+              className="btn btn-sm bg-white hover:bg-slate-50 border border-slate-300"
             >
               Edit Profile
             </Link>
-            <Link
+            <a
               href="/sign-out"
-              className="px-3 py-1.5 rounded-md border text-sm hover:bg-slate-50"
+              className="btn btn-sm bg-white hover:bg-slate-50 border border-slate-300"
             >
-              Sign Out
-            </Link>
+              Sign out
+            </a>
           </div>
         </div>
+
+        {/* Meta row */}
+        <div className="mt-1 text-sm text-slate-600">
+          {profile.city && profile.country ? (
+            <>
+              {profile.city}, {profile.country}
+            </>
+          ) : null}
+          {profile.created_at ? (
+            <>
+              {profile.city && profile.country ? ' • ' : ''}
+              Member since {new Date(profile.created_at).toLocaleDateString()}
+            </>
+          ) : null}
+        </div>
       </div>
-    </div>
+    </header>
   );
 }

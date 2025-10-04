@@ -1,20 +1,26 @@
 // app/layout.tsx
-'use client';
-
 import './globals.css';
-import { ReactNode } from 'react';
+import type { Metadata } from 'next';
 import ClientHeaderNav from '@/components/ClientHeaderNav';
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export const metadata: Metadata = {
+  title: 'Harmonic Exchange',
+  description: 'Exploring a new way of living through cooperation and mutual support',
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen font-sans bg-background text-foreground">
-        <header className="border-b">
-          <div className="mx-auto max-w-5xl px-3">
+      <body className="min-h-screen bg-[#fafafa] text-slate-900 antialiased">
+        <div className="border-b bg-white">
+          <div className="mx-auto max-w-6xl px-4">
             <ClientHeaderNav />
           </div>
-        </header>
-        <main className="mx-auto max-w-5xl p-4">{children}</main>
+        </div>
+
+        <main className="mx-auto max-w-6xl px-4 py-6">
+          {children}
+        </main>
       </body>
     </html>
   );

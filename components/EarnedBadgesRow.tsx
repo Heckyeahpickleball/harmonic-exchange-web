@@ -47,11 +47,8 @@ export default function EarnedBadgesRow({ profileId, size = 32, max = 8, classNa
       {rows.map((b) => (
         <Badge
           key={`${b.badge_code}-${b.earned_at}`}
-          src={b.icon ?? undefined}
-          tier={b.tier ?? undefined}
-          track={(b.track as any) ?? undefined}
+          icon={b.icon ?? ""}
           size={size}
-          alt={b.label}
           className="rounded-full"
         />
       ))}

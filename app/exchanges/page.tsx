@@ -1,3 +1,4 @@
+// /app/exchanges/page.tsx
 'use client';
 
 import { Suspense, useEffect, useMemo, useState, useCallback } from 'react';
@@ -91,7 +92,7 @@ function MessageThread({
         .from('notifications')
         .select('id, created_at, type, data')
         .eq('profile_id', me)
-        .or('type.eq.message,type.eq.message_received')
+        .in('type', ['message', 'message_received']) // safer than .or()
         .contains('data', { request_id: req.id })
         .order('created_at', { ascending: true });
 
@@ -123,7 +124,14 @@ function MessageThread({
   }, [unread]);
 
   useEffect(() => {
-    loadThread();
+    let cancelled = false;
+    (async () => {
+      if (cancelled) return;
+      await loadThread();
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, req.id, me]);
 
@@ -155,11 +163,7 @@ function MessageThread({
             if (open) {
               setMsgs((m) => [...m, msg]);
               if (n.type === 'message_received') {
-                supabase
-                  .from('notifications')
-                  .update({ read_at: new Date().toISOString() })
-                  .eq('id', n.id)
-                  .then(() => {});
+                supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', n.id);
               }
             } else {
               if (n.type === 'message_received') setUnread((u) => u + 1);
@@ -219,11 +223,11 @@ function MessageThread({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="rounded border px-3 py-1 text-sm hover:bg-gray-50 relative"
+        className="relative rounded border px-3 py-1 text-sm hover:bg-gray-50"
       >
         {open ? 'Hide messages' : 'Message'}
         {unread > 0 && !open && (
-          <span className="absolute -right-2 -top-2 rounded-full bg-amber-500 px-1 text-[11px] font-bold text-white min-w-[18px] text-center">
+          <span className="absolute -right-2 -top-2 min-w-[18px] rounded-full bg-amber-500 px-1 text-[11px] font-bold text-white text-center">
             {unread}
           </span>
         )}
@@ -244,10 +248,10 @@ function MessageThread({
                 <li
                   key={m.id}
                   className={`max-w-[85%] rounded px-3 py-2 text-sm ${
-                    mine ? 'ml-auto bg-black text-white' : 'bg-gray-100'
+                    mine ? 'ml-auto bg-gray-900 text-white' : 'bg-gray-100'
                   }`}
                 >
-                  <div className="opacity-70 text-[11px]">
+                  <div className="text-[11px] opacity-70">
                     {new Date(m.created_at).toLocaleString()}
                   </div>
                   <div className="mt-1 whitespace-pre-wrap">{m.text}</div>
@@ -310,9 +314,8 @@ function ExchangesContent() {
             requester:profiles ( id, display_name )
           `)
           .eq('offers.owner_id', uid)
-          .not('status', 'in', '(fulfilled,declined)')   // ACTIVE ONLY
+          .not('status', 'in', '(fulfilled,declined)')
           .order('created_at', { ascending: false });
-
         if (error) throw error;
         setItems((data || []) as unknown as ReqRow[]);
       } else if (tab === 'sent') {
@@ -324,13 +327,11 @@ function ExchangesContent() {
             requester:profiles ( id, display_name )
           `)
           .eq('requester_profile_id', uid)
-          .not('status', 'in', '(fulfilled,declined)')   // ACTIVE ONLY
+          .not('status', 'in', '(fulfilled,declined)')
           .order('created_at', { ascending: false });
-
         if (error) throw error;
         setItems((data || []) as unknown as ReqRow[]);
       } else if (tab === 'fulfilled') {
-        // FULFILLED: union of both sides where status is fulfilled
         const [rx, sx] = await Promise.all([
           supabase
             .from('requests')
@@ -359,7 +360,6 @@ function ExchangesContent() {
         const merged = dedupeNewest([...rxRows, ...sxRows]);
         setItems(merged);
       } else {
-        // DECLINED: union of both sides where status is declined
         const [rx, sx] = await Promise.all([
           supabase
             .from('requests')
@@ -398,7 +398,11 @@ function ExchangesContent() {
   }, [tab]);
 
   useEffect(() => {
-    load();
+    let cancelled = false;
+    (async () => {
+      if (cancelled) return;
+      await load();
+    })();
   }, [load]);
 
   const received = useMemo(() => (tab === 'received' ? items : []), [tab, items]);
@@ -450,11 +454,7 @@ function ExchangesContent() {
       } else if (tab === 'sent') {
         const ownerId = req.offers?.owner_id;
         if (next === 'withdrawn' && ownerId)
-          await notify(ownerId, 'system', {
-            kind: 'withdrawn',
-            request_id: req.id,
-            offer_id: req.offer_id,
-          });
+          await notify(ownerId, 'system', { kind: 'withdrawn', request_id: req.id, offer_id: req.offer_id });
       }
 
       // If moved to fulfilled or declined, reload so it leaves Active tabs.
@@ -475,33 +475,25 @@ function ExchangesContent() {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setTab('received')}
-            className={`rounded border px-3 py-1 text-sm ${
-              tab === 'received' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'
-            }`}
+            className={`rounded border px-3 py-1 text-sm ${tab === 'received' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'}`}
           >
             Received
           </button>
           <button
             onClick={() => setTab('sent')}
-            className={`rounded border px-3 py-1 text-sm ${
-              tab === 'sent' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'
-            }`}
+            className={`rounded border px-3 py-1 text-sm ${tab === 'sent' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'}`}
           >
             Sent
           </button>
           <button
             onClick={() => setTab('fulfilled')}
-            className={`rounded border px-3 py-1 text-sm ${
-              tab === 'fulfilled' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'
-            }`}
+            className={`rounded border px-3 py-1 text-sm ${tab === 'fulfilled' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'}`}
           >
             Fulfilled
           </button>
           <button
             onClick={() => setTab('declined')}
-            className={`rounded border px-3 py-1 text-sm ${
-              tab === 'declined' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'
-            }`}
+            className={`rounded border px-3 py-1 text-sm ${tab === 'declined' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'}`}
           >
             Declined
           </button>
@@ -517,9 +509,7 @@ function ExchangesContent() {
             <li key={r.id} className="rounded border p-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm text-gray-600">
-                    {new Date(r.created_at).toLocaleString()}
-                  </div>
+                  <div className="text-sm text-gray-600">{new Date(r.created_at).toLocaleString()}</div>
                   <div className="mt-1">
                     <strong>{r.requester?.display_name ?? 'Someone'}</strong> requested{' '}
                     <Link href={`/offers/${r.offer_id}`} className="underline">
@@ -531,36 +521,22 @@ function ExchangesContent() {
                     Status: <span className="font-semibold">{r.status}</span>
                   </div>
 
-                  <MessageThread
-                    req={r}
-                    me={me}
-                    tab={tab}
-                    autoOpen={thread === r.id}
-                  />
+                  <MessageThread req={r} me={me} tab={tab} autoOpen={thread === r.id} />
                 </div>
 
                 <div className="flex flex-col gap-2">
                   {r.status === 'pending' && (
                     <>
-                      <button
-                        onClick={() => setStatus(r, 'accepted')}
-                        className="rounded bg-black px-3 py-1 text-sm text-white"
-                      >
+                      <button onClick={() => setStatus(r, 'accepted')} className="rounded bg-black px-3 py-1 text-sm text-white">
                         Accept
                       </button>
-                      <button
-                        onClick={() => setStatus(r, 'declined')}
-                        className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
-                      >
+                      <button onClick={() => setStatus(r, 'declined')} className="rounded border px-3 py-1 text-sm hover:bg-gray-50">
                         Decline
                       </button>
                     </>
                   )}
                   {r.status === 'accepted' && (
-                    <button
-                      onClick={() => setStatus(r, 'fulfilled')}
-                      className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
-                    >
+                    <button onClick={() => setStatus(r, 'fulfilled')} className="rounded border px-3 py-1 text-sm hover:bg-gray-50">
                       Mark Fulfilled
                     </button>
                   )}
@@ -580,9 +556,7 @@ function ExchangesContent() {
             <li key={r.id} className="rounded border p-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm text-gray-600">
-                    {new Date(r.created_at).toLocaleString()}
-                  </div>
+                  <div className="text-sm text-gray-600">{new Date(r.created_at).toLocaleString()}</div>
                   <div className="mt-1">
                     You requested{' '}
                     <Link href={`/offers/${r.offer_id}`} className="underline">
@@ -594,20 +568,12 @@ function ExchangesContent() {
                     Status: <span className="font-semibold">{r.status}</span>
                   </div>
 
-                  <MessageThread
-                    req={r}
-                    me={me}
-                    tab={tab}
-                    autoOpen={thread === r.id}
-                  />
+                  <MessageThread req={r} me={me} tab={tab} autoOpen={thread === r.id} />
                 </div>
 
                 <div className="flex flex-col gap-2">
                   {r.status === 'pending' && (
-                    <button
-                      onClick={() => setStatus(r, 'withdrawn')}
-                      className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
-                    >
+                    <button onClick={() => setStatus(r, 'withdrawn')} className="rounded border px-3 py-1 text-sm hover:bg-gray-50">
                       Withdraw
                     </button>
                   )}
@@ -627,9 +593,7 @@ function ExchangesContent() {
             <li key={r.id} className="rounded border p-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm text-gray-600">
-                    {new Date(r.created_at).toLocaleString()}
-                  </div>
+                  <div className="text-sm text-gray-600">{new Date(r.created_at).toLocaleString()}</div>
                   <div className="mt-1">
                     <Link href={`/offers/${r.offer_id}`} className="underline">
                       {r.offers?.title ?? 'this offer'}
@@ -642,10 +606,7 @@ function ExchangesContent() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Link
-                    href={`/exchanges?thread=${r.id}`}
-                    className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
-                  >
+                  <Link href={`/exchanges?thread=${r.id}`} className="rounded border px-3 py-1 text-sm hover:bg-gray-50">
                     Open
                   </Link>
                 </div>
@@ -664,9 +625,7 @@ function ExchangesContent() {
             <li key={r.id} className="rounded border p-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm text-gray-600">
-                    {new Date(r.created_at).toLocaleString()}
-                  </div>
+                  <div className="text-sm text-gray-600">{new Date(r.created_at).toLocaleString()}</div>
                   <div className="mt-1">
                     <Link href={`/offers/${r.offer_id}`} className="underline">
                       {r.offers?.title ?? 'this offer'}
@@ -679,10 +638,7 @@ function ExchangesContent() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Link
-                    href={`/exchanges?thread=${r.id}`}
-                    className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
-                  >
+                  <Link href={`/exchanges?thread=${r.id}`} className="rounded border px-3 py-1 text-sm hover:bg-gray-50">
                     Open
                   </Link>
                 </div>
@@ -710,7 +666,7 @@ function dedupeNewest<T extends { id: string; created_at: string }>(rows: T[]): 
   return out;
 }
 
-// Suspense wrapper is required for Next 15+ if you use useSearchParams in the page tree.
+// Suspense wrapper is required for Next 15+ when you use useSearchParams in the page tree.
 export default function ExchangesPage() {
   return (
     <Suspense fallback={<div className="text-sm text-gray-600">Loading…</div>}>
