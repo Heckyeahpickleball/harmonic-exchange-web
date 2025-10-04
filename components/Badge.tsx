@@ -2,33 +2,44 @@
 
 import * as React from 'react';
 
-type Props = {
-  /** image url to show inside the round badge */
-  icon: string;
-  /** px size of the circle */
-  size?: number;
-  /** tooltip/title text */
-  title?: string;
-  className?: string;
+/**
+ * Render a circular badge image.
+ * Safe to wrap in <Link> — it does not intercept clicks.
+ */
+export type BadgeProps = {
+  icon: string;         // URL or /public path to the badge image
+  size?: number;        // circle diameter in px
+  title?: string;       // tooltip / aria-label
+  className?: string;   // extra classes from parent
 };
 
-export default function Badge({ icon, size = 40, title, className = '' }: Props) {
-  const s = Math.max(16, size);
+export default function Badge({
+  icon,
+  size = 40,
+  title,
+  className = '',
+}: BadgeProps) {
+  const dim = Math.max(16, size);
+
   return (
     <div
+      role="img"
+      aria-label={title}
+      title={title}
       className={[
-        'inline-flex items-center justify-center rounded-full border bg-white shadow-sm',
+        'inline-flex items-center justify-center rounded-full',
+        'border border-slate-200 bg-white shadow-sm overflow-hidden',
+        'pointer-events-auto cursor-pointer select-none',
         className,
       ].join(' ')}
-      style={{ width: s, height: s }}
-      title={title}
-      aria-label={title}
+      style={{ width: dim, height: dim }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={icon}
-        alt={title || 'Badge'}
-        style={{ width: Math.floor(s * 0.78), height: Math.floor(s * 0.78) }}
+        alt={title ?? 'Badge'}
+        className="h-full w-full object-contain"
+        draggable={false}
       />
     </div>
   );
