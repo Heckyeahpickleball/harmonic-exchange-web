@@ -33,6 +33,15 @@ type FormState = {
   cover_url: string | null;
 };
 
+type ExpandedBadge = {
+  badge_code: string;
+  label: string | null;
+  track: 'give' | 'receive' | 'streak' | 'milestone' | null;
+  tier: number | null;
+  icon: string | null;   // e.g. "/badges/give_rays_t1.png"
+  earned_at: string;     // timestamp
+};
+
 export default function ProfilePage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -57,6 +66,10 @@ export default function ProfilePage() {
   const [offers, setOffers] = useState<OfferRow[]>([]);
   const [offersLoading, setOffersLoading] = useState(false);
   const [offersMsg, setOffersMsg] = useState('');
+
+  // NEW: badges
+  const [badges, setBadges] = useState<ExpandedBadge[] | null>(null);
+  const [badgesMsg, setBadgesMsg] = useState<string>('');
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
@@ -170,6 +183,33 @@ export default function ProfilePage() {
       cancelled = true;
     };
   }, [userId]);
+
+  // NEW: Load badges for this profile (from the expanded view)
+  useEffect(() => {
+    if (!profile?.id) return;
+    let cancelled = false;
+
+    (async () => {
+      setBadges(null);
+      setBadgesMsg('');
+      try {
+        const { data, error } = await supabase
+          .from('profile_badges_expanded')
+          .select('badge_code,label,track,tier,icon,earned_at')
+          .eq('profile_id', profile.id)
+          .order('earned_at', { ascending: false });
+
+        if (error) throw error;
+        if (!cancelled) setBadges((data as ExpandedBadge[]) ?? []);
+      } catch (e: any) {
+        if (!cancelled) setBadgesMsg(e?.message ?? 'Failed to load badges.');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id]);
 
   const skillsList = useMemo(
     () =>
@@ -287,7 +327,24 @@ export default function ProfilePage() {
                   </span>
                 )}
               </div>
-              <div className="mt-1 text-sm text-gray-600">
+
+              {/* NEW: Badges row */}
+              {!!badges?.length && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {badges.map((b) => (
+                    <img
+                      key={b.badge_code}
+                      src={b.icon ?? ''}
+                      alt={b.label ?? b.badge_code}
+                      title={`${b.label ?? b.badge_code}${b.tier ? ` (T${b.tier})` : ''}`}
+                      className="h-7 w-7 rounded-full border"
+                    />
+                  ))}
+                </div>
+              )}
+              {badgesMsg && <p className="mt-1 text-xs text-amber-700">{badgesMsg}</p>}
+
+              <div className="mt-2 text-sm text-gray-600">
                 {form.area_city || form.area_country ? (
                   <span>
                     {[form.area_city, form.area_country].filter(Boolean).join(', ')}
