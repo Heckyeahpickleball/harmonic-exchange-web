@@ -14,13 +14,14 @@ type NotifType =
   | 'message'
   | 'offer_pending'
   | 'fulfillment_reminder'
+  | 'badge_awarded'          // NEW: celebratory badge
   | 'system'
   | string;
 
 type Notif = {
   id: string;
   type: NotifType;
-  data: any;
+  data: any;                 // expect { badge_id?, badge_name?, level?, image_url? } for badge_awarded
   created_at: string;
   read_at: string | null;
   profile_id: string;
@@ -40,7 +41,6 @@ export default function NotificationsBell() {
   const sigSeen = useRef<Set<string>>(new Set());
 
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const listRef = useRef<HTMLUListElement | null>(null);
 
   /* ---------- enrichment helpers ---------- */
   async function enrichOfferTitles(notifs: Notif[]) {
@@ -95,11 +95,21 @@ export default function NotificationsBell() {
   }
 
   /* ---------- label + href ---------- */
-  function label(n: Notif): { text: string; href?: string } {
+  function label(n: Notif): { text: string; href?: string; _celebrate?: boolean } {
     const offerId = n.data?.offer_id as string | undefined;
     const offerTitle = n.data?.offer_title as string | undefined;
     const body = (n.data?.text ?? n.data?.message) as string | undefined;
     const reqId = n.data?.request_id as string | undefined;
+
+    if (n.type === 'badge_awarded') {
+      const name = n.data?.badge_name || 'New badge';
+      const level = n.data?.level ? ` (Level ${n.data.level})` : '';
+      return {
+        text: `🎉 You earned a badge: ${name}${level}!`,
+        href: '/profile?tab=badges',
+        _celebrate: true,
+      };
+    }
 
     switch (n.type) {
       case 'offer_pending': {
@@ -157,7 +167,12 @@ export default function NotificationsBell() {
   }
 
   function sig(n: Notif) {
-    return `${n.profile_id}|${n.type}|${n.data?.offer_id ?? ''}|${n.data?.request_id ?? ''}`;
+    // de-dupe: same profile + type + (offer_id|request_id|badge_id)
+    const part =
+      n.type === 'badge_awarded'
+        ? n.data?.badge_id ?? ''
+        : (n.data?.offer_id ?? '') + '|' + (n.data?.request_id ?? '');
+    return `${n.profile_id}|${n.type}|${part}`;
   }
 
   /* ---------- initial load + realtime ---------- */
@@ -276,10 +291,7 @@ export default function NotificationsBell() {
           className="absolute right-0 z-[2000] mt-2 w-[360px] max-w-[92vw] hx-card p-0"
           role="menu"
           aria-label="Notifications"
-          style={{
-            // ensure panel doesn't block the whole page
-            pointerEvents: 'auto',
-          }}
+          style={{ pointerEvents: 'auto' }}
         >
           <div className="flex items-center justify-between border-b px-3 py-2">
             <strong className="text-sm">Notifications</strong>
@@ -288,13 +300,13 @@ export default function NotificationsBell() {
             </button>
           </div>
 
-          <ul ref={listRef} className="max-h-[55vh] overflow-auto">
+          <ul className="max-h-[55vh] overflow-auto">
             {rows.length === 0 && (
               <li className="px-3 py-3 text-sm text-[var(--hx-muted)]">No notifications.</li>
             )}
 
             {rows.map((n) => {
-              const { text, href } = label(n);
+              const { text, href, _celebrate } = label(n);
               const ts = new Date(n.created_at).toLocaleString();
               const isUnread = !n.read_at;
 
@@ -304,6 +316,7 @@ export default function NotificationsBell() {
                   className={[
                     'border-b px-3 py-2 text-sm transition-colors',
                     isUnread ? 'bg-teal-50/50' : '',
+                    _celebrate ? 'bg-amber-50' : '',
                   ].join(' ')}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -319,8 +332,16 @@ export default function NotificationsBell() {
                           />
                         )}
                         <div className="text-[11px] text-[var(--hx-muted)]">{ts}</div>
+                        {_celebrate && <span aria-hidden>🎊</span>}
                       </div>
-                      <div className="mt-0.5 break-words">{text}</div>
+                      <div className="mt-0.5 break-words font-medium">
+                        {_celebrate ? text : text}
+                      </div>
+                      {_celebrate && n.data?.badge_name && (
+                        <div className="mt-0.5 text-xs text-[var(--hx-muted)]">
+                          Keep the streak going to level it up!
+                        </div>
+                      )}
                     </div>
 
                     {href && (
