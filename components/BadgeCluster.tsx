@@ -15,14 +15,18 @@ export type ProfileBadge = {
 
 export type BadgeClusterProps = {
   badges: ProfileBadge[] | null | undefined;
-  /** px size for each badge circle */
+  /** px size for each badge circle (default 40) */
   size?: number;
-  /** where clicking a badge should navigate */
-  href?: string; // default: '/debug/gamification'
+  /** gap between badges in px (default 8) */
+  gap?: number;
+  /** where clicking a badge should navigate (default /profile/badges) */
+  href?: string;
   /** map a badge to an icon URL (optional) */
   resolveIcon?: (b: ProfileBadge) => string | null | undefined;
   /** map a badge to a caption/label (optional) */
   resolveLabel?: (b: ProfileBadge) => string | null | undefined;
+  /** add title/aria-label on each badge (default false) */
+  showTitles?: boolean;
   className?: string;
 };
 
@@ -34,9 +38,11 @@ export type BadgeClusterProps = {
 export default function BadgeCluster({
   badges,
   size = 40,
-  href = '/debug/gamification',
+  gap = 8,
+  href = '/profile/badges',
   resolveIcon,
   resolveLabel,
+  showTitles = false,
   className = '',
 }: BadgeClusterProps) {
   const display = React.useMemo(() => {
@@ -68,12 +74,15 @@ export default function BadgeCluster({
   if (!display.length) return null;
 
   return (
-    <div className={['flex items-center gap-2', className].join(' ')}>
+    <div
+      className={['flex items-center flex-wrap', className].join(' ')}
+      style={{ gap }}
+    >
       {display.map((b) => {
         const label =
           b.label ??
           resolveLabel?.(b) ??
-          // reasonable fallback labels
+          // fallback label
           (b.track
             ? `${cap(b.track)}${b.tier ? ` • Tier ${b.tier}` : ''}`
             : b.badge_code ?? 'Badge');
@@ -81,18 +90,24 @@ export default function BadgeCluster({
         const icon =
           b.image_url ??
           resolveIcon?.(b) ??
-          // default guess: you keep your assets in /public/badges/<code>.png
+          // default guess: /public/badges/<code>.png
           (b.badge_code ? `/badges/${b.badge_code}.png` : '/badges/placeholder.png');
+
+        const a11y = showTitles
+          ? {
+              title: `See all badges — ${label}`,
+              'aria-label': `See all badges — ${label}`,
+            }
+          : undefined;
 
         return (
           <Link
             key={`${b.track}:${b.badge_code ?? b.tier}`}
             href={href}
             className="group inline-flex items-center"
-            title={`See all badges — ${label}`}
-            aria-label={`See all badges — ${label}`}
+            {...a11y}
           >
-            <Badge icon={icon} size={size} title={label} />
+            <Badge icon={icon} size={size} title={showTitles ? label : undefined} />
           </Link>
         );
       })}
