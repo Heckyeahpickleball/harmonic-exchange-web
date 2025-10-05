@@ -1,3 +1,4 @@
+// /app/exchanges/page.tsx
 'use client';
 
 import { Suspense, useEffect, useMemo, useState, useCallback } from 'react';
@@ -277,6 +278,17 @@ function MessageThread({
   );
 }
 
+/** Re-fetch a single request row (lightweight) */
+async function fetchRequestStatus(id: string) {
+  const { data, error } = await supabase
+    .from('requests')
+    .select('id,status,updated_at')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return data as { id: string; status: Status; updated_at: string | null } | null;
+}
+
 function ExchangesContent() {
   const thread = useSafeThreadParam();
 
@@ -285,6 +297,7 @@ function ExchangesContent() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
   const [me, setMe] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -310,7 +323,7 @@ function ExchangesContent() {
             requester:profiles ( id, display_name )
           `)
           .eq('offers.owner_id', uid)
-          .not('status', 'in', '(fulfilled,declined)')   // ACTIVE ONLY
+          .not('status', 'in', '(fulfilled,declined)')
           .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -324,13 +337,12 @@ function ExchangesContent() {
             requester:profiles ( id, display_name )
           `)
           .eq('requester_profile_id', uid)
-          .not('status', 'in', '(fulfilled,declined)')   // ACTIVE ONLY
+          .not('status', 'in', '(fulfilled,declined)')
           .order('created_at', { ascending: false });
 
         if (error) throw error;
         setItems((data || []) as unknown as ReqRow[]);
       } else if (tab === 'fulfilled') {
-        // FULFILLED: union of both sides where status is fulfilled
         const [rx, sx] = await Promise.all([
           supabase
             .from('requests')
@@ -359,7 +371,6 @@ function ExchangesContent() {
         const merged = dedupeNewest([...rxRows, ...sxRows]);
         setItems(merged);
       } else {
-        // DECLINED: union of both sides where status is declined
         const [rx, sx] = await Promise.all([
           supabase
             .from('requests')
@@ -418,12 +429,22 @@ function ExchangesContent() {
         data,
       });
     } catch (e) {
+      // swallow — notifications shouldn't block the main action
       console.warn('notify failed', e);
     }
   }
 
+  /**
+   * Robust status update:
+   * - optimistic UI
+   * - if a server-side trigger causes ON CONFLICT error, we re-fetch;
+   *   if the row DID update, we treat as success.
+   */
   async function setStatus(req: ReqRow, next: Status) {
     setMsg('');
+    setBusyId(req.id);
+
+    // optimistic
     setItems((prev) =>
       prev.map((r) =>
         r.id === req.id ? { ...r, status: next, updated_at: new Date().toISOString() } : r
@@ -435,10 +456,34 @@ function ExchangesContent() {
         .from('requests')
         .update({ status: next })
         .eq('id', req.id)
-        .select('id')
-        .single();
-      if (error) throw error;
+        .select('id,status')
+        .maybeSingle();
 
+      if (error) {
+        const msg = String(error?.message ?? '');
+        const code = (error as any)?.code ?? '';
+
+        // Known Postgres "ON CONFLICT" / unique-index mismatch messages to treat as "soft success"
+        const isOnConflict =
+          msg.toLowerCase().includes('on conflict') ||
+          msg.toLowerCase().includes('unique or exclusion constraint') ||
+          code === '42P10' || // "invalid_column_reference" often seen on bad ON CONFLICT specs
+          code === '23505';    // unique_violation (if a trigger tries to insert a duplicate)
+
+        if (isOnConflict) {
+          // Re-fetch the row. If it already shows the target status, accept success.
+          const latest = await fetchRequestStatus(req.id);
+          if (latest?.status === next) {
+            // soft success: continue
+          } else {
+            throw error;
+          }
+        } else {
+          throw error;
+        }
+      }
+
+      // Send notifications (non-blocking errors)
       if (tab === 'received') {
         const requesterId = req.requester_profile_id;
         if (next === 'accepted')
@@ -457,14 +502,19 @@ function ExchangesContent() {
           });
       }
 
-      // If moved to fulfilled or declined, reload so it leaves Active tabs.
+      // If moved out of active pool, reload list to disappear from tab
       if (next === 'fulfilled' || next === 'declined') {
         await load();
       }
     } catch (e: any) {
       console.error(e);
       setMsg(e?.message ?? 'Update failed.');
-      setItems((prev) => prev.map((r) => (r.id === req.id ? { ...r, status: req.status } : r)));
+      // rollback UI
+      setItems((prev) =>
+        prev.map((r) => (r.id === req.id ? { ...r, status: req.status } : r))
+      );
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -544,24 +594,27 @@ function ExchangesContent() {
                     <>
                       <button
                         onClick={() => setStatus(r, 'accepted')}
-                        className="rounded bg-black px-3 py-1 text-sm text-white"
+                        className="rounded bg-black px-3 py-1 text-sm text-white disabled:opacity-50"
+                        disabled={busyId === r.id}
                       >
-                        Accept
+                        {busyId === r.id ? 'Working…' : 'Accept'}
                       </button>
                       <button
                         onClick={() => setStatus(r, 'declined')}
-                        className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
+                        className="rounded border px-3 py-1 text-sm hover:bg-gray-50 disabled:opacity-50"
+                        disabled={busyId === r.id}
                       >
-                        Decline
+                        {busyId === r.id ? 'Working…' : 'Decline'}
                       </button>
                     </>
                   )}
                   {r.status === 'accepted' && (
                     <button
                       onClick={() => setStatus(r, 'fulfilled')}
-                      className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
+                      className="rounded border px-3 py-1 text-sm hover:bg-gray-50 disabled:opacity-50"
+                      disabled={busyId === r.id}
                     >
-                      Mark Fulfilled
+                      {busyId === r.id ? 'Marking…' : 'Mark Fulfilled'}
                     </button>
                   )}
                 </div>
@@ -606,9 +659,10 @@ function ExchangesContent() {
                   {r.status === 'pending' && (
                     <button
                       onClick={() => setStatus(r, 'withdrawn')}
-                      className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
+                      className="rounded border px-3 py-1 text-sm hover:bg-gray-50 disabled:opacity-50"
+                      disabled={busyId === r.id}
                     >
-                      Withdraw
+                      {busyId === r.id ? 'Working…' : 'Withdraw'}
                     </button>
                   )}
                 </div>
