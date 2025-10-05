@@ -37,7 +37,7 @@ function useSafeThreadParam() {
   return thread;
 }
 
-/** Pretty print any Supabase/Postgres error so we can see which step failed */
+/** Pretty print DB errors */
 function fmtError(label: string, e: any) {
   try {
     const payload = {
@@ -50,12 +50,17 @@ function fmtError(label: string, e: any) {
       schema: e?.schema ?? null,
       constraint: e?.constraint ?? null,
     };
-    const text = `[${label}] ${payload.message}` +
+    const text =
+      `[${label}] ${payload.message}` +
       (payload.code ? ` (code ${payload.code})` : '') +
       (payload.constraint ? ` | constraint: ${payload.constraint}` : '') +
       (payload.table ? ` | table: ${payload.table}` : '');
     console.warn('DB ERROR:', payload);
-    return text + (payload.details ? `\nDetails: ${payload.details}` : '') + (payload.hint ? `\nHint: ${payload.hint}` : '');
+    return (
+      text +
+      (payload.details ? `\nDetails: ${payload.details}` : '') +
+      (payload.hint ? `\nHint: ${payload.hint}` : '')
+    );
   } catch {
     return `[${label}] ${String(e?.message ?? e)}`;
   }
@@ -148,8 +153,7 @@ function MessageThread({
 
   useEffect(() => {
     loadThread();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, req.id, me]);
+  }, [open, req.id, me]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!me) return;
@@ -264,9 +268,10 @@ function MessageThread({
           <ul className="space-y-2">
             {msgs.map((m) => {
               const mine = m.sender_id === me;
+              const key = `${m.id}_${m.created_at}`;
               return (
                 <li
-                  key={m.id}
+                  key={key}
                   className={`max-w-[85%] rounded px-3 py-2 text-sm ${
                     mine ? 'ml-auto bg-black text-white' : 'bg-gray-100'
                   }`}
@@ -458,7 +463,7 @@ function ExchangesContent() {
     }
   }
 
-  /** Update + award badges (with very explicit error messages) */
+  /** Update + award badges */
   async function setStatus(req: ReqRow, next: Status) {
     setMsg('');
     setBusyId(req.id);
@@ -471,7 +476,6 @@ function ExchangesContent() {
     );
 
     try {
-      // 1) Update the request status
       {
         const { error } = await supabase
           .from('requests')
@@ -489,30 +493,24 @@ function ExchangesContent() {
             code === '42P10' ||
             code === '23505';
 
-          if (isOnConflict) {
+        if (isOnConflict) {
             const latest = await fetchRequestStatus(req.id);
-            if (latest?.status !== next) {
-              throw new Error(fmtError('requests.update', error));
-            }
+            if (latest?.status !== next) throw new Error(fmtError('requests.update', error));
           } else {
             throw new Error(fmtError('requests.update', error));
           }
         }
       }
 
-      // 2) After fulfilled, award badges via RPC
       if (next === 'fulfilled') {
         const { error: rpcErr } = await supabase.rpc('award_badges_for_request', {
           p_request_id: req.id,
         });
-        if (rpcErr) {
-          throw new Error(fmtError('rpc award_badges_for_request', rpcErr));
-        } else {
-          await notify(req.requester_profile_id, 'request_fulfilled', {
-            request_id: req.id,
-            offer_id: req.offer_id,
-          });
-        }
+        if (rpcErr) throw new Error(fmtError('rpc award_badges_for_request', rpcErr));
+        await notify(req.requester_profile_id, 'request_fulfilled', {
+          request_id: req.id,
+          offer_id: req.offer_id,
+        });
       } else if (tab === 'received') {
         const requesterId = req.requester_profile_id;
         if (next === 'accepted')
@@ -532,7 +530,6 @@ function ExchangesContent() {
       console.warn(e);
       const text = typeof e?.message === 'string' ? e.message : fmtError('setStatus', e);
       setMsg(text);
-      // rollback UI
       setItems((prev) =>
         prev.map((r) => (r.id === req.id ? { ...r, status: req.status } : r))
       );
@@ -604,12 +601,7 @@ function ExchangesContent() {
                     Status: <span className="font-semibold">{r.status}</span>
                   </div>
 
-                  <MessageThread
-                    req={r}
-                    me={me!}
-                    tab={tab}
-                    autoOpen={thread === r.id}
-                  />
+                  <MessageThread req={r} me={me!} tab={tab} autoOpen={thread === r.id} />
                 </div>
 
                 <div className="flex flex-col gap-2">
@@ -670,12 +662,7 @@ function ExchangesContent() {
                     Status: <span className="font-semibold">{r.status}</span>
                   </div>
 
-                  <MessageThread
-                    req={r}
-                    me={me!}
-                    tab={tab}
-                    autoOpen={thread === r.id}
-                  />
+                  <MessageThread req={r} me={me!} tab={tab} autoOpen={thread === r.id} />
                 </div>
 
                 <div className="flex flex-col gap-2">
@@ -719,8 +706,9 @@ function ExchangesContent() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {/* NEW: open the Messages inbox and focus this thread */}
                   <Link
-                    href={`/exchanges?thread=${r.id}`}
+                    href={`/messages?thread=${r.id}`}
                     className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
                   >
                     Open
@@ -756,8 +744,9 @@ function ExchangesContent() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {/* NEW: open the Messages inbox and focus this thread */}
                   <Link
-                    href={`/exchanges?thread=${r.id}`}
+                    href={`/messages?thread=${r.id}`}
                     className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
                   >
                     Open
@@ -787,7 +776,6 @@ function dedupeNewest<T extends { id: string; created_at: string }>(rows: T[]): 
   return out;
 }
 
-// Suspense wrapper is required for Next 15+ if you use useSearchParams in the page tree.
 export default function ExchangesPage() {
   return (
     <Suspense fallback={<div className="text-sm text-gray-600">Loading…</div>}>
