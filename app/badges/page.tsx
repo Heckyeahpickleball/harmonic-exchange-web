@@ -1,58 +1,83 @@
-// app/badges/page.tsx
-import { supabase } from '../../lib/supabaseClient';
+// /app/badges/page.tsx
+'use client';
+
+export const dynamic = 'force-dynamic';
+
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { supabase } from '@/lib/supabaseClient';
 
 type Row = {
-  id: string;
   code: string;
-  track: string;
   label: string | null;
-  description?: string | null; // if you later add it
+  track: 'give' | 'receive' | 'streak' | 'milestone' | null;
+  how: string | null;
+  icon: string | null;
 };
 
-export const dynamic = 'force-static';
+export default function AllBadgesPage() {
+  const [defs, setDefs] = useState<Row[]>([]);
+  const [err, setErr] = useState<string | null>(null);
 
-export default async function BadgesPage() {
-  const { data, error } = await supabase
-    .from('badges')
-    .select('id, code, track, label')
-    .order('track', { ascending: true })
-    .order('code', { ascending: true });
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('badges')
+          .select('code,label,track,how:how_to_earn,icon')
+          .order('track', { ascending: true })
+          .order('tier', { ascending: true });
 
-  if (error) {
-    // Don’t crash the build if the table is empty or RLS blocks it
-    return (
-      <main className="mx-auto max-w-3xl px-4 py-8">
-        <h1 className="text-2xl font-bold">Badges</h1>
-        <p className="mt-2 text-[var(--hx-muted)]">
-          Couldn’t load badges yet. Please try again later.
-        </p>
-      </main>
-    );
-  }
+        if (!alive) return;
+        if (error) throw error;
 
-  const badges = (data ?? []) as Row[];
+        if (data?.length) {
+          setDefs(
+            data.map((r: any) => ({
+              code: r.code,
+              label: r.label ?? r.code,
+              track: r.track ?? null,
+              how: r.how ?? '',
+              icon: r.icon ?? `/badges/${r.code}.png`,
+            }))
+          );
+        } else {
+          // small fallback
+          setDefs([
+            { code: 'give_t1', label: 'Giver • Tier 1', track: 'give', how: 'Complete your first Give.', icon: '/badges/give_t1.png' },
+            { code: 'recv_t1', label: 'Receiver • Tier 1', track: 'receive', how: 'Receive your first gift.', icon: '/badges/recv_t1.png' },
+            { code: 'streak_7', label: '7-Day Streak', track: 'streak', how: 'Be active 7 days in a row.', icon: '/badges/streak_7.png' },
+          ]);
+        }
+      } catch (e: any) {
+        setErr(e?.message ?? 'Failed to load badges.');
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-8">
-      <h1 className="text-2xl font-bold">Badges</h1>
-      <p className="mt-2 text-[var(--hx-muted)]">
-        Explore every badge and what it takes to earn it.
-      </p>
+    <section className="mx-auto max-w-3xl p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h1 className="text-xl font-semibold">All Badges & How to Earn Them</h1>
+        <Link href="/profile" className="text-sm underline">Back to Profile</Link>
+      </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {badges.map((b) => (
-          <article key={b.id} className="hx-card p-4">
-            <div className="text-sm uppercase tracking-wide text-[var(--hx-muted)]">
-              {b.track}
+      {err && <p className="mb-3 text-sm text-rose-600">{err}</p>}
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {defs.map((b) => (
+          <div key={b.code} className="flex items-center gap-3 rounded-lg border p-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={b.icon ?? ''} alt={b.label ?? b.code} className="h-10 w-10 rounded-full border" />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold">{b.label}</div>
+              <div className="text-xs text-slate-600">{b.how}</div>
             </div>
-            <div className="mt-1 text-lg font-semibold">{b.label ?? b.code}</div>
-            <div className="mt-1 text-xs text-[var(--hx-muted)]">
-              Code: <code>{b.code}</code>
-            </div>
-            {/* If/when you add a description field in the badges table, render it here */}
-          </article>
+          </div>
         ))}
       </div>
-    </main>
+    </section>
   );
 }

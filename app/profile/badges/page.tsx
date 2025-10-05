@@ -14,7 +14,7 @@ type BadgeDef = {
   icon?: string | null;
 };
 
-export default function AllBadgesPage() {
+export default function BadgesIndexPage() {
   const [defs, setDefs] = useState<BadgeDef[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -44,7 +44,7 @@ export default function AllBadgesPage() {
             }))
           );
         } else {
-          // Fallback list so page still renders without DB rows
+          // Fallback so the page still renders without DB rows
           setDefs([
             { code: 'give_t1', label: 'Giver • Tier 1', track: 'give', how: 'Complete your first Give.', icon: '/badges/give_t1.png' },
             { code: 'give_t2', label: 'Giver • Tier 2', track: 'give', how: 'Complete 5 Gives.', icon: '/badges/give_t2.png' },

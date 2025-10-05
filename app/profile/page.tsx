@@ -8,7 +8,7 @@ import ImageCropperModal from '@/components/ImageCropperModal';
 import OfferCard, { type OfferRow } from '@/components/OfferCard';
 import UserFeed from '@/components/UserFeed';
 import PostComposer from '@/components/PostComposer';
-import BadgeCluster from '@/components/BadgeCluster'; // ✅ shared badges row
+import BadgeCluster from '@/components/BadgeCluster';
 
 type ProfileRow = {
   id: string;
@@ -28,7 +28,7 @@ type FormState = {
   display_name: string;
   area_city: string;
   area_country: string;
-  skillsCSV: string; // comma-separated
+  skillsCSV: string;
   bio: string;
   avatar_url: string | null;
   cover_url: string | null;
@@ -39,8 +39,8 @@ type ExpandedBadge = {
   label: string | null;
   track: 'give' | 'receive' | 'streak' | 'milestone' | null;
   tier: number | null;
-  icon: string | null;   // e.g. "/badges/give_rays_t1.png"
-  earned_at: string;     // timestamp
+  icon: string | null;
+  earned_at: string;
 };
 
 export default function ProfilePage() {
@@ -319,9 +319,9 @@ export default function ProfilePage() {
           )}
         </div>
 
-        {/* Header content */}
-        <div className="relative px-4 pb-4 pt-12 md:px-6">
-          {/* Avatar */}
+        {/* Header content – tightened paddings */}
+        <div className="relative px-4 pb-3 pt-8 md:px-6">
+          {/* Avatar (unchanged size/position) */}
           <div className="absolute -top-10 left-4 h-20 w-20 overflow-hidden rounded-full border-4 border-white md:left-6 md:h-24 md:w-24">
             {form.avatar_url ? (
               <img src={form.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
@@ -330,15 +330,13 @@ export default function ProfilePage() {
             )}
           </div>
 
-          {/* New header layout: left (name/meta/actions) | right (badges) */}
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-start">
-            {/* LEFT: name high/close to cover, then meta, then actions */}
+          {/* New compact header layout: left (name/meta/actions) | right (badges) */}
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-12 md:items-start">
+            {/* LEFT */}
             <div className="md:col-span-8 md:pl-28">
-              {/* Name row */}
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl font-semibold md:text-2xl">
-                  {form.display_name || 'Unnamed'}
-                </h1>
+              {/* Name row – smaller gaps/margins */}
+              <div className="flex flex-wrap items-center gap-2 leading-tight">
+                <h1 className="text-xl font-semibold md:text-2xl">{form.display_name || 'Unnamed'}</h1>
                 {profile?.role && (
                   <span className="rounded-full border px-2 py-0.5 text-xs capitalize text-gray-700">
                     {profile.role}
@@ -346,50 +344,48 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              {/* Meta */}
-              <div className="mt-1 text-sm text-gray-600">
+              {/* Meta – pulled closer */}
+              <div className="mt-0.5 text-[13px] text-gray-600 flex flex-wrap gap-2">
                 {form.area_city || form.area_country ? (
-                  <span>
-                    {[form.area_city, form.area_country].filter(Boolean).join(', ')}
-                  </span>
+                  <span>{[form.area_city, form.area_country].filter(Boolean).join(', ')}</span>
                 ) : (
                   <span>—</span>
                 )}
                 {profile?.created_at && (
                   <>
-                    <span className="mx-2">•</span>
+                    <span>•</span>
                     <span>Member since {new Date(profile.created_at).toLocaleDateString()}</span>
                   </>
                 )}
               </div>
 
-              {/* Actions under name */}
-              <div className="mt-2 flex items-center gap-2">
+              {/* Actions – tight spacing */}
+              <div className="mt-1.5 flex items-center gap-2">
                 <button
                   onClick={() => setEditing(true)}
-                  className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
+                  className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
                 >
                   Edit Profile
                 </button>
                 <button
                   type="button"
-                  onClick={async () => { await supabase.auth.signOut(); location.href='/' }}
-                  className="rounded border px-3 py-2 text-sm"
+                  onClick={async () => { await supabase.auth.signOut(); location.href='/'; }}
+                  className="rounded border px-3 py-1.5 text-sm"
                 >
                   Sign Out
                 </button>
               </div>
             </div>
 
-            {/* RIGHT: larger clickable badges (shifted a bit left via right padding) */}
+            {/* RIGHT: badges with captions, evenly spaced single-row */}
             <div className="md:col-span-4">
               {!!clusterBadges.length ? (
-                <div className="flex items-start justify-end pr-8 md:pr-12">
+                <div className="flex items-start justify-start md:justify-end">
                   <BadgeCluster
                     badges={clusterBadges}
-                    size={60}                    // bigger badges
-                    href="/profile/badges"       // clickable
-                    className="gap-6 md:gap-8"   // spacing between badges
+                    size={48}
+                    href="/profile/badges"
+                    className="gap-6 md:gap-8"
                   />
                 </div>
               ) : badgesMsg ? (
@@ -453,7 +449,7 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        {/* Posts column — SINGLE composer + feed */}
+        {/* Posts column */}
         <section className="md:col-span-7 space-y-2">
           <h2 className="text-base font-semibold">Posts</h2>
           {userId && <PostComposer profileId={userId} />}
