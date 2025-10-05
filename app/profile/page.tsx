@@ -330,9 +330,12 @@ export default function ProfilePage() {
             )}
           </div>
 
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div className="mt-2 md:mt-0 md:pl-24">
-              <div className="flex items-center gap-2">
+          {/* New header layout: left (name/meta/actions) | right (badges) */}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-start">
+            {/* LEFT: name high/close to cover, then meta, then actions */}
+            <div className="md:col-span-8 md:pl-28">
+              {/* Name row */}
+              <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl font-semibold md:text-2xl">
                   {form.display_name || 'Unnamed'}
                 </h1>
@@ -343,20 +346,8 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              {/* Badges row (shared component, with captions + click to /profile/badges) */}
-              {!!clusterBadges.length && (
-                <div className="mt-2">
-                  <BadgeCluster
-                    badges={clusterBadges}
-                    size={28}
-                    showTitles
-                    href="/profile/badges"
-                  />
-                </div>
-              )}
-              {badgesMsg && <p className="mt-1 text-xs text-amber-700">{badgesMsg}</p>}
-
-              <div className="mt-2 text-sm text-gray-600">
+              {/* Meta */}
+              <div className="mt-1 text-sm text-gray-600">
                 {form.area_city || form.area_country ? (
                   <span>
                     {[form.area_city, form.area_country].filter(Boolean).join(', ')}
@@ -371,22 +362,38 @@ export default function ProfilePage() {
                   </>
                 )}
               </div>
+
+              {/* Actions under name */}
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  onClick={() => setEditing(true)}
+                  className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
+                >
+                  Edit Profile
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => { await supabase.auth.signOut(); location.href='/' }}
+                  className="rounded border px-3 py-2 text-sm"
+                >
+                  Sign Out
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2 md:self-center">
-              <button
-                onClick={() => setEditing(true)}
-                className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
-              >
-                Edit Profile
-              </button>
-              <button
-                type="button"
-                onClick={async () => { await supabase.auth.signOut(); location.href='/' }}
-                className="rounded border px-3 py-2 text-sm"
-              >
-                Sign Out
-              </button>
+            {/* RIGHT: larger clickable badges */}
+            <div className="md:col-span-4">
+              {!!clusterBadges.length ? (
+                <div className="flex items-start justify-start md:justify-end">
+                  <BadgeCluster
+                    badges={clusterBadges}
+                    size={40}              // bigger badges
+                    href="/profile/badges" // clickable
+                  />
+                </div>
+              ) : badgesMsg ? (
+                <p className="text-xs text-amber-700">{badgesMsg}</p>
+              ) : null}
             </div>
           </div>
         </div>

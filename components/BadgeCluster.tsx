@@ -30,7 +30,7 @@ export type BadgeClusterProps = {
   /** map a badge to a caption/label (optional) */
   resolveLabel?: (b: ClusterBadge) => string | null | undefined;
   /** show small text labels under each badge */
-  showTitles?: boolean;
+  showTitles?: boolean; // default now TRUE
   className?: string;
 };
 
@@ -45,7 +45,7 @@ export default function BadgeCluster({
   href = '/profile/badges',
   resolveIcon,
   resolveLabel,
-  showTitles = false,
+  showTitles = true, // ← captions on by default
   className = '',
 }: BadgeClusterProps) {
   const display = React.useMemo(() => {
@@ -86,7 +86,7 @@ export default function BadgeCluster({
   if (!display.length) return null;
 
   return (
-    <div className={['flex items-center gap-2', className].join(' ')}>
+    <div className={['flex items-start gap-3 flex-wrap', className].join(' ')}>
       {display.map((b) => {
         const label =
           b.label ??
@@ -100,7 +100,10 @@ export default function BadgeCluster({
           (b.badge_code ? `/badges/${b.badge_code}.png` : '/badges/placeholder.png');
 
         return (
-          <div key={`${b.track}:${b.badge_code ?? b.tier}`} className="flex flex-col items-center">
+          <div
+            key={`${b.track}:${b.badge_code ?? b.tier}`}
+            className="flex flex-col items-center"
+          >
             <Link
               href={href}
               className="group inline-flex items-center focus:outline-none focus:ring-2 focus:ring-blue-400 rounded-full"
@@ -110,7 +113,12 @@ export default function BadgeCluster({
               <Badge icon={icon} size={size} title={label} />
             </Link>
             {showTitles && (
-              <span className="mt-1 text-[10px] leading-none text-slate-600">{label}</span>
+              <span
+                className="mt-1 text-[10px] leading-tight text-slate-600 text-center max-w-[7.5rem] line-clamp-2"
+                style={{ wordBreak: 'break-word' }}
+              >
+                {label}
+              </span>
             )}
           </div>
         );
