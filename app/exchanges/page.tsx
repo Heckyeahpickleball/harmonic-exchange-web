@@ -1,4 +1,3 @@
-// /app/exchanges/page.tsx
 'use client';
 
 import { Suspense, useEffect, useMemo, useState, useCallback } from 'react';
@@ -36,6 +35,30 @@ function useSafeThreadParam() {
     setThread(searchParams.get('thread') || undefined);
   }, [searchParams]);
   return thread;
+}
+
+/** Pretty print any Supabase/Postgres error so we can see which step failed */
+function fmtError(label: string, e: any) {
+  try {
+    const payload = {
+      label,
+      message: e?.message ?? String(e),
+      code: e?.code ?? null,
+      details: e?.details ?? null,
+      hint: e?.hint ?? null,
+      table: e?.table ?? null,
+      schema: e?.schema ?? null,
+      constraint: e?.constraint ?? null,
+    };
+    const text = `[${label}] ${payload.message}` +
+      (payload.code ? ` (code ${payload.code})` : '') +
+      (payload.constraint ? ` | constraint: ${payload.constraint}` : '') +
+      (payload.table ? ` | table: ${payload.table}` : '');
+    console.warn('DB ERROR:', payload);
+    return text + (payload.details ? `\nDetails: ${payload.details}` : '') + (payload.hint ? `\nHint: ${payload.hint}` : '');
+  } catch {
+    return `[${label}] ${String(e?.message ?? e)}`;
+  }
 }
 
 function MessageThread({
@@ -108,8 +131,8 @@ function MessageThread({
 
       await markThreadRead();
     } catch (e: any) {
-      console.error(e);
-      setErr(e?.message ?? 'Failed to load messages.');
+      console.warn(e);
+      setErr(fmtError('loadThread', e));
     } finally {
       setLoading(false);
     }
@@ -208,8 +231,8 @@ function MessageThread({
 
       await loadThread();
     } catch (e: any) {
-      console.error(e);
-      setErr(e?.message ?? 'Failed to send message.');
+      console.warn(e);
+      setErr(fmtError('notify(message)', e));
       setMsgs((m) => m.filter((x) => x.id !== optimistic.id));
       setDraft(text);
     }
@@ -233,7 +256,7 @@ function MessageThread({
       {open && (
         <div className="mt-2 rounded border p-3">
           {loading && <p className="text-sm text-gray-600">Loading messages…</p>}
-          {err && <p className="text-sm text-red-600">{err}</p>}
+          {err && <p className="text-sm text-red-600 whitespace-pre-wrap">{err}</p>}
           {msgs.length === 0 && !loading && (
             <p className="text-sm text-gray-600">No messages yet.</p>
           )}
@@ -400,8 +423,8 @@ function ExchangesContent() {
         setItems(merged);
       }
     } catch (e: any) {
-      console.error(e);
-      setMsg(e?.message ?? 'Failed to load exchanges.');
+      console.warn(e);
+      setMsg(fmtError('load', e));
       setItems([]);
     } finally {
       setLoading(false);
@@ -423,23 +446,19 @@ function ExchangesContent() {
     data: Record<string, any>
   ) {
     try {
-      await supabase.from('notifications').insert({
+      const { error } = await supabase.from('notifications').insert({
         profile_id: profileId,
         type,
         data,
       });
-    } catch (e) {
-      // swallow — notifications shouldn't block the main action
+      if (error) throw error;
+    } catch (e: any) {
       console.warn('notify failed', e);
+      setMsg(fmtError(`notify ${type}`, e));
     }
   }
 
-  /**
-   * Robust status update:
-   * - optimistic UI
-   * - if a server-side trigger causes ON CONFLICT error, we re-fetch;
-   *   if the row DID update, we treat as success.
-   */
+  /** Update + award badges (with very explicit error messages) */
   async function setStatus(req: ReqRow, next: Status) {
     setMsg('');
     setBusyId(req.id);
@@ -452,63 +471,67 @@ function ExchangesContent() {
     );
 
     try {
-      const { error } = await supabase
-        .from('requests')
-        .update({ status: next })
-        .eq('id', req.id)
-        .select('id,status')
-        .maybeSingle();
+      // 1) Update the request status
+      {
+        const { error } = await supabase
+          .from('requests')
+          .update({ status: next })
+          .eq('id', req.id)
+          .select('id,status')
+          .maybeSingle();
 
-      if (error) {
-        const msg = String(error?.message ?? '');
-        const code = (error as any)?.code ?? '';
+        if (error) {
+          const msgLower = String(error?.message ?? '').toLowerCase();
+          const code = (error as any)?.code ?? '';
+          const isOnConflict =
+            msgLower.includes('on conflict') ||
+            msgLower.includes('unique or exclusion constraint') ||
+            code === '42P10' ||
+            code === '23505';
 
-        // Known Postgres "ON CONFLICT" / unique-index mismatch messages to treat as "soft success"
-        const isOnConflict =
-          msg.toLowerCase().includes('on conflict') ||
-          msg.toLowerCase().includes('unique or exclusion constraint') ||
-          code === '42P10' || // "invalid_column_reference" often seen on bad ON CONFLICT specs
-          code === '23505';    // unique_violation (if a trigger tries to insert a duplicate)
-
-        if (isOnConflict) {
-          // Re-fetch the row. If it already shows the target status, accept success.
-          const latest = await fetchRequestStatus(req.id);
-          if (latest?.status === next) {
-            // soft success: continue
+          if (isOnConflict) {
+            const latest = await fetchRequestStatus(req.id);
+            if (latest?.status !== next) {
+              throw new Error(fmtError('requests.update', error));
+            }
           } else {
-            throw error;
+            throw new Error(fmtError('requests.update', error));
           }
-        } else {
-          throw error;
         }
       }
 
-      // Send notifications (non-blocking errors)
-      if (tab === 'received') {
+      // 2) After fulfilled, award badges via RPC
+      if (next === 'fulfilled') {
+        const { error: rpcErr } = await supabase.rpc('award_badges_for_request', {
+          p_request_id: req.id,
+        });
+        if (rpcErr) {
+          throw new Error(fmtError('rpc award_badges_for_request', rpcErr));
+        } else {
+          await notify(req.requester_profile_id, 'request_fulfilled', {
+            request_id: req.id,
+            offer_id: req.offer_id,
+          });
+        }
+      } else if (tab === 'received') {
         const requesterId = req.requester_profile_id;
         if (next === 'accepted')
           await notify(requesterId, 'request_accepted', { request_id: req.id, offer_id: req.offer_id });
         if (next === 'declined')
           await notify(requesterId, 'request_declined', { request_id: req.id, offer_id: req.offer_id });
-        if (next === 'fulfilled')
-          await notify(requesterId, 'request_fulfilled', { request_id: req.id, offer_id: req.offer_id });
       } else if (tab === 'sent') {
         const ownerId = req.offers?.owner_id;
         if (next === 'withdrawn' && ownerId)
-          await notify(ownerId, 'system', {
-            kind: 'withdrawn',
-            request_id: req.id,
-            offer_id: req.offer_id,
-          });
+          await notify(ownerId, 'system', { kind: 'withdrawn', request_id: req.id, offer_id: req.offer_id });
       }
 
-      // If moved out of active pool, reload list to disappear from tab
       if (next === 'fulfilled' || next === 'declined') {
         await load();
       }
     } catch (e: any) {
-      console.error(e);
-      setMsg(e?.message ?? 'Update failed.');
+      console.warn(e);
+      const text = typeof e?.message === 'string' ? e.message : fmtError('setStatus', e);
+      setMsg(text);
       // rollback UI
       setItems((prev) =>
         prev.map((r) => (r.id === req.id ? { ...r, status: req.status } : r))
@@ -558,7 +581,7 @@ function ExchangesContent() {
         </div>
       </div>
 
-      {msg && <p className="text-sm text-amber-700">{msg}</p>}
+      {msg && <p className="text-sm text-amber-700 whitespace-pre-wrap">{msg}</p>}
       {loading && <p className="text-sm text-gray-600">Loading…</p>}
 
       {tab === 'received' && me && (
@@ -583,7 +606,7 @@ function ExchangesContent() {
 
                   <MessageThread
                     req={r}
-                    me={me}
+                    me={me!}
                     tab={tab}
                     autoOpen={thread === r.id}
                   />
@@ -649,7 +672,7 @@ function ExchangesContent() {
 
                   <MessageThread
                     req={r}
-                    me={me}
+                    me={me!}
                     tab={tab}
                     autoOpen={thread === r.id}
                   />
