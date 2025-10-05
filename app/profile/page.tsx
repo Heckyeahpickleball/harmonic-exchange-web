@@ -387,8 +387,9 @@ export default function ProfilePage() {
                 <div className="flex items-start justify-start md:justify-end">
                   <BadgeCluster
                     badges={clusterBadges}
-                    size={40}              // bigger badges
+                    size={48}              // bigger badges
                     href="/profile/badges" // clickable
+                    className="gap-4 md:gap-6 lg:gap-8"  // ⬅️ more spacing between badges
                   />
                 </div>
               ) : badgesMsg ? (

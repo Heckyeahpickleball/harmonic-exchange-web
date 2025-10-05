@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic'; // prevent build-time prerender
+
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
@@ -14,35 +16,51 @@ type BadgeDef = {
 
 export default function AllBadgesPage() {
   const [defs, setDefs] = useState<BadgeDef[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
+    let alive = true;
     (async () => {
-      // Try to load from your `badges` table; fall back to a small built-in list.
-      const { data } = await supabase
-        .from('badges')
-        .select('code,label,track,how:how_to_earn,icon')
-        .order('track', { ascending: true })
-        .order('tier', { ascending: true });
+      setLoading(true);
+      setErr(null);
+      try {
+        const { data } = await supabase
+          .from('badges')
+          .select('code,label,track,how:how_to_earn,icon')
+          .order('track', { ascending: true })
+          .order('tier', { ascending: true });
 
-      if (data?.length) {
-        setDefs(
-          data.map((r: any) => ({
-            code: r.code,
-            label: r.label ?? r.code,
-            track: r.track,
-            how: r.how ?? '',
-            icon: r.icon ?? `/badges/${r.code}.png`,
-          }))
-        );
-      } else {
-        setDefs([
-          { code: 'give_t1', label: 'Giver • Tier 1', track: 'give', how: 'Complete your first Give.', icon: '/badges/give_t1.png' },
-          { code: 'give_t2', label: 'Giver • Tier 2', track: 'give', how: 'Complete 5 Gives.', icon: '/badges/give_t2.png' },
-          { code: 'recv_t1', label: 'Receiver • Tier 1', track: 'receive', how: 'Receive your first gift.', icon: '/badges/recv_t1.png' },
-          { code: 'streak_7', label: '7-Day Streak', track: 'streak', how: 'Be active 7 days in a row.', icon: '/badges/streak_7.png' },
-        ]);
+        if (!alive) return;
+
+        if (data?.length) {
+          setDefs(
+            data.map((r: any) => ({
+              code: r.code,
+              label: r.label ?? r.code,
+              track: r.track,
+              how: r.how ?? '',
+              icon: r.icon ?? `/badges/${r.code}.png`,
+            }))
+          );
+        } else {
+          // Fallback list so page still renders without DB rows
+          setDefs([
+            { code: 'give_t1', label: 'Giver • Tier 1', track: 'give', how: 'Complete your first Give.', icon: '/badges/give_t1.png' },
+            { code: 'give_t2', label: 'Giver • Tier 2', track: 'give', how: 'Complete 5 Gives.', icon: '/badges/give_t2.png' },
+            { code: 'recv_t1', label: 'Receiver • Tier 1', track: 'receive', how: 'Receive your first gift.', icon: '/badges/recv_t1.png' },
+            { code: 'streak_7', label: '7-Day Streak', track: 'streak', how: 'Be active 7 days in a row.', icon: '/badges/streak_7.png' },
+          ]);
+        }
+      } catch (e: any) {
+        if (!alive) return;
+        setErr(e?.message ?? 'Failed to load badges.');
+        setDefs([]);
+      } finally {
+        if (alive) setLoading(false);
       }
     })();
+    return () => { alive = false; };
   }, []);
 
   return (
@@ -52,7 +70,10 @@ export default function AllBadgesPage() {
         <Link href="/profile" className="text-sm underline">Back to Profile</Link>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      {loading && <p className="text-sm text-slate-600">Loading…</p>}
+      {err && <p className="text-sm text-rose-600">Error: {err}</p>}
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 mt-2">
         {defs.map((b) => (
           <div key={b.code} className="flex items-center gap-3 rounded-lg border p-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
