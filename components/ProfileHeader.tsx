@@ -1,10 +1,11 @@
+// components/ProfileHeader.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import type { Database } from '../types/supabase';
+// Removed: import type { Database } from '../types/supabase';
 import BadgeCluster from '@/components/BadgeCluster';
 
 type Profile = {
@@ -22,8 +23,8 @@ type ExpandedBadge = {
   label: string | null;
   track: 'give' | 'receive' | 'streak' | 'milestone' | null;
   tier: number | null;
-  icon: string | null;            // e.g. "/badges/give_rays_t1.png"
-  earned_at: string;              // timestamp
+  icon: string | null;
+  earned_at: string;
 };
 
 interface ProfileHeaderProps {
@@ -32,16 +33,15 @@ interface ProfileHeaderProps {
 }
 
 export default function ProfileHeader({ profile, isOwner = false }: ProfileHeaderProps) {
-  const supabase = useMemo(() => createClientComponentClient<Database>(), []);
+  // Use the client without a missing generic type
+  const supabase = useMemo(() => createClientComponentClient(), []);
   const [badges, setBadges] = useState<ExpandedBadge[] | null>(null);
   const [loadingBadges, setLoadingBadges] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ---- Fetch badges for this profile
   useEffect(() => {
-    let isMounted = true;
-
-    async function loadBadges() {
+    let alive = true;
+    (async () => {
       setLoadingBadges(true);
       setError(null);
       const { data, error } = await supabase
@@ -50,12 +50,11 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
         .eq('profile_id', profile.id)
         .order('earned_at', { ascending: false });
 
-      if (!isMounted) return;
+      if (!alive) return;
       if (error) {
         setError(error.message);
         setBadges([]);
       } else {
-        // Normalize icon paths (fallback to a generic)
         const normalized = (data ?? []).map((b) => ({
           ...b,
           icon: b.icon ?? '/badges/generic_badge.png',
@@ -63,11 +62,9 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
         setBadges(normalized);
       }
       setLoadingBadges(false);
-    }
-
-    if (profile?.id) loadBadges();
+    })();
     return () => {
-      isMounted = false;
+      alive = false;
     };
   }, [supabase, profile?.id]);
 
@@ -79,6 +76,7 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
       {/* Header row */}
       <div className="px-4 sm:px-6 -mt-10 pb-4">
         <div className="flex items-end gap-4">
+          {/* Avatar */}
           <div className="h-20 w-20 rounded-full border-4 border-white overflow-hidden bg-slate-100 shrink-0">
             {profile?.avatar_url ? (
               <Image
@@ -93,8 +91,10 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
             )}
           </div>
 
+          {/* Name + meta + badges inline */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
+            {/* Top line: name, admin pill, badges cluster to the right */}
+            <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl sm:text-2xl font-semibold truncate">
                 {profile?.full_name || 'Member'}
               </h1>
@@ -103,51 +103,46 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
                   Admin
                 </span>
               ) : null}
+
+              {/* Inline badges cluster (no captions) */}
+              <div className="ml-2 flex-1 min-w-[140px]">
+                {loadingBadges ? (
+                  <span className="text-xs text-slate-500">Loading badges…</span>
+                ) : error ? (
+                  <span className="text-xs text-rose-600">Badges: {error}</span>
+                ) : badges && badges.length > 0 ? (
+                  <BadgeCluster
+                    badges={badges}
+                    size={24}
+                    href="/profile/badges"
+                    /* inline beside name -> no titles to keep it compact */
+                  />
+                ) : (
+                  <span className="text-xs text-slate-500">No badges yet.</span>
+                )}
+              </div>
+
+              {/* Optional helper link for owners */}
+              {isOwner && (
+                <Link
+                  href="/profile/badges"
+                  className="text-xs text-emerald-700 hover:underline whitespace-nowrap"
+                >
+                  Learn how to earn
+                </Link>
+              )}
             </div>
 
+            {/* Meta row */}
             <div className="mt-1 text-sm text-slate-600 flex flex-wrap items-center gap-x-3 gap-y-1">
               {(profile?.city || profile?.country) && (
-                <span>
-                  {[profile.city, profile.country].filter(Boolean).join(', ')}
-                </span>
+                <span>{[profile.city, profile.country].filter(Boolean).join(', ')}</span>
               )}
               {profile?.created_at && (
                 <span className="truncate">
                   • Member since {new Date(profile.created_at).toLocaleDateString()}
                 </span>
               )}
-            </div>
-
-            {/* Badge Cluster */}
-            <div className="mt-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-medium text-slate-700">Badges</h2>
-                {isOwner && (
-                  <Link
-                    href="/profile/badges"
-                    className="text-xs text-emerald-700 hover:underline"
-                  >
-                    Learn how to earn
-                  </Link>
-                )}
-              </div>
-
-              <div className="mt-2">
-                {loadingBadges ? (
-                  <div className="text-sm text-slate-500">Loading badges…</div>
-                ) : error ? (
-                  <div className="text-sm text-rose-600">Couldn’t load badges: {error}</div>
-                ) : badges && badges.length > 0 ? (
-                  <BadgeCluster
-                    badges={badges}
-                    size={28}
-                    // tooltips on hover
-                    showTitles
-                  />
-                ) : (
-                  <div className="text-sm text-slate-500">No badges yet.</div>
-                )}
-              </div>
             </div>
           </div>
 
