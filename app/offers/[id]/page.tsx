@@ -150,11 +150,22 @@ export default function OfferDetailPage() {
 
       <div className="flex items-start justify-between gap-3">
         <h1 className="text-2xl font-bold">{offer.title}</h1>
-        {offer.status !== 'active' && (
-          <span className="rounded bg-gray-200 px-2 py-0.5 text-[11px] uppercase tracking-wide text-gray-700">
-            {offer.status === 'pending' ? 'pending approval' : offer.status}
-          </span>
-        )}
+
+        <div className="flex items-center gap-2">
+          {/* NEW: View Provider button */}
+          <Link
+            href={`/u/${offer.owner_id}`}
+            className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
+          >
+            View Provider
+          </Link>
+
+          {offer.status !== 'active' && (
+            <span className="rounded bg-gray-200 px-2 py-0.5 text-[11px] uppercase tracking-wide text-gray-700">
+              {offer.status === 'pending' ? 'pending approval' : offer.status}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="relative h-64 w-full overflow-hidden rounded bg-gray-100">

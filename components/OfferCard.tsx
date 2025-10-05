@@ -119,7 +119,18 @@ export default function OfferCard({ offer, mine = false, onDeleted }: Props) {
             </Link>
           )}
 
-          {mine && (
+          {/* NEW: View Provider button */}
+          {offer.owner_id && (
+            <Link
+              href={`/u/${offer.owner_id}`}
+              className="hx-btn hx-btn--outline-secondary text-sm"
+              title="View provider profile"
+            >
+              View Provider
+            </Link>
+          )}
+
+        {mine && (
             <button
               onClick={handleDelete}
               disabled={deleting}
