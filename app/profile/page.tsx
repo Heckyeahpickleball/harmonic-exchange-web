@@ -8,7 +8,7 @@ import ImageCropperModal from '@/components/ImageCropperModal';
 import OfferCard, { type OfferRow } from '@/components/OfferCard';
 import UserFeed from '@/components/UserFeed';
 import PostComposer from '@/components/PostComposer';
-import BadgeCluster from '@/components/BadgeCluster'; // ✅ use the shared badges row
+import BadgeCluster from '@/components/BadgeCluster'; // ✅ shared badges row
 
 type ProfileRow = {
   id: string;
@@ -381,15 +381,15 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* RIGHT: larger clickable badges */}
+            {/* RIGHT: larger clickable badges (shifted a bit left via right padding) */}
             <div className="md:col-span-4">
               {!!clusterBadges.length ? (
-                <div className="flex items-start justify-start md:justify-end">
+                <div className="flex items-start justify-end pr-8 md:pr-12">
                   <BadgeCluster
                     badges={clusterBadges}
-                    size={48}              // bigger badges
-                    href="/profile/badges" // clickable
-                    className="gap-4 md:gap-6 lg:gap-8"  // ⬅️ more spacing between badges
+                    size={60}                    // bigger badges
+                    href="/profile/badges"       // clickable
+                    className="gap-6 md:gap-8"   // spacing between badges
                   />
                 </div>
               ) : badgesMsg ? (
