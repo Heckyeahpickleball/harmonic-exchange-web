@@ -8,6 +8,7 @@ import ImageCropperModal from '@/components/ImageCropperModal';
 import OfferCard, { type OfferRow } from '@/components/OfferCard';
 import UserFeed from '@/components/UserFeed';
 import PostComposer from '@/components/PostComposer';
+import BadgeCluster from '@/components/BadgeCluster'; // ✅ use the shared badges row
 
 type ProfileRow = {
   id: string;
@@ -67,7 +68,7 @@ export default function ProfilePage() {
   const [offersLoading, setOffersLoading] = useState(false);
   const [offersMsg, setOffersMsg] = useState('');
 
-  // NEW: badges
+  // Badges
   const [badges, setBadges] = useState<ExpandedBadge[] | null>(null);
   const [badgesMsg, setBadgesMsg] = useState<string>('');
 
@@ -184,7 +185,7 @@ export default function ProfilePage() {
     };
   }, [userId]);
 
-  // NEW: Load badges for this profile (from the expanded view)
+  // Load badges for this profile (from the expanded view)
   useEffect(() => {
     if (!profile?.id) return;
     let cancelled = false;
@@ -210,6 +211,20 @@ export default function ProfilePage() {
       cancelled = true;
     };
   }, [profile?.id]);
+
+  // Map ExpandedBadge -> BadgeCluster’s expected shape
+  const clusterBadges = useMemo(
+    () =>
+      (badges ?? []).map((b) => ({
+        badge_code: b.badge_code,
+        track: b.track ?? '',
+        tier: b.tier ?? 0,
+        earned_at: b.earned_at,
+        image_url: b.icon ?? undefined,
+        label: b.label ?? null,
+      })),
+    [badges]
+  );
 
   const skillsList = useMemo(
     () =>
@@ -328,18 +343,15 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              {/* NEW: Badges row */}
-              {!!badges?.length && (
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  {badges.map((b) => (
-                    <img
-                      key={b.badge_code}
-                      src={b.icon ?? ''}
-                      alt={b.label ?? b.badge_code}
-                      title={`${b.label ?? b.badge_code}${b.tier ? ` (T${b.tier})` : ''}`}
-                      className="h-7 w-7 rounded-full border"
-                    />
-                  ))}
+              {/* Badges row (shared component, with captions + click to /profile/badges) */}
+              {!!clusterBadges.length && (
+                <div className="mt-2">
+                  <BadgeCluster
+                    badges={clusterBadges}
+                    size={28}
+                    showTitles
+                    href="/profile/badges"
+                  />
                 </div>
               )}
               {badgesMsg && <p className="mt-1 text-xs text-amber-700">{badgesMsg}</p>}
@@ -459,6 +471,7 @@ export default function ProfilePage() {
               }}
               className="grid gap-4 md:grid-cols-2"
             >
+              {/* left column */}
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium">Display name *</label>
@@ -514,6 +527,7 @@ export default function ProfilePage() {
                 </div>
               </div>
 
+              {/* right column */}
               <div className="space-y-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Cover photo</label>

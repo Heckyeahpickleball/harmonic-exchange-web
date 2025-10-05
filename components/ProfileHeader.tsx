@@ -5,7 +5,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-// Removed: import type { Database } from '../types/supabase';
 import BadgeCluster from '@/components/BadgeCluster';
 
 type Profile = {
