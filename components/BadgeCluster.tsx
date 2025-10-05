@@ -4,40 +4,62 @@ import Link from 'next/link';
 import * as React from 'react';
 import Badge from './Badge';
 
-/**
- * The cluster accepts a minimal, tolerant shape so both your
- * ProfileBadge rows and ExpandedBadge rows can be rendered.
- * (This fixes the "ExpandedBadge[] is not assignable to ProfileBadge[]" error.)
- */
-export type ClusterBadge = {
-  badge_code?: string | null;     // e.g. "give_t2", "recv_t1"
-  track?: string | null;          // "give" | "receive" | "streak" | etc.
-  tier?: number | null;           // 1..n
+export type ProfileBadge = {
+  badge_code?: string | null;   // e.g. "give_t2", "recv_t1", "streak_7"
+  track?: string | null;        // "give" | "receive" | "streak" | etc.
+  tier?: number | null;         // 1..n
   earned_at?: string | null;
-  image_url?: string | null;      // optional pre-resolved URL
-  label?: string | null;          // human label like "Giver • Tier 2"
-  icon?: string | null;           // some sources call it "icon"
+  image_url?: string | null;
+  label?: string | null;        // e.g. "Giver • Tier 2"
 };
 
 export type BadgeClusterProps = {
-  badges: ClusterBadge[] | null | undefined;
-  /** px size for each badge circle */
+  badges: ProfileBadge[] | null | undefined;
   size?: number;
-  /** where clicking a badge should navigate */
-  href?: string; // default: '/profile/badges'
-  /** map a badge to an icon URL (optional) */
-  resolveIcon?: (b: ClusterBadge) => string | null | undefined;
-  /** map a badge to a caption/label (optional) */
-  resolveLabel?: (b: ClusterBadge) => string | null | undefined;
+  /** page to open when clicking any badge */
+  href?: string;                // default: '/profile/badges'
+  resolveIcon?: (b: ProfileBadge) => string | null | undefined;
+  resolveLabel?: (b: ProfileBadge) => string | null | undefined;
   /** show small text labels under each badge */
   showTitles?: boolean;
   className?: string;
 };
 
+function parseFromCode(code: string | null | undefined) {
+  // Pull track + tier out of common patterns like "give_t2", "recv_t1", "streak_7"
+  if (!code) return { track: null as string | null, tier: null as number | null };
+  const lower = code.toLowerCase();
+
+  // Normalize track aliases
+  let track: string | null = null;
+  if (/\bgiv(e|er)?\b/.test(lower)) track = 'give';
+  else if (/\brec(eive|v|vr|eiv)?\b/.test(lower)) track = 'receive';
+  else if (/\bstreak\b/.test(lower)) track = 'streak';
+  else if (/\bmilestone\b/.test(lower)) track = 'milestone';
+
+  const tierMatch = lower.match(/(?:_t|t)(\d+)|(?:[_-])(\d+)$/);
+  const num = tierMatch ? Number(tierMatch[1] ?? tierMatch[2]) : null;
+
+  return { track, tier: Number.isFinite(num) ? num : null };
+}
+
+function friendlyTrack(s: string | null | undefined) {
+  const t = (s ?? '').toLowerCase();
+  if (t === 'give' || t === 'giver') return 'give';
+  if (t === 'recv' || t === 'receive' || t === 'receiver') return 'receive';
+  if (t === 'streak') return 'streak';
+  if (t === 'milestone') return 'milestone';
+  return t || null;
+}
+
+function cap(s: string) {
+  return s ? s.slice(0, 1).toUpperCase() + s.slice(1) : s;
+}
+
 /**
  * Compact row of badges.
  * - Only the highest tier per track is shown (T2 replaces T1).
- * - Every badge is a link to your “All Badges & How to Earn” page.
+ * - Every badge is a link to the “All Badges & How to Earn” page.
  */
 export default function BadgeCluster({
   badges,
@@ -51,32 +73,33 @@ export default function BadgeCluster({
   const display = React.useMemo(() => {
     if (!badges?.length) return [];
 
+    // Normalize each badge (track + tier fallbacks from code)
+    const normalized = badges.map((b) => {
+      const fromCode = parseFromCode(b.badge_code);
+      const track = friendlyTrack(b.track) ?? fromCode.track;
+      const tier = (b.tier ?? fromCode.tier ?? 0) as number;
+      return { ...b, track, tier } as Required<Pick<ProfileBadge,'track'|'tier'>> & ProfileBadge;
+    });
+
     // Keep only the highest tier for each track
-    const byTrack = new Map<string, ClusterBadge>();
-    for (const b of badges) {
-      const key = String(b.track ?? '').toLowerCase();
-      if (!key) continue; // skip items with no track
+    const byTrack = new Map<string, ProfileBadge & { tier: number; track: string | null }>();
+    for (const b of normalized) {
+      const key = (b.track ?? 'misc').toLowerCase();
       const prev = byTrack.get(key);
-      const curTier = b.tier ?? 0;
-      const prevTier = prev?.tier ?? 0;
-      if (!prev || curTier > prevTier) byTrack.set(key, b);
+      if (!prev || (b.tier ?? 0) > (prev.tier ?? 0)) {
+        byTrack.set(key, b as ProfileBadge & { tier: number; track: string | null });
+      }
     }
 
-    // deterministic order: streak, give, receive, then alpha
-    const order = ['streak', 'give', 'receive'];
+    // Deterministic order: streak, give, receive, milestone, then alpha
+    const order = ['streak', 'give', 'receive', 'milestone'];
     const result = Array.from(byTrack.values()).sort((a, b) => {
       const ai = order.indexOf(String(a.track ?? '').toLowerCase());
       const bi = order.indexOf(String(b.track ?? '').toLowerCase());
       const aRank = ai === -1 ? 999 : ai;
       const bRank = bi === -1 ? 999 : bi;
       if (aRank !== bRank) return aRank - bRank;
-
-      // higher tier first
-      const at = a.tier ?? 0;
-      const bt = b.tier ?? 0;
-      if (bt !== at) return bt - at;
-
-      // stable fallback by code
+      if ((b.tier ?? 0) !== (a.tier ?? 0)) return (b.tier ?? 0) - (a.tier ?? 0); // higher first
       return String(a.badge_code ?? '').localeCompare(String(b.badge_code ?? ''));
     });
 
@@ -86,16 +109,15 @@ export default function BadgeCluster({
   if (!display.length) return null;
 
   return (
-    <div className={['flex items-center gap-2', className].join(' ')}>
+    <div className={['flex items-center gap-2 relative z-10', className].join(' ')}>
       {display.map((b) => {
         const label =
           b.label ??
           resolveLabel?.(b) ??
-          (b.track ? `${cap(String(b.track))}${b.tier ? ` • Tier ${b.tier}` : ''}` : b.badge_code ?? 'Badge');
+          (b.track ? `${cap(b.track)}${b.tier ? ` • Tier ${b.tier}` : ''}` : b.badge_code ?? 'Badge');
 
         const icon =
           b.image_url ??
-          b.icon ??
           resolveIcon?.(b) ??
           (b.badge_code ? `/badges/${b.badge_code}.png` : '/badges/placeholder.png');
 
@@ -103,7 +125,7 @@ export default function BadgeCluster({
           <div key={`${b.track}:${b.badge_code ?? b.tier}`} className="flex flex-col items-center">
             <Link
               href={href}
-              className="group inline-flex items-center focus:outline-none focus:ring-2 focus:ring-blue-400 rounded-full"
+              className="group inline-flex items-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-400 rounded-full"
               title={`See all badges — ${label}`}
               aria-label={`See all badges — ${label}`}
             >
@@ -117,8 +139,4 @@ export default function BadgeCluster({
       })}
     </div>
   );
-}
-
-function cap(s: string) {
-  return s ? s.slice(0, 1).toUpperCase() + s.slice(1) : s;
 }
