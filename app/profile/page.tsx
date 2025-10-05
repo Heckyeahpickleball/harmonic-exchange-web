@@ -133,9 +133,7 @@ export default function ProfilePage() {
 
       setLoading(false);
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   // Load my active offers
@@ -180,9 +178,7 @@ export default function ProfilePage() {
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [userId]);
 
   // Load badges for this profile (from the expanded view)
@@ -207,12 +203,10 @@ export default function ProfilePage() {
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [profile?.id]);
 
-  // Map ExpandedBadge -> BadgeCluster’s expected shape
+  // Map ExpandedBadge -> BadgeCluster shape
   const clusterBadges = useMemo(
     () =>
       (badges ?? []).map((b) => ({
@@ -319,9 +313,9 @@ export default function ProfilePage() {
           )}
         </div>
 
-        {/* Header content – tightened paddings */}
-        <div className="relative px-4 pb-3 pt-8 md:px-6">
-          {/* Avatar (unchanged size/position) */}
+        {/* Header content – tighter top/bottom */}
+        <div className="relative px-4 pb-3 pt-2 md:px-6">
+          {/* Avatar */}
           <div className="absolute -top-10 left-4 h-20 w-20 overflow-hidden rounded-full border-4 border-white md:left-6 md:h-24 md:w-24">
             {form.avatar_url ? (
               <img src={form.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
@@ -330,11 +324,11 @@ export default function ProfilePage() {
             )}
           </div>
 
-          {/* New compact header layout: left (name/meta/actions) | right (badges) */}
+          {/* Compact header layout */}
           <div className="grid grid-cols-1 gap-2 md:grid-cols-12 md:items-start">
-            {/* LEFT */}
+            {/* LEFT: name/meta (pulled up) + actions (spaced down) */}
             <div className="md:col-span-8 md:pl-28">
-              {/* Name row – smaller gaps/margins */}
+              {/* Name row */}
               <div className="flex flex-wrap items-center gap-2 leading-tight">
                 <h1 className="text-xl font-semibold md:text-2xl">{form.display_name || 'Unnamed'}</h1>
                 {profile?.role && (
@@ -344,7 +338,7 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              {/* Meta – pulled closer */}
+              {/* Meta (closer to name) */}
               <div className="mt-0.5 text-[13px] text-gray-600 flex flex-wrap gap-2">
                 {form.area_city || form.area_country ? (
                   <span>{[form.area_city, form.area_country].filter(Boolean).join(', ')}</span>
@@ -359,8 +353,8 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              {/* Actions – tight spacing */}
-              <div className="mt-1.5 flex items-center gap-2">
+              {/* Actions – more space above to separate from name/location */}
+              <div className="mt-3 flex items-center gap-2">
                 <button
                   onClick={() => setEditing(true)}
                   className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
@@ -377,7 +371,7 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* RIGHT: badges with captions, evenly spaced single-row */}
+            {/* RIGHT: badges */}
             <div className="md:col-span-4">
               {!!clusterBadges.length ? (
                 <div className="flex items-start justify-start md:justify-end">
@@ -421,22 +415,18 @@ export default function ProfilePage() {
 
       {status && <p className="px-1 text-sm text-gray-700">{status}</p>}
 
-      {/* ===== Main content: Offers (left) + Posts (right) ===== */}
+      {/* Main content */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-        {/* Offers column */}
         <section className="md:col-span-5 space-y-2">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold">Active Offers</h2>
             <Link href="/offers/new" className="text-xs underline">New offer</Link>
           </div>
-
           {offersLoading && <p className="text-sm text-gray-600">Loading…</p>}
           {offersMsg && <p className="text-sm text-amber-700">{offersMsg}</p>}
-
           {!offersLoading && offers.length === 0 && (
             <p className="text-sm text-gray-600">No active offers yet.</p>
           )}
-
           <div className="grid grid-cols-1 gap-3">
             {offers.map((o) => (
               <OfferCard
@@ -449,7 +439,6 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        {/* Posts column */}
         <section className="md:col-span-7 space-y-2">
           <h2 className="text-base font-semibold">Posts</h2>
           {userId && <PostComposer profileId={userId} />}
@@ -457,7 +446,7 @@ export default function ProfilePage() {
         </section>
       </div>
 
-      {/* ----- EDIT DIALOG ----- */}
+      {/* EDIT DIALOG */}
       {editing && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
           <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-xl">
@@ -635,39 +624,6 @@ export default function ProfilePage() {
             {status && <p className="mt-3 text-sm text-gray-700">{status}</p>}
           </div>
         </div>
-      )}
-
-      {/* Cropper modal */}
-      {cropper && (
-        <ImageCropperModal
-          src={cropper.src}
-          aspect={cropper.aspect}
-          targetWidth={cropper.targetWidth}
-          targetHeight={cropper.targetHeight}
-          title={cropper.title}
-          onCancel={() => {
-            URL.revokeObjectURL(cropper.src);
-            setCropper(null);
-          }}
-          onConfirm={async (file) => {
-            try {
-              setStatus(`Uploading ${cropper.kind}…`);
-              const url = await uploadTo(cropper.kind === 'avatar' ? 'avatars' : 'covers', file);
-              if (cropper.kind === 'avatar') {
-                setForm((f) => ({ ...f, avatar_url: url }));
-                setStatus('Avatar uploaded');
-              } else {
-                setForm((f) => ({ ...f, cover_url: url }));
-                setStatus('Cover uploaded');
-              }
-            } catch (err: any) {
-              setStatus(`${cropper.kind} upload failed: ${err?.message ?? err}`);
-            } finally {
-              URL.revokeObjectURL(cropper.src);
-              setCropper(null);
-            }
-          }}
-        />
       )}
     </section>
   );
