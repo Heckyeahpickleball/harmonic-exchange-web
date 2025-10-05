@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import Badge from '@/components/Badge';
 
 export type ExpandedBadge = {
@@ -18,22 +19,26 @@ type Props = {
   size?: number;
   /** show a small caption under each badge */
   showTitles?: boolean;
+  /** where clicking a badge should navigate */
+  href?: string; // default: '/profile/badges'
   className?: string;
 };
 
 /**
- * Renders a compact row of earned badges using the shared <Badge /> component.
- * Only uses props supported by Badge: { icon, size, title, className }.
+ * Compact row of earned badges.
+ * - Only the highest tier per track is shown (T2 replaces T1).
+ * - Each badge is a link to the full badges page.
  */
 export default function EarnedBadgesRow({
   badges,
   size = 28,
   showTitles = false,
+  href = '/profile/badges',
   className = '',
 }: Props) {
   if (!badges?.length) return null;
 
-  // Highest tier per track (so T2 replaces T1, etc.)
+  // Highest tier per track
   const display = React.useMemo(() => {
     const byTrack = new Map<string, ExpandedBadge>();
     for (const b of badges) {
@@ -69,7 +74,14 @@ export default function EarnedBadgesRow({
 
         return (
           <div key={`${b.track}:${b.badge_code ?? b.tier}`} className="flex flex-col items-center">
-            <Badge icon={icon} size={size} title={title} />
+            <Link
+              href={href}
+              className="group inline-flex items-center focus:outline-none focus:ring-2 focus:ring-blue-400 rounded-full"
+              title={`See all badges — ${title}`}
+              aria-label={`See all badges — ${title}`}
+            >
+              <Badge icon={icon} size={size} title={title} />
+            </Link>
             {showTitles && (
               <span className="mt-1 text-[10px] leading-none text-slate-600">{title}</span>
             )}
