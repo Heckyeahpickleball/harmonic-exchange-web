@@ -313,7 +313,7 @@ export default function ProfilePage() {
           )}
         </div>
 
-        {/* Header content – tighter top/bottom */}
+        {/* Header content – keep left where it is, move badges independently */}
         <div className="relative px-4 pb-3 pt-2 md:px-6">
           {/* Avatar */}
           <div className="absolute -top-10 left-4 h-20 w-20 overflow-hidden rounded-full border-4 border-white md:left-6 md:h-24 md:w-24">
@@ -324,11 +324,9 @@ export default function ProfilePage() {
             )}
           </div>
 
-          {/* Compact header layout */}
           <div className="grid grid-cols-1 gap-2 md:grid-cols-12 md:items-start">
-            {/* LEFT: name/meta (pulled up) + actions (spaced down) */}
+            {/* LEFT (unchanged position) */}
             <div className="md:col-span-8 md:pl-28">
-              {/* Name row */}
               <div className="flex flex-wrap items-center gap-2 leading-tight">
                 <h1 className="text-xl font-semibold md:text-2xl">{form.display_name || 'Unnamed'}</h1>
                 {profile?.role && (
@@ -338,7 +336,6 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              {/* Meta (closer to name) */}
               <div className="mt-0.5 text-[13px] text-gray-600 flex flex-wrap gap-2">
                 {form.area_city || form.area_country ? (
                   <span>{[form.area_city, form.area_country].filter(Boolean).join(', ')}</span>
@@ -353,7 +350,6 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              {/* Actions – more space above to separate from name/location */}
               <div className="mt-3 flex items-center gap-2">
                 <button
                   onClick={() => setEditing(true)}
@@ -371,17 +367,29 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* RIGHT: badges */}
-            <div className="md:col-span-4">
+            {/* RIGHT: badges absolutely centered vertically so left side never shifts */}
+            <div className="md:col-span-4 md:relative md:h-[100px]">
               {!!clusterBadges.length ? (
-                <div className="flex items-start justify-start md:justify-end">
-                  <BadgeCluster
-                    badges={clusterBadges}
-                    size={48}
-                    href="/profile/badges"
-                    className="gap-6 md:gap-8"
-                  />
-                </div>
+                <>
+                  {/* Desktop: remove from flow, center vertically */}
+                  <div className="hidden md:flex absolute inset-0 items-center justify-end">
+                    <BadgeCluster
+                      badges={clusterBadges}
+                      size={48}
+                      href="/profile/badges"
+                      className="gap-6 md:gap-8"
+                    />
+                  </div>
+                  {/* Mobile: normal flow */}
+                  <div className="md:hidden flex justify-start">
+                    <BadgeCluster
+                      badges={clusterBadges}
+                      size={48}
+                      href="/profile/badges"
+                      className="gap-6"
+                    />
+                  </div>
+                </>
               ) : badgesMsg ? (
                 <p className="text-xs text-amber-700">{badgesMsg}</p>
               ) : null}
