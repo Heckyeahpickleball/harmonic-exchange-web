@@ -112,7 +112,6 @@ export default function NotificationsBell() {
       case 'request_declined':
         return { text: `Your request was declined${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
       case 'request_fulfilled':
-        // Send them to the fulfilled tab (clearer than "sent")
         return { text: `Request marked fulfilled${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=fulfilled' };
 
       case 'badge_earned': {
@@ -133,7 +132,6 @@ export default function NotificationsBell() {
             ? 'Offers Shared'
             : track ?? 'Badge';
         const text = `🎉 New badge earned — ${niceTrack}${tier != null ? ` (Tier ${tier})` : ''}`;
-        // Jump to the badges anchor on Profile
         return { text, href: '/profile#badges' };
       }
 
@@ -308,7 +306,7 @@ export default function NotificationsBell() {
                         onClick={async () => {
                           await markOneRead(n.id);
                           setOpen(false);
-                          router.push(href); // navigate (supports anchors like #badges)
+                          router.push(href);
                         }}
                         aria-label="View"
                         title="View"

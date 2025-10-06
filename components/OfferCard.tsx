@@ -21,7 +21,12 @@ export type OfferRow = {
 type Props = {
   offer: OfferRow;
   mine?: boolean;
+  /** If the viewing user is an admin/moderator, pass true to expose approval actions */
+  isAdmin?: boolean;
+  /** Called after a successful delete */
   onDeleted?: (id: string) => void;
+  /** Called after a successful approve (status -> active) */
+  onApproved?: (id: string) => void;
 };
 
 function StatusBadge({ status }: { status: OfferRow['status'] }) {
@@ -41,8 +46,15 @@ function StatusBadge({ status }: { status: OfferRow['status'] }) {
   );
 }
 
-export default function OfferCard({ offer, mine = false, onDeleted }: Props) {
+export default function OfferCard({
+  offer,
+  mine = false,
+  isAdmin = false,
+  onDeleted,
+  onApproved,
+}: Props) {
   const [deleting, setDeleting] = useState(false);
+  const [approving, setApproving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const thumb =
@@ -60,6 +72,29 @@ export default function OfferCard({ offer, mine = false, onDeleted }: Props) {
       setErr(e?.message ?? 'Failed to delete');
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function handleApprove() {
+    // Promote a pending offer to active (admin/mod only)
+    setErr(null);
+    try {
+      setApproving(true);
+
+      // If you created a Postgres function, prefer it here:
+      // const { error } = await supabase.rpc('approve_offer', { p_offer_id: offer.id });
+      // Fallback: direct update (requires an RLS policy that allows admins/mods).
+      const { error } = await supabase
+        .from('offers')
+        .update({ status: 'active' })
+        .eq('id', offer.id);
+
+      if (error) throw error;
+      onApproved?.(offer.id);
+    } catch (e: any) {
+      setErr(e?.message ?? 'Failed to approve');
+    } finally {
+      setApproving(false);
     }
   }
 
@@ -119,7 +154,7 @@ export default function OfferCard({ offer, mine = false, onDeleted }: Props) {
             </Link>
           )}
 
-          {/* NEW: View Provider button */}
+          {/* View Provider */}
           {offer.owner_id && (
             <Link
               href={`/u/${offer.owner_id}`}
@@ -130,8 +165,23 @@ export default function OfferCard({ offer, mine = false, onDeleted }: Props) {
             </Link>
           )}
 
-        {mine && (
+          {/* Admin: Approve pending */}
+          {isAdmin && offer.status === 'pending' && (
             <button
+              type="button"
+              onClick={handleApprove}
+              disabled={approving}
+              className="hx-btn hx-btn--success text-sm disabled:opacity-60"
+              title="Approve this offer"
+            >
+              {approving ? 'Approving…' : 'Approve'}
+            </button>
+          )}
+
+          {/* Owner: Delete */}
+          {mine && (
+            <button
+              type="button"
               onClick={handleDelete}
               disabled={deleting}
               className="hx-btn hx-btn--secondary text-sm disabled:opacity-60"

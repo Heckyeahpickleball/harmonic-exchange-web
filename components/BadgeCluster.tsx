@@ -27,13 +27,7 @@ export type BadgeClusterProps = {
 
 const ORDER: Array<'streak' | 'give' | 'receive'> = ['streak', 'give', 'receive'];
 
-const FALLBACK_LABEL: Record<string, string> = {
-  streak: 'Keep the Flow',
-  give: 'First Gift',
-  receive: 'First Receiving',
-};
-
-// Build a filename based on track + tier that matches your /public/badges folder
+// Build a filename based on track + tier that matches /public/badges
 function guessIconPath(b: ClusterBadge): string | undefined {
   const track = (b.track || '').toLowerCase();
   const tier = Math.max(1, Math.min(6, Number(b.tier) || 1)); // clamp 1..6
@@ -43,20 +37,20 @@ function guessIconPath(b: ClusterBadge): string | undefined {
   return undefined;
 }
 
-// Final fallback if everything else is missing
+// Final safety net
 const ULTIMATE_FALLBACK = '/badges/streak_wave.png';
 
 export default function BadgeCluster({
   badges,
   size = 48,
-  href = '/profile/badges',
+  href = '/profile#badges',
   resolveIcon,
   resolveLabel,
   showTitles = true,
   className = '',
   itemWidth = 112,
 }: BadgeClusterProps) {
-  // keep highest-tier badge per track
+  // 1) keep only highest tier per track (no placeholders)
   const display = React.useMemo(() => {
     const byTrack = new Map<string, ClusterBadge>();
     for (const b of badges ?? []) {
@@ -66,22 +60,11 @@ export default function BadgeCluster({
       const prevTier = byTrack.get(key)?.tier ?? -1;
       if (!byTrack.has(key) || curTier > prevTier) byTrack.set(key, b);
     }
-    // ensure we always render 3 slots (with placeholders where needed)
-    return ORDER.map((trk) => {
-      const existing = byTrack.get(trk);
-      if (existing) return existing;
-      return {
-        track: trk,
-        tier: 1,
-        badge_code: `${trk}_locked`,
-        label: FALLBACK_LABEL[trk],
-        image_url: guessIconPath({ track: trk, tier: 1 }) ?? ULTIMATE_FALLBACK,
-        earned_at: null,
-      } as ClusterBadge;
-    });
+    // stable order
+    return ORDER.map((t) => byTrack.get(t)).filter(Boolean) as ClusterBadge[];
   }, [badges]);
 
-  if (!display.length) return null;
+  if (display.length === 0) return null;
 
   return (
     <div className={['flex flex-nowrap items-start gap-6 overflow-x-auto md:overflow-visible', className].join(' ')}>
@@ -91,14 +74,15 @@ export default function BadgeCluster({
           resolveLabel?.(b) ??
           (b.track ? `${cap(String(b.track))}${b.tier ? ` • Tier ${b.tier}` : ''}` : b.badge_code ?? 'Badge');
 
-        // priority: explicit image -> legacy icon -> resolver -> derived by code -> guessed by track/tier -> final fallback
+        // Prefer “known good” sources first to avoid broken images:
+        // image_url -> legacy icon -> resolver -> by track/tier -> by code -> ultimate fallback
         const derivedFromCode = b.badge_code ? `/badges/${b.badge_code}.png` : undefined;
         const icon =
           b.image_url ||
           b.icon ||
           resolveIcon?.(b) ||
-          derivedFromCode ||
           guessIconPath(b) ||
+          derivedFromCode ||
           ULTIMATE_FALLBACK;
 
         return (
