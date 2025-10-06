@@ -6,9 +6,12 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
-// Force runtime rendering (avoid static export/prerender issues)
+/** 🔒 Force runtime rendering — do NOT prerender this page or its data */
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+export const dynamicParams = true;
+export const runtime = 'nodejs';
 
 type ExpandedBadge = {
   badge_code: string | null;
@@ -40,7 +43,8 @@ function howToFor(track: 'give' | 'receive' | 'streak', tier: number): string {
 
   const count = TIER_COUNTS[(tier - 1) as 0 | 1 | 2 | 3 | 4 | 5] ?? tier;
   const action = track === 'give' ? 'Give' : 'Receive';
-  const noun = track === 'give' ? plural(count, 'gift', 'gifts') : plural(count, 'receiving', 'receivings');
+  const noun =
+    track === 'give' ? plural(count, 'gift', 'gifts') : plural(count, 'receiving', 'receivings');
 
   if (tier === 1) {
     return track === 'give' ? 'Give your first gift' : 'Receive your first gift';
@@ -102,8 +106,7 @@ function iconFor(row: ExpandedBadge): string {
   return '/badges/give_rays_t1.png';
 }
 
-// Inner component that actually uses useSearchParams()
-// Wrapped by Suspense in the default export below (Next 15 requirement).
+// Uses useSearchParams — must be wrapped in Suspense by the default export
 function ProfileBadgesInner() {
   const search = useSearchParams();
   const requestedId = search.get('id') || null;
