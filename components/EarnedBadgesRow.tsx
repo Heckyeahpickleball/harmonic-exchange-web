@@ -20,44 +20,51 @@ type Props = {
   /** show a small caption under each badge */
   showTitles?: boolean;
   /** where clicking a badge should navigate */
-  href?: string; // default: '/profile/badges'
+  href?: string; // default changed to '/profile#badges'
   className?: string;
 };
 
 /**
  * Compact row of earned badges.
+ * - Shows only the three core tracks: give / receive / streak
  * - Only the highest tier per track is shown (T2 replaces T1).
- * - Each badge is a link to the full badges page.
+ * - Each badge links to the full badges section on the Profile page.
  */
 export default function EarnedBadgesRow({
   badges,
   size = 28,
   showTitles = false,
-  href = '/profile/badges',
+  href = '/profile#badges',
   className = '',
 }: Props) {
+  // Nothing to show
   if (!badges?.length) return null;
 
-  // Highest tier per track
-  const display = React.useMemo(() => {
-    const byTrack = new Map<string, ExpandedBadge>();
-    for (const b of badges) {
-      const key = String(b.track ?? '').toLowerCase();
-      const prev = byTrack.get(key);
-      if (!prev || (b.tier ?? 0) > (prev.tier ?? 0)) byTrack.set(key, b);
+  // Keep only the three core tracks we want to display
+  const CORE_TRACKS: Array<'give' | 'receive' | 'streak'> = ['give', 'receive', 'streak'];
+  const filtered = badges.filter(
+    (b) => !!b.track && (CORE_TRACKS as string[]).includes(String(b.track))
+  );
+
+  // Highest tier per track (within the filtered set)
+  const bestByTrack = React.useMemo(() => {
+    const map = new Map<string, ExpandedBadge>();
+    for (const b of filtered) {
+      const key = String(b.track);
+      const prev = map.get(key);
+      if (!prev || (b.tier ?? 0) > (prev.tier ?? 0)) {
+        map.set(key, b);
+      }
     }
-    // Nice deterministic order
-    const order = ['streak', 'give', 'receive', 'milestone'];
-    return Array.from(byTrack.values()).sort((a, b) => {
-      const ai = order.indexOf(String(a.track).toLowerCase());
-      const bi = order.indexOf(String(b.track).toLowerCase());
-      const ra = ai === -1 ? 999 : ai;
-      const rb = bi === -1 ? 999 : bi;
-      if (ra !== rb) return ra - rb;
-      if ((b.tier ?? 0) !== (a.tier ?? 0)) return (b.tier ?? 0) - (a.tier ?? 0);
-      return String(a.badge_code ?? '').localeCompare(String(b.badge_code ?? ''));
-    });
-  }, [badges]);
+    return map;
+  }, [filtered]);
+
+  // Build the display array in a deterministic order
+  const display = React.useMemo(() => {
+    return CORE_TRACKS
+      .map((t) => bestByTrack.get(t))
+      .filter((x): x is ExpandedBadge => !!x);
+  }, [bestByTrack]);
 
   if (!display.length) return null;
 
@@ -72,8 +79,9 @@ export default function EarnedBadgesRow({
           b.icon ??
           (b.badge_code ? `/badges/${b.badge_code}.png` : '/badges/placeholder.png');
 
+        // Key is guaranteed unique because we only keep a single (highest) badge per track
         return (
-          <div key={`${b.track}:${b.badge_code ?? b.tier}`} className="flex flex-col items-center">
+          <div key={String(b.track)} className="flex flex-col items-center">
             <Link
               href={href}
               className="group inline-flex items-center focus:outline-none focus:ring-2 focus:ring-blue-400 rounded-full"

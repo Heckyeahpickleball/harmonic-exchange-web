@@ -1,4 +1,3 @@
-// /components/NotificationsBell.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -14,6 +13,7 @@ type NotifType =
   | 'message'
   | 'offer_pending'
   | 'fulfillment_reminder'
+  | 'badge_earned'
   | 'system'
   | string;
 
@@ -34,12 +34,10 @@ export default function NotificationsBell() {
   const [rows, setRows] = useState<Notif[]>([]);
   const unread = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
 
-  // caches
   const titleCache = useRef(new Map<string, string>());
   const requesterCache = useRef(new Map<string, string>());
   const sigSeen = useRef<Set<string>>(new Set());
 
-  /* ---------- enrichment helpers ---------- */
   async function enrichOfferTitles(notifs: Notif[]) {
     const missing = Array.from(
       new Set(
@@ -91,7 +89,6 @@ export default function NotificationsBell() {
     );
   }
 
-  /* ---------- label + href ---------- */
   function label(n: Notif): { text: string; href?: string } {
     const offerId = n.data?.offer_id as string | undefined;
     const offerTitle = n.data?.offer_title as string | undefined;
@@ -115,18 +112,44 @@ export default function NotificationsBell() {
       case 'request_declined':
         return { text: `Your request was declined${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
       case 'request_fulfilled':
-        return { text: `Request marked fulfilled${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
+        // Send them to the fulfilled tab (clearer than "sent")
+        return { text: `Request marked fulfilled${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=fulfilled' };
+
+      case 'badge_earned': {
+        const track = n.data?.track as string | undefined;
+        const tier = n.data?.tier as number | undefined;
+        const niceTrack =
+          track === 'give'
+            ? 'Giver'
+            : track === 'receive'
+            ? 'Receiver'
+            : track === 'streak'
+            ? 'Streak'
+            : track === 'completed_exchange'
+            ? 'Completed Exchanges'
+            : track === 'requests_made'
+            ? 'Requests Made'
+            : track === 'shared_offers'
+            ? 'Offers Shared'
+            : track ?? 'Badge';
+        const text = `🎉 New badge earned — ${niceTrack}${tier != null ? ` (Tier ${tier})` : ''}`;
+        // Jump to the badges anchor on Profile
+        return { text, href: '/profile#badges' };
+      }
+
       case 'message':
       case 'message_received': {
         const snip = body ? `: ${body.slice(0, 80)}` : '';
         const on = offerTitle ? ` on “${offerTitle}”` : '';
         return { text: `New message${on}${snip}`, href: reqId ? `/messages?thread=${reqId}` : '/messages' };
       }
+
       case 'fulfillment_reminder': {
         const t = offerTitle ? ` “${offerTitle}”` : '';
         const href = reqId ? `/exchanges?focus=${reqId}` : '/exchanges';
         return { text: `Has your offer been fulfilled?${t}`, href };
       }
+
       default: {
         const text = n.data?.message || n.data?.text || 'Update';
         return { text, href: '/exchanges' };
@@ -134,7 +157,6 @@ export default function NotificationsBell() {
     }
   }
 
-  /* ---------- mark read helpers ---------- */
   async function markAllRead() {
     if (!uid) return;
     const ids = rows.filter((r) => !r.read_at).map((r) => r.id);
@@ -154,10 +176,11 @@ export default function NotificationsBell() {
   }
 
   function sig(n: Notif) {
-    return `${n.profile_id}|${n.type}|${n.data?.offer_id ?? ''}|${n.data?.request_id ?? ''}`;
-    }
+    return `${n.profile_id}|${n.type}|${n.data?.offer_id ?? ''}|${n.data?.request_id ?? ''}|${n.data?.track ?? ''}|${
+      n.data?.tier ?? ''
+    }`;
+  }
 
-  /* ---------- initial load + realtime ---------- */
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -173,7 +196,6 @@ export default function NotificationsBell() {
         .limit(50);
 
       const initial = (list || []) as Notif[];
-
       const seen = new Set<string>();
       const dedup: Notif[] = [];
       for (const n of initial) {
@@ -187,7 +209,6 @@ export default function NotificationsBell() {
 
       void Promise.allSettled([enrichOfferTitles(dedup), enrichRequesterNames(dedup)]);
 
-      // realtime
       const chIns = supabase
         .channel('realtime:notifications:ins')
         .on(
@@ -224,15 +245,14 @@ export default function NotificationsBell() {
     })();
   }, []);
 
-  /* ---------- UI ---------- */
   return (
     <div className="relative">
-      {/* teal outline button */}
       <button
         className="hx-btn hx-btn--outline-primary text-sm px-3 py-2 relative"
         onClick={() => setOpen((v) => !v)}
         title="Notifications"
         aria-label="Open notifications"
+        type="button"
       >
         <span aria-hidden>🔔</span>
         {unread > 0 && (
@@ -246,7 +266,7 @@ export default function NotificationsBell() {
         <div className="absolute right-0 z-50 mt-2 w-[360px] max-w-[92vw] hx-card p-0">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <strong className="text-sm">Notifications</strong>
-            <button onClick={markAllRead} className="hx-btn hx-btn--secondary text-xs px-2 py-1">
+            <button onClick={markAllRead} className="hx-btn hx-btn--secondary text-xs px-2 py-1" type="button">
               Mark all read
             </button>
           </div>
@@ -262,10 +282,7 @@ export default function NotificationsBell() {
               return (
                 <li
                   key={n.id}
-                  className={[
-                    'border-b px-3 py-2 text-sm transition-colors',
-                    isUnread ? 'bg-teal-50/50' : '',
-                  ].join(' ')}
+                  className={['border-b px-3 py-2 text-sm transition-colors', isUnread ? 'bg-teal-50/50' : ''].join(' ')}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -291,7 +308,7 @@ export default function NotificationsBell() {
                         onClick={async () => {
                           await markOneRead(n.id);
                           setOpen(false);
-                          router.push(href);
+                          router.push(href); // navigate (supports anchors like #badges)
                         }}
                         aria-label="View"
                         title="View"
