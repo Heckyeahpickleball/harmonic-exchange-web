@@ -1,37 +1,50 @@
-// components/BadgeCluster.tsx
 'use client';
 
 import Link from 'next/link';
 import * as React from 'react';
 import Badge from './Badge';
 
-/** Tolerant shape so different badge sources can render here */
 export type ClusterBadge = {
   badge_code?: string | null;
   track?: string | null;
   tier?: number | null;
   earned_at?: string | null;
-  image_url?: string | null;
+  image_url?: string | null; // preferred when present
   label?: string | null;
-  icon?: string | null;
+  icon?: string | null;      // legacy field some rows may have
 };
 
 export type BadgeClusterProps = {
   badges: ClusterBadge[] | null | undefined;
-  /** px size of each circular badge */
   size?: number;
-  /** destination when a badge is clicked */
-  href?: string; // default: '/profile/badges'
-  /** optional mappers */
+  href?: string;
   resolveIcon?: (b: ClusterBadge) => string | null | undefined;
   resolveLabel?: (b: ClusterBadge) => string | null | undefined;
-  /** captions on/off (defaults to ON) */
   showTitles?: boolean;
-  /** extra classes for the whole row */
   className?: string;
-  /** fixed width (px) reserved for each badge+caption so spacing is even */
-  itemWidth?: number; // e.g. 112
+  itemWidth?: number;
 };
+
+const ORDER: Array<'streak' | 'give' | 'receive'> = ['streak', 'give', 'receive'];
+
+const FALLBACK_LABEL: Record<string, string> = {
+  streak: 'Keep the Flow',
+  give: 'First Gift',
+  receive: 'First Receiving',
+};
+
+// Build a filename based on track + tier that matches your /public/badges folder
+function guessIconPath(b: ClusterBadge): string | undefined {
+  const track = (b.track || '').toLowerCase();
+  const tier = Math.max(1, Math.min(6, Number(b.tier) || 1)); // clamp 1..6
+  if (track === 'give') return `/badges/give_rays_t${tier}.png`;
+  if (track === 'receive') return `/badges/receive_bowl_t${tier}.png`;
+  if (track === 'streak') return '/badges/streak_wave.png';
+  return undefined;
+}
+
+// Final fallback if everything else is missing
+const ULTIMATE_FALLBACK = '/badges/streak_wave.png';
 
 export default function BadgeCluster({
   badges,
@@ -41,63 +54,58 @@ export default function BadgeCluster({
   resolveLabel,
   showTitles = true,
   className = '',
-  itemWidth = 112, // <- consistent spacing
+  itemWidth = 112,
 }: BadgeClusterProps) {
+  // keep highest-tier badge per track
   const display = React.useMemo(() => {
-    if (!badges?.length) return [];
-
-    // keep only highest tier per track
     const byTrack = new Map<string, ClusterBadge>();
-    for (const b of badges) {
+    for (const b of badges ?? []) {
       const key = String(b.track ?? '').toLowerCase();
       if (!key) continue;
       const curTier = b.tier ?? 0;
-      const prevTier = byTrack.get(key)?.tier ?? 0;
+      const prevTier = byTrack.get(key)?.tier ?? -1;
       if (!byTrack.has(key) || curTier > prevTier) byTrack.set(key, b);
     }
-
-    // deterministic order
-    const order = ['streak', 'give', 'receive'];
-    return Array.from(byTrack.values()).sort((a, b) => {
-      const ai = order.indexOf(String(a.track ?? '').toLowerCase());
-      const bi = order.indexOf(String(b.track ?? '').toLowerCase());
-      const ar = ai === -1 ? 999 : ai;
-      const br = bi === -1 ? 999 : bi;
-      if (ar !== br) return ar - br;
-      const at = a.tier ?? 0;
-      const bt = b.tier ?? 0;
-      if (bt !== at) return bt - at;
-      return String(a.badge_code ?? '').localeCompare(String(b.badge_code ?? ''));
+    // ensure we always render 3 slots (with placeholders where needed)
+    return ORDER.map((trk) => {
+      const existing = byTrack.get(trk);
+      if (existing) return existing;
+      return {
+        track: trk,
+        tier: 1,
+        badge_code: `${trk}_locked`,
+        label: FALLBACK_LABEL[trk],
+        image_url: guessIconPath({ track: trk, tier: 1 }) ?? ULTIMATE_FALLBACK,
+        earned_at: null,
+      } as ClusterBadge;
     });
   }, [badges]);
 
   if (!display.length) return null;
 
   return (
-    <div
-      className={[
-        // single row, never wrap; allow scroll on narrow screens
-        'flex flex-nowrap items-start gap-6 overflow-x-auto md:overflow-visible',
-        className,
-      ].join(' ')}
-    >
+    <div className={['flex flex-nowrap items-start gap-6 overflow-x-auto md:overflow-visible', className].join(' ')}>
       {display.map((b) => {
         const label =
           b.label ??
           resolveLabel?.(b) ??
           (b.track ? `${cap(String(b.track))}${b.tier ? ` • Tier ${b.tier}` : ''}` : b.badge_code ?? 'Badge');
 
+        // priority: explicit image -> legacy icon -> resolver -> derived by code -> guessed by track/tier -> final fallback
+        const derivedFromCode = b.badge_code ? `/badges/${b.badge_code}.png` : undefined;
         const icon =
-          b.image_url ??
-          b.icon ??
-          resolveIcon?.(b) ??
-          (b.badge_code ? `/badges/${b.badge_code}.png` : '/badges/placeholder.png');
+          b.image_url ||
+          b.icon ||
+          resolveIcon?.(b) ||
+          derivedFromCode ||
+          guessIconPath(b) ||
+          ULTIMATE_FALLBACK;
 
         return (
           <div
             key={`${b.track}:${b.badge_code ?? b.tier}`}
             className="flex-none flex flex-col items-center"
-            style={{ width: itemWidth }} // <- keeps spacing even regardless of caption length
+            style={{ width: itemWidth }}
           >
             <Link
               href={href}
