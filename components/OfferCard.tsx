@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 export type OfferRow = {
@@ -57,8 +57,13 @@ export default function OfferCard({
   const [approving, setApproving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const thumb =
-    Array.isArray(offer.images) && offer.images.length > 0 ? offer.images[0] : null;
+  // Keep a local status so the card reflects changes immediately
+  const [status, setStatus] = useState<OfferRow['status']>(offer.status);
+
+  const thumb = useMemo(
+    () => (Array.isArray(offer.images) && offer.images.length > 0 ? offer.images[0] : null),
+    [offer.images]
+  );
 
   async function handleDelete() {
     setErr(null);
@@ -76,21 +81,53 @@ export default function OfferCard({
   }
 
   async function handleApprove() {
-    // Promote a pending offer to active (admin/mod only)
+    // Try secured RPC first; fallback to direct update if RPC is missing.
     setErr(null);
     try {
       setApproving(true);
 
-      // If you created a Postgres function, prefer it here:
-      // const { error } = await supabase.rpc('approve_offer', { p_offer_id: offer.id });
-      // Fallback: direct update (requires an RLS policy that allows admins/mods).
-      const { error } = await supabase
-        .from('offers')
-        .update({ status: 'active' })
-        .eq('id', offer.id);
+      const rpc = await supabase.rpc('admin_offer_set_status', {
+        p_offer_id: offer.id,
+        p_status: 'active',
+        p_reason: null,
+      });
 
-      if (error) throw error;
-      onApproved?.(offer.id);
+      if (rpc.error) {
+        const msg = rpc.error.message || '';
+        const fnMissing = /function .*admin_offer_set_status.* does not exist/i.test(msg);
+
+        if (!fnMissing) throw rpc.error;
+
+        // Fallback: direct update (requires correct RLS for admin/mod)
+        const { error: upErr } = await supabase
+          .from('offers')
+          .update({ status: 'active' })
+          .eq('id', offer.id);
+
+        if (upErr) {
+          if (/permission denied|row-level security/i.test(upErr.message)) {
+            throw new Error(
+              "RLS blocked this update. Your admin/mod policy for the 'offers' table may be missing."
+            );
+          }
+          throw upErr;
+        }
+
+        // Best-effort admin action log (non-blocking)
+        try {
+          const { data: auth } = await supabase.auth.getUser();
+          await supabase.from('admin_actions').insert({
+            admin_profile_id: auth.user?.id ?? null,
+            action: 'offers.status -> active',
+            target_type: 'offer',
+            target_id: offer.id,
+            reason: null,
+          });
+        } catch {}
+      }
+
+      setStatus('active');      // optimistic UI
+      onApproved?.(offer.id);   // let parent refresh if needed
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to approve');
     } finally {
@@ -139,7 +176,7 @@ export default function OfferCard({
               </div>
             )}
           </div>
-          <StatusBadge status={offer.status} />
+          <StatusBadge status={status} />
         </div>
 
         {/* Actions */}
@@ -166,7 +203,7 @@ export default function OfferCard({
           )}
 
           {/* Admin: Approve pending */}
-          {isAdmin && offer.status === 'pending' && (
+          {isAdmin && status === 'pending' && (
             <button
               type="button"
               onClick={handleApprove}

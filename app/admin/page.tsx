@@ -1,13 +1,13 @@
-/* HX v1.1 — Admin panel (Users, Offers, Chapters, Audit)
-   - NEW: Chapters tab with pending/active/suspended views, search, and Approve/Decline.
-   - Approve sets groups.status='active' (triggers your starter-kit seeding).
-   - Decline sets groups.status='archived' (acts as “declined” per Phase 1 decisions).
-   - Only admins can change chapter status. Mods can view.
+/* HX v1.2 — Admin panel (Users, Offers, Chapters, Audit)
+   - FIX: Offers tab "Approve/Reject/Block…" now falls back to direct update if RPC is missing.
+   - Better errors when RLS blocks updates (so you can see exactly why).
+   - Keeps all features from v1.1, including Chapters and Audit.
 
-   Keeps:
-   - Users tab: roles/status + reset ask quota + fulfilled received count
-   - Offers tab: role-aware actions (mods can’t act on admin-owned offers)
-   - Audit tab: admins only
+   Tabs:
+   - Users: roles/status + reset ask quota + fulfilled received count
+   - Offers: role-aware actions (mods can’t act on admin-owned offers)
+   - Chapters: pending/active/suspended + approve/decline
+   - Audit: admins only
 */
 
 'use client';
@@ -442,7 +442,7 @@ function AdminContent() {
     }
   }
 
-  // ===== Offer actions =====
+  // ===== Offer actions (CHANGE HERE: RPC -> ALWAYS try fallback on ANY error) =====
   async function setOfferStatus(id: string, next: OfferRow['status']) {
     if (!me) return;
 
@@ -455,15 +455,50 @@ function AdminContent() {
 
     setMsg('');
     const reason = prompt(`Reason for setting offer status to ${next}? (optional)`) || null;
+
     try {
-      await supabase.rpc('admin_offer_set_status', { p_offer_id: id, p_status: next, p_reason: reason });
+      // 1) Try RPC first (expected to be SECURITY DEFINER)
+      const rpc = await supabase.rpc('admin_offer_set_status', {
+        p_offer_id: id,
+        p_status: next,
+        p_reason: reason,
+      });
+
+      // 2) If RPC fails for ANY reason, attempt direct update fallback
+      if (rpc.error) {
+        const { error: upErr } = await supabase
+          .from('offers')
+          .update({ status: next })
+          .eq('id', id);
+
+        if (upErr) {
+          if (/permission denied|row-level security/i.test(upErr.message)) {
+            throw new Error(
+              "RLS blocked this update. Your admin/mod policy for the 'offers' table is missing or too strict."
+            );
+          }
+          throw upErr;
+        }
+
+        // Best-effort: log admin action if table exists
+        try {
+          await supabase.from('admin_actions').insert({
+            admin_profile_id: me?.id,
+            action: `offers.status -> ${next}`,
+            target_type: 'offer',
+            target_id: id,
+            reason,
+          });
+        } catch { /* non-blocking */ }
+      }
+
       setOffers((prev) => prev.map((o) => (o.id === id ? { ...o, status: next } : o)));
     } catch (e: any) {
       showError(e, 'Failed to set offer status');
     }
   }
 
-  // ===== Chapter actions =====
+  // ===== Chapter actions (unchanged, has its own fallback) =====
   function ensureAdminAction() {
     if (!isAdmin) {
       setMsg('Only admins can approve/decline chapters.');
