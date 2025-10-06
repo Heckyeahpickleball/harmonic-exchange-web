@@ -206,19 +206,30 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, [profile?.id]);
 
-  // Map ExpandedBadge -> BadgeCluster shape
-  const clusterBadges = useMemo(
-    () =>
-      (badges ?? []).map((b) => ({
-        badge_code: b.badge_code,
-        track: b.track ?? '',
-        tier: b.tier ?? 0,
-        earned_at: b.earned_at,
-        image_url: b.icon ?? undefined,
-        label: b.label ?? null,
-      })),
-    [badges]
-  );
+  // Map ExpandedBadge -> BadgeCluster shape, filter to earned only
+  const clusterBadges = useMemo(() => {
+    const list = (badges ?? []).filter((b) => {
+      const tr = String(b.track ?? '');
+      if (tr === 'streak') return true;
+      return (b.tier ?? 0) > 0;
+    });
+    return list.map((b) => ({
+      badge_code: b.badge_code,
+      track: b.track ?? '',
+      tier: b.tier ?? 0,
+      earned_at: b.earned_at,
+      image_url:
+        b.icon ||
+        (b.track === 'give' && (b.tier ?? 0) >= 1
+          ? `/badges/give_rays_t${b.tier}.png`
+          : b.track === 'receive' && (b.tier ?? 0) >= 1
+          ? `/badges/receive_bowl_t${b.tier}.png`
+          : b.track === 'streak'
+          ? `/badges/streak_wave.png`
+          : undefined),
+      label: b.label ?? null,
+    }));
+  }, [badges]);
 
   const skillsList = useMemo(
     () =>
@@ -313,7 +324,7 @@ export default function ProfilePage() {
           )}
         </div>
 
-        {/* Header content – keep left where it is, move badges independently */}
+        {/* Header content */}
         <div className="relative px-4 pb-3 pt-2 md:px-6">
           {/* Avatar */}
           <div className="absolute -top-10 left-4 h-20 w-20 overflow-hidden rounded-full border-4 border-white md:left-6 md:h-24 md:w-24">
@@ -325,7 +336,7 @@ export default function ProfilePage() {
           </div>
 
           <div className="grid grid-cols-1 gap-2 md:grid-cols-12 md:items-start">
-            {/* LEFT (unchanged position) */}
+            {/* LEFT */}
             <div className="md:col-span-8 md:pl-28">
               <div className="flex flex-wrap items-center gap-2 leading-tight">
                 <h1 className="text-xl font-semibold md:text-2xl">{form.display_name || 'Unnamed'}</h1>
@@ -367,11 +378,10 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* RIGHT: badges absolutely centered vertically so left side never shifts */}
+            {/* RIGHT: badges */}
             <div className="md:col-span-4 md:relative md:h-[100px]">
               {!!clusterBadges.length ? (
                 <>
-                  {/* Desktop: remove from flow, center vertically */}
                   <div className="hidden md:flex absolute inset-0 items-center justify-end">
                     <BadgeCluster
                       badges={clusterBadges}
@@ -380,7 +390,6 @@ export default function ProfilePage() {
                       className="gap-6 md:gap-8"
                     />
                   </div>
-                  {/* Mobile: normal flow */}
                   <div className="md:hidden flex justify-start">
                     <BadgeCluster
                       badges={clusterBadges}
