@@ -1,9 +1,14 @@
+// /app/profile/badges/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+
+// Force runtime rendering (avoid static export/prerender issues)
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 type ExpandedBadge = {
   badge_code: string | null;
@@ -91,14 +96,15 @@ function iconFor(row: ExpandedBadge): string {
 
   const code = (row.badge_code ?? '').toLowerCase();
   if (code.startsWith('give_')) return `/badges/give_rays_t${tier}.png`;
-  if (code.startsWith('recv') || code.startsWith('receive'))
-    return `/badges/receive_bowl_t${tier}.png`;
+  if (code.startsWith('recv') || code.startsWith('receive')) return `/badges/receive_bowl_t${tier}.png`;
   if (code.startsWith('streak')) return `/badges/streak_wave.png`;
 
   return '/badges/give_rays_t1.png';
 }
 
-export default function ProfileBadgesPage() {
+// Inner component that actually uses useSearchParams()
+// Wrapped by Suspense in the default export below (Next 15 requirement).
+function ProfileBadgesInner() {
   const search = useSearchParams();
   const requestedId = search.get('id') || null;
 
@@ -219,5 +225,13 @@ export default function ProfileBadgesPage() {
         })}
       </div>
     </section>
+  );
+}
+
+export default function ProfileBadgesPage() {
+  return (
+    <Suspense fallback={<div className="p-4 text-sm text-gray-600">Loading badges…</div>}>
+      <ProfileBadgesInner />
+    </Suspense>
   );
 }
