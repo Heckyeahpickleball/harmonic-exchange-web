@@ -35,6 +35,7 @@ function fallbackIcon(b: ExpandedBadge): string | null {
  * Compact row of earned badges.
  * - Only highest tier per track is shown (T2 replaces T1).
  * - Filters out tier 0 (not yet earned).
+ * - Mobile: centered + horizontal scroll if needed; Desktop: inline row.
  */
 export default function EarnedBadgesRow({
   badges,
@@ -53,8 +54,6 @@ export default function EarnedBadgesRow({
     });
   }, [badges]);
 
-  if (!earned.length) return null;
-
   // 2) Highest tier per track + stable ordering
   const display = React.useMemo(() => {
     const byTrack = new Map<string, ExpandedBadge>();
@@ -63,10 +62,10 @@ export default function EarnedBadgesRow({
       const prev = byTrack.get(key);
       if (!prev || (b.tier ?? 0) > (prev.tier ?? 0)) byTrack.set(key, b);
     }
-    const order = ['streak', 'give', 'receive', 'milestone'];
+    const order = ['streak', 'give', 'receive', 'milestone'] as const;
     return Array.from(byTrack.values()).sort((a, b) => {
-      const ai = order.indexOf(String(a.track).toLowerCase());
-      const bi = order.indexOf(String(b.track).toLowerCase());
+      const ai = order.indexOf(String(a.track).toLowerCase() as any);
+      const bi = order.indexOf(String(b.track).toLowerCase() as any);
       const ra = ai === -1 ? 999 : ai;
       const rb = bi === -1 ? 999 : bi;
       if (ra !== rb) return ra - rb;
@@ -78,19 +77,26 @@ export default function EarnedBadgesRow({
   if (!display.length) return null;
 
   return (
-    <div className={['flex items-center gap-2', className].join(' ')}>
+    <div
+      className={[
+        // Mobile: centered row with optional horizontal scroll. Desktop: normal inline row.
+        'flex items-center gap-3 sm:gap-2',
+        'justify-center sm:justify-start',
+        'overflow-x-auto sm:overflow-visible overscroll-contain',
+        'snap-x snap-mandatory sm:snap-none scrollbar-thin',
+        className,
+      ].join(' ')}
+      aria-label="Earned badges"
+    >
       {display.map((b) => {
         const title =
           b.label ??
           (b.track ? `${cap(b.track)}${b.tier ? ` • Tier ${b.tier}` : ''}` : b.badge_code ?? 'Badge');
 
-        const icon =
-          b.icon ||
-          fallbackIcon(b) ||
-          '/badges/placeholder.png';
+        const icon = b.icon || fallbackIcon(b) || '/badges/placeholder.png';
 
         return (
-          <div key={`${b.track}:${b.badge_code ?? b.tier}`} className="flex flex-col items-center">
+          <div key={`${b.track}:${b.badge_code ?? b.tier}`} className="flex flex-col items-center snap-start">
             <Link
               href={href}
               className="group inline-flex items-center focus:outline-none focus:ring-2 focus:ring-blue-400 rounded-full"
