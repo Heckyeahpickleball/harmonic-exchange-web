@@ -13,6 +13,7 @@ type Profile = {
   city?: string | null;
   country?: string | null;
   avatar_url?: string | null;
+  cover_url?: string | null;
   created_at?: string | null;
   is_admin?: boolean | null;
 };
@@ -67,44 +68,59 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
   }, [supabase, profile?.id]);
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      {/* Cover */}
-      <div className="h-28 sm:h-32 w-full bg-[url('/cover-default.jpg')] bg-cover bg-center" />
+    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      {/* Cover: real image if present; safe heights across breakpoints */}
+      <div className="relative h-36 sm:h-44 md:h-56 w-full">
+        {profile?.cover_url ? (
+          <Image
+            src={profile.cover_url}
+            alt="Cover"
+            fill
+            className="object-cover"
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 100vw, 100vw"
+            priority={false}
+          />
+        ) : (
+          <div className="h-full w-full bg-gradient-to-r from-slate-200 to-slate-100" />
+        )}
+      </div>
 
-      {/* Header row */}
-      <div className="px-4 sm:px-6 -mt-10 pb-4">
-        <div className="flex items-end gap-4">
+      {/* Header content */}
+      <div className="px-4 sm:px-6 pb-4">
+        {/* On mobile we avoid overlap by aligning avatar + name in a single row;
+            on md+ the negative margin gives a tasteful overlap. */}
+        <div className="mt-[-32px] sm:mt-[-40px] md:mt-[-48px] flex items-end gap-3 md:gap-4">
           {/* Avatar */}
-          <div className="h-20 w-20 rounded-full border-4 border-white overflow-hidden bg-slate-100 shrink-0">
+          <div className="h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 rounded-full border-4 border-white overflow-hidden bg-slate-100 shrink-0">
             {profile?.avatar_url ? (
               <Image
                 src={profile.avatar_url}
                 alt={profile?.full_name || 'Avatar'}
-                width={80}
-                height={80}
-                sizes="(max-width: 640px) 80px, 80px"
+                width={96}
+                height={96}
+                sizes="(max-width: 640px) 64px, 96px"
                 className="h-full w-full object-cover"
               />
             ) : (
-              <div className="h-full w-full grid place-items-center text-slate-400 text-xl">🙂</div>
+              <div className="grid h-full w-full place-items-center text-slate-400 text-xl">🙂</div>
             )}
           </div>
 
           {/* Name + meta */}
-          <div className="flex-1 min-w-0">
-            {/* Top line: name, admin pill, badges inline (desktop/tablet only) */}
+          <div className="min-w-0 flex-1">
+            {/* Name row */}
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl sm:text-2xl font-semibold truncate">
+              <h1 className="truncate text-lg sm:text-xl md:text-2xl font-semibold">
                 {profile?.full_name || 'Member'}
               </h1>
-              {profile?.is_admin ? (
-                <span className="text-xs rounded-full border px-2 py-0.5 bg-emerald-50 border-emerald-200 text-emerald-700">
+              {profile?.is_admin && (
+                <span className="text-[11px] rounded-full border px-2 py-0.5 bg-emerald-50 border-emerald-200 text-emerald-700">
                   Admin
                 </span>
-              ) : null}
+              )}
 
-              {/* Inline badges beside name — keep for sm+ only to preserve desktop look */}
-              <div className="ml-2 flex-1 min-w-[140px] hidden sm:block">
+              {/* Desktop/tablet inline badges — unchanged look */}
+              <div className="ml-2 hidden min-w-[140px] flex-1 sm:block">
                 {loadingBadges ? (
                   <span className="text-xs text-slate-500">Loading badges…</span>
                 ) : error ? (
@@ -116,38 +132,36 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
                 )}
               </div>
 
-              {/* Optional helper link for owners */}
               {isOwner && (
                 <Link
                   href="/profile/badges"
-                  className="hidden sm:inline text-xs text-emerald-700 hover:underline whitespace-nowrap"
+                  className="hidden sm:inline whitespace-nowrap text-xs text-emerald-700 hover:underline"
                 >
                   Learn how to earn
                 </Link>
               )}
             </div>
 
-            {/* Meta row */}
-            <div className="mt-1 text-sm text-slate-600 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {/* Meta */}
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm text-slate-600">
               {(profile?.city || profile?.country) && (
                 <span>{[profile.city, profile.country].filter(Boolean).join(', ')}</span>
               )}
               {profile?.created_at && (
-                <span className="truncate">
-                  • Member since {new Date(profile.created_at).toLocaleDateString()}
-                </span>
+                <span>• Member since {new Date(profile.created_at).toLocaleDateString()}</span>
               )}
             </div>
 
-            {/* Mobile badges: centered, scrollable; shows only on small screens */}
+            {/* Mobile badges: tighter spacing so 3 fit across without scrolling */}
             <div className="sm:hidden mt-3 -mx-2 px-2">
               {loadingBadges ? (
                 <span className="text-xs text-slate-500">Loading badges…</span>
               ) : error ? (
                 <span className="text-xs text-rose-600">Badges: {error}</span>
               ) : badges && badges.length > 0 ? (
-                <div className="flex items-center justify-center gap-4 overflow-x-auto overscroll-contain snap-x snap-mandatory scrollbar-thin">
-                  <BadgeCluster badges={badges} size={22} href="/profile/badges" />
+                <div className="flex items-center justify-center gap-3">
+                  {/* size 22 + small gap ensures 3 fit on 360–400px widths */}
+                  <BadgeCluster badges={badges.slice(0, 3)} size={22} href="/profile/badges" />
                 </div>
               ) : (
                 <span className="text-xs text-slate-500">No badges yet.</span>
@@ -163,7 +177,7 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
             </div>
           </div>
 
-          {/* Owner actions (desktop only) */}
+          {/* Owner action (desktop only) */}
           <div className="hidden sm:block">
             {isOwner && (
               <Link

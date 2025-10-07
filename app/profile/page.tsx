@@ -84,6 +84,9 @@ export default function ProfilePage() {
     title: string;
   } | null>(null);
 
+  // About collapse (mobile-friendly)
+  const [aboutOpen, setAboutOpen] = useState(false);
+
   // Load current user + profile
   useEffect(() => {
     let cancelled = false;
@@ -299,6 +302,10 @@ export default function ProfilePage() {
     }
   }
 
+  // Carousel helpers for mobile
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const scrollBy = (dx: number) => railRef.current?.scrollBy({ left: dx, behavior: 'smooth' });
+
   if (loading) return <p className="p-4">Loading...</p>;
 
   if (!userEmail) {
@@ -318,6 +325,7 @@ export default function ProfilePage() {
         {/* Cover */}
         <div className="relative h-40 w-full md:h-56">
           {form.cover_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
             <img src={form.cover_url} alt="Cover" className="h-full w-full object-cover" />
           ) : (
             <div className="h-full w-full bg-gradient-to-r from-slate-200 to-slate-100" />
@@ -329,6 +337,7 @@ export default function ProfilePage() {
           {/* Avatar */}
           <div className="absolute -top-10 left-4 h-20 w-20 overflow-hidden rounded-full border-4 border-white md:left-6 md:h-24 md:w-24">
             {form.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
               <img src={form.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
             ) : (
               <div className="grid h-full w-full place-items-center bg-slate-200 text-slate-500">☺</div>
@@ -347,7 +356,7 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              <div className="mt-0.5 text-[13px] text-gray-600 flex flex-wrap gap-2">
+              <div className="mt-0.5 flex flex-wrap gap-2 text-[13px] text-gray-600">
                 {form.area_city || form.area_country ? (
                   <span>{[form.area_city, form.area_country].filter(Boolean).join(', ')}</span>
                 ) : (
@@ -370,7 +379,7 @@ export default function ProfilePage() {
                 </button>
                 <button
                   type="button"
-                  onClick={async () => { await supabase.auth.signOut(); location.href='/'; }}
+                  onClick={async () => { await supabase.auth.signOut(); location.href = '/'; }}
                   className="rounded border px-3 py-1.5 text-sm"
                 >
                   Sign Out
@@ -378,25 +387,15 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* RIGHT: badges */}
+            {/* RIGHT: badges (unchanged on desktop; compact on mobile) */}
             <div className="md:col-span-4 md:relative md:h-[100px]">
               {!!clusterBadges.length ? (
                 <>
-                  <div className="hidden md:flex absolute inset-0 items-center justify-end">
-                    <BadgeCluster
-                      badges={clusterBadges}
-                      size={48}
-                      href="/profile/badges"
-                      className="gap-6 md:gap-8"
-                    />
+                  <div className="absolute inset-0 hidden items-center justify-end md:flex">
+                    <BadgeCluster badges={clusterBadges} size={48} href="/profile/badges" className="gap-8" />
                   </div>
-                  <div className="md:hidden flex justify-start">
-                    <BadgeCluster
-                      badges={clusterBadges}
-                      size={48}
-                      href="/profile/badges"
-                      className="gap-6"
-                    />
+                  <div className="flex justify-start md:hidden">
+                    <BadgeCluster badges={clusterBadges.slice(0, 3)} size={22} href="/profile/badges" className="gap-3" />
                   </div>
                 </>
               ) : badgesMsg ? (
@@ -411,10 +410,43 @@ export default function ProfilePage() {
       {(form.bio || skillsList.length) && (
         <div className="rounded-xl border p-4">
           {form.bio && (
-            <>
-              <h3 className="mb-1 text-sm font-semibold">About</h3>
-              <p className="whitespace-pre-wrap text-sm text-gray-800">{form.bio}</p>
-            </>
+            <div>
+              {/* Mobile: collapsed preview; Desktop: unchanged full text */}
+              <div className="md:hidden">
+                <button
+                  onClick={() => setAboutOpen((v) => !v)}
+                  className="group flex w-full items-center justify-between text-left"
+                  aria-expanded={aboutOpen}
+                  aria-controls="about-panel"
+                >
+                  <div className="min-w-0 text-sm text-gray-800">
+                    {!aboutOpen ? (
+                      <p className="truncate">{form.bio}</p>
+                    ) : (
+                      <p id="about-panel" className="whitespace-pre-wrap">
+                        {form.bio}
+                      </p>
+                    )}
+                  </div>
+                  <span className="ml-2 inline-flex items-center gap-1 text-xs text-gray-600">
+                    {aboutOpen ? 'See less' : 'See more'}
+                    <svg
+                      className={['h-4 w-4 transition-transform', aboutOpen ? 'rotate-180' : 'rotate-0'].join(' ')}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                    >
+                      <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+                    </svg>
+                  </span>
+                </button>
+              </div>
+
+              <div className="hidden md:block">
+                <h3 className="mb-1 text-sm font-semibold">About</h3>
+                <p className="whitespace-pre-wrap text-sm text-gray-800">{form.bio}</p>
+              </div>
+            </div>
           )}
 
           {skillsList.length > 0 && (
@@ -434,17 +466,65 @@ export default function ProfilePage() {
 
       {/* Main content */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-        <section className="md:col-span-5 space-y-2">
+        {/* Offers: carousel on mobile, grid on desktop */}
+        <section className="space-y-2 md:col-span-5">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold">Active Offers</h2>
             <Link href="/offers/new" className="text-xs underline">New offer</Link>
           </div>
+
           {offersLoading && <p className="text-sm text-gray-600">Loading…</p>}
           {offersMsg && <p className="text-sm text-amber-700">{offersMsg}</p>}
           {!offersLoading && offers.length === 0 && (
             <p className="text-sm text-gray-600">No active offers yet.</p>
           )}
-          <div className="grid grid-cols-1 gap-3">
+
+          {/* Mobile carousel */}
+          <div className="md:hidden">
+            {offers.length > 0 && (
+              <div className="relative">
+                <div className="absolute left-1 top-1/2 z-10 hidden xs:flex -translate-y-1/2">
+                  <button
+                    type="button"
+                    onClick={() => scrollBy(-280)}
+                    className="rounded-full bg-white/90 px-2 py-1 shadow hover:bg-white"
+                    aria-label="Scroll left"
+                  >
+                    ‹
+                  </button>
+                </div>
+                <div className="absolute right-1 top-1/2 z-10 hidden xs:flex -translate-y-1/2">
+                  <button
+                    type="button"
+                    onClick={() => scrollBy(280)}
+                    className="rounded-full bg-white/90 px-2 py-1 shadow hover:bg-white"
+                    aria-label="Scroll right"
+                  >
+                    ›
+                  </button>
+                </div>
+
+                <div
+                  ref={railRef}
+                  className="-mx-2 flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-contain px-2 py-1 scrollbar-thin"
+                  aria-label="Your offers carousel"
+                >
+                  {offers.map((o) => (
+                    <div key={o.id} className="min-w-[260px] max-w-[280px] snap-start">
+                      <OfferCard
+                        offer={o}
+                        mine
+                        onDeleted={(id) => setOffers((prev) => prev.filter((x) => x.id !== id))}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Desktop grid stays as-is */}
+          <div className="hidden md:grid md:grid-cols-1 md:gap-3">
             {offers.map((o) => (
               <OfferCard
                 key={o.id}
@@ -456,7 +536,8 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        <section className="md:col-span-7 space-y-2">
+        {/* Posts (unchanged) */}
+        <section className="space-y-2 md:col-span-7">
           <h2 className="text-base font-semibold">Posts</h2>
           {userId && <PostComposer profileId={userId} />}
           {userId && <UserFeed profileId={userId} />}
@@ -542,6 +623,7 @@ export default function ProfilePage() {
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Cover photo</label>
                   {form.cover_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
                     <img src={form.cover_url} alt="Cover" className="max-h-40 w-full rounded border object-cover" />
                   ) : (
                     <div className="rounded border p-4 text-sm text-gray-500">No cover set</div>
@@ -581,6 +663,7 @@ export default function ProfilePage() {
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Profile picture</label>
                   {form.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
                     <img src={form.avatar_url} alt="Avatar" className="h-32 w-32 rounded-full border object-cover" />
                   ) : (
                     <div className="grid h-32 w-32 place-items-center rounded-full border text-sm text-gray-500">
