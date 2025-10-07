@@ -84,7 +84,7 @@ export default function ProfilePage() {
     title: string;
   } | null>(null);
 
-  // About collapse (mobile-friendly)
+  // Collapsible (mobile) — About + Skills together
   const [aboutOpen, setAboutOpen] = useState(false);
 
   // Load current user + profile
@@ -334,21 +334,71 @@ export default function ProfilePage() {
 
         {/* Header content */}
         <div className="relative px-4 pb-3 pt-2 md:px-6">
-          {/* Avatar */}
-          <div className="absolute -top-10 left-4 h-20 w-20 overflow-hidden rounded-full border-4 border-white md:left-6 md:h-24 md:w-24">
-            {form.avatar_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={form.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
-            ) : (
-              <div className="grid h-full w-full place-items-center bg-slate-200 text-slate-500">☺</div>
-            )}
+          {/* MOBILE: no overlap — avatar + name row */}
+          <div className="md:hidden flex items-end gap-3">
+            <div className="h-16 w-16 rounded-full border-4 border-white overflow-hidden bg-slate-100 -mt-8 shrink-0">
+              {form.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={form.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
+              ) : (
+                <div className="grid h-full w-full place-items-center text-slate-400 text-xl">🙂</div>
+              )}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2 leading-tight">
+                <h1 className="truncate text-lg font-semibold">{form.display_name || 'Unnamed'}</h1>
+                {profile?.role && (
+                  <span className="rounded-full border px-2 py-0.5 text-[11px] capitalize text-gray-700">
+                    {profile.role}
+                  </span>
+                )}
+              </div>
+              <div className="mt-0.5 flex flex-wrap gap-2 text-[13px] text-gray-600">
+                {form.area_city || form.area_country ? (
+                  <span>{[form.area_city, form.area_country].filter(Boolean).join(', ')}</span>
+                ) : (
+                  <span>—</span>
+                )}
+                {profile?.created_at && (
+                  <>
+                    <span>•</span>
+                    <span>Member since {new Date(profile.created_at).toLocaleDateString()}</span>
+                  </>
+                )}
+              </div>
+
+              {/* Mobile badges: 3 across, tight spacing */}
+              <div className="mt-2">
+                {!!clusterBadges.length ? (
+                  <BadgeCluster
+                    badges={clusterBadges.slice(0, 3)}
+                    size={22}
+                    className="gap-3"
+                    href="/profile/badges"
+                  />
+                ) : badgesMsg ? (
+                  <p className="text-xs text-amber-700">{badgesMsg}</p>
+                ) : null}
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-12 md:items-start">
+          {/* DESKTOP/TABLET: original overlap style */}
+          <div className="hidden md:grid md:grid-cols-12 md:items-start">
+            <div className="absolute -top-10 left-4 h-24 w-24 overflow-hidden rounded-full border-4 border-white md:left-6">
+              {form.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={form.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
+              ) : (
+                <div className="grid h-full w-full place-items-center bg-slate-200 text-slate-500">☺</div>
+              )}
+            </div>
+
             {/* LEFT */}
             <div className="md:col-span-8 md:pl-28">
               <div className="flex flex-wrap items-center gap-2 leading-tight">
-                <h1 className="text-xl font-semibold md:text-2xl">{form.display_name || 'Unnamed'}</h1>
+                <h1 className="text-2xl font-semibold">{form.display_name || 'Unnamed'}</h1>
                 {profile?.role && (
                   <span className="rounded-full border px-2 py-0.5 text-xs capitalize text-gray-700">
                     {profile.role}
@@ -356,7 +406,7 @@ export default function ProfilePage() {
                 )}
               </div>
 
-              <div className="mt-0.5 flex flex-wrap gap-2 text-[13px] text-gray-600">
+              <div className="mt-0.5 flex flex-wrap gap-2 text-sm text-gray-600">
                 {form.area_city || form.area_country ? (
                   <span>{[form.area_city, form.area_country].filter(Boolean).join(', ')}</span>
                 ) : (
@@ -387,17 +437,12 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* RIGHT: badges (unchanged on desktop; compact on mobile) */}
+            {/* RIGHT badges (unchanged desktop) */}
             <div className="md:col-span-4 md:relative md:h-[100px]">
               {!!clusterBadges.length ? (
-                <>
-                  <div className="absolute inset-0 hidden items-center justify-end md:flex">
-                    <BadgeCluster badges={clusterBadges} size={48} href="/profile/badges" className="gap-8" />
-                  </div>
-                  <div className="flex justify-start md:hidden">
-                    <BadgeCluster badges={clusterBadges.slice(0, 3)} size={22} href="/profile/badges" className="gap-3" />
-                  </div>
-                </>
+                <div className="absolute inset-0 hidden items-center justify-end md:flex">
+                  <BadgeCluster badges={clusterBadges} size={48} href="/profile/badges" className="gap-8" />
+                </div>
               ) : badgesMsg ? (
                 <p className="text-xs text-amber-700">{badgesMsg}</p>
               ) : null}
@@ -406,67 +451,85 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* About / Skills */}
+      {/* About + Skills (together collapsed on mobile) */}
       {(form.bio || skillsList.length) && (
         <div className="rounded-xl border p-4">
-          {form.bio && (
-            <div>
-              {/* Mobile: collapsed preview; Desktop: unchanged full text */}
-              <div className="md:hidden">
-                <button
-                  onClick={() => setAboutOpen((v) => !v)}
-                  className="group flex w-full items-center justify-between text-left"
-                  aria-expanded={aboutOpen}
-                  aria-controls="about-panel"
-                >
-                  <div className="min-w-0 text-sm text-gray-800">
-                    {!aboutOpen ? (
-                      <p className="truncate">{form.bio}</p>
-                    ) : (
-                      <p id="about-panel" className="whitespace-pre-wrap">
-                        {form.bio}
-                      </p>
-                    )}
-                  </div>
-                  <span className="ml-2 inline-flex items-center gap-1 text-xs text-gray-600">
-                    {aboutOpen ? 'See less' : 'See more'}
-                    <svg
-                      className={['h-4 w-4 transition-transform', aboutOpen ? 'rotate-180' : 'rotate-0'].join(' ')}
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                    >
-                      <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-                    </svg>
-                  </span>
-                </button>
-              </div>
+          {/* Mobile: one-line preview + centered round chevron */}
+          <div className="md:hidden">
+            <p className="truncate text-center text-sm text-gray-800">
+              {form.bio || 'About & Skills'}
+            </p>
+            <div className="mt-2 flex items-center justify-center">
+              <button
+                onClick={() => setAboutOpen((v) => !v)}
+                className="flex flex-col items-center"
+                aria-expanded={aboutOpen}
+                aria-controls="about-skill-panel"
+                type="button"
+              >
+                <span className="grid h-8 w-8 place-items-center rounded-full border">
+                  <svg
+                    className={['h-4 w-4 transition-transform', aboutOpen ? 'rotate-180' : 'rotate-0'].join(' ')}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                  >
+                    <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+                  </svg>
+                </span>
+                <span className="mt-1 text-[11px] text-gray-600">{aboutOpen ? 'See less' : 'See more'}</span>
+              </button>
+            </div>
 
-              <div className="hidden md:block">
+            {aboutOpen && (
+              <div id="about-skill-panel" className="mt-3 space-y-3">
+                {form.bio && (
+                  <>
+                    <h3 className="text-sm font-semibold">About</h3>
+                    <p className="whitespace-pre-wrap text-sm text-gray-800">{form.bio}</p>
+                  </>
+                )}
+                {skillsList.length > 0 && (
+                  <div>
+                    <h3 className="mb-1 text-sm font-semibold">Skills</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {skillsList.map((s, i) => (
+                        <span key={i} className="rounded-full border px-2 py-1 text-xs">{s}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Desktop: unchanged (always open) */}
+          <div className="hidden md:block">
+            {form.bio && (
+              <>
                 <h3 className="mb-1 text-sm font-semibold">About</h3>
                 <p className="whitespace-pre-wrap text-sm text-gray-800">{form.bio}</p>
+              </>
+            )}
+            {skillsList.length > 0 && (
+              <div className="mt-3">
+                <h3 className="mb-1 text-sm font-semibold">Skills</h3>
+                <div className="flex flex-wrap gap-2">
+                  {skillsList.map((s, i) => (
+                    <span key={i} className="rounded-full border px-2 py-1 text-xs">{s}</span>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-
-          {skillsList.length > 0 && (
-            <div className="mt-3">
-              <h3 className="mb-1 text-sm font-semibold">Skills</h3>
-              <div className="flex flex-wrap gap-2">
-                {skillsList.map((s, i) => (
-                  <span key={i} className="rounded-full border px-2 py-1 text-xs">{s}</span>
-                ))}
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
       {status && <p className="px-1 text-sm text-gray-700">{status}</p>}
 
-      {/* Main content */}
+      {/* Two-column layout */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-        {/* Offers: carousel on mobile, grid on desktop */}
+        {/* Offers (left) */}
         <section className="space-y-2 md:col-span-5">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold">Active Offers</h2>
@@ -523,7 +586,7 @@ export default function ProfilePage() {
             )}
           </div>
 
-          {/* Desktop grid stays as-is */}
+          {/* Desktop grid (unchanged) */}
           <div className="hidden md:grid md:grid-cols-1 md:gap-3">
             {offers.map((o) => (
               <OfferCard
@@ -536,7 +599,7 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        {/* Posts (unchanged) */}
+        {/* Posts (right) */}
         <section className="space-y-2 md:col-span-7">
           <h2 className="text-base font-semibold">Posts</h2>
           {userId && <PostComposer profileId={userId} />}
@@ -544,7 +607,7 @@ export default function ProfilePage() {
         </section>
       </div>
 
-      {/* EDIT DIALOG */}
+      {/* EDIT DIALOG (unchanged) */}
       {editing && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
           <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-xl">
