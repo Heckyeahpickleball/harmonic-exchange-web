@@ -243,11 +243,10 @@ export default function ProfilePage() {
     [form.skillsCSV]
   );
 
-  // ✅ Stable, SSR-safe date string to avoid hydration mismatch
+  // Stable, SSR-safe date
   const memberSince = useMemo(() => {
     if (!profile?.created_at) return null;
     const d = new Date(profile.created_at);
-    // Fixed locale + timezone so server and client render the same text
     return new Intl.DateTimeFormat('en-US', {
       year: 'numeric',
       month: 'numeric',
@@ -363,7 +362,8 @@ export default function ProfilePage() {
         <div className="relative px-4 pb-3 pt-2 md:px-6">
           {/* MOBILE */}
           <div className="md:hidden relative">
-            <div className="absolute -top-10 left-3 h-20 w-20 rounded-full border-4 border-white overflow-hidden bg-slate-100">
+            {/* Bigger avatar, left; name should bottom-align with avatar */}
+            <div className="absolute -top-12 left-3 h-24 w-24 rounded-full border-4 border-white overflow-hidden bg-slate-100">
               {form.avatar_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={form.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
@@ -372,29 +372,29 @@ export default function ProfilePage() {
               )}
             </div>
 
-            <div className="pl-[112px] pt-[2px]">
-              <div className="flex flex-wrap items-center gap-2 leading-tight">
-                <h1 className="truncate text-base font-semibold">{form.display_name || 'Unnamed'}</h1>
+            {/* Reserve horizontal space for avatar; min-h matches avatar bottom, then bottom-align name */}
+            <div className="pl-[138px] pt-1 min-h-[96px] flex flex-col justify-end">
+              {/* Name row: larger, fills space; bottom aligns with avatar bottom */}
+              <div className="flex items-end gap-2">
+                <h1 className="truncate text-[22px] leading-[1.1] font-bold">
+                  {form.display_name || 'Unnamed'}
+                </h1>
                 {profile?.role && (
-                  <span className="rounded-full border px-2 py-0.5 text-[10px] capitalize text-gray-700">
+                  <span className="mb-[2px] rounded-full border px-2 py-0.5 text-[10px] capitalize text-gray-700">
                     {profile.role}
                   </span>
                 )}
               </div>
-              <div className="mt-1 flex flex-wrap gap-2 text-[12px] text-gray-600">
-                {form.area_city || form.area_country ? (
-                  <span>{[form.area_city, form.area_country].filter(Boolean).join(', ')}</span>
-                ) : (
-                  <span>—</span>
-                )}
-                {memberSince && (
-                  <>
-                    <span>•</span>
-                    <span>Member since {memberSince}</span>
-                  </>
-                )}
+
+              {/* Single meta line: location • member since */}
+              <div className="mt-1 text-[12px] text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis">
+                {form.area_city || form.area_country
+                  ? [form.area_city, form.area_country].filter(Boolean).join(', ')
+                  : '—'}
+                {memberSince && ` • Member since ${memberSince}`}
               </div>
 
+              {/* 3 badges, tight spacing so all fit */}
               {!!clusterBadges.length && (
                 <div className="mt-2">
                   <BadgeCluster
@@ -411,7 +411,7 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* DESKTOP/TABLET */}
+          {/* DESKTOP/TABLET (unchanged) */}
           <div className="hidden md:grid md:grid-cols-12 md:items-start">
             <div className="absolute -top-10 left-4 h-24 w-24 overflow-hidden rounded-full border-4 border-white md:left-6">
               {form.avatar_url ? (
@@ -476,9 +476,9 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* About + Skills (mobile collapsed to "About" title; centered chevron half outside) */}
+      {/* About + Skills (mobile collapsed to "About" title; shorter preview; centered chevron half outside) */}
       {(form.bio || skillsList.length) && (
-        <div className="relative rounded-xl border px-4 pt-3 pb-10">
+        <div className="relative rounded-xl border px-4 pt-2 pb-6">
           <div className="md:hidden">
             {!aboutOpen ? (
               <h3 className="text-center text-sm font-semibold">About</h3>
@@ -500,14 +500,14 @@ export default function ProfilePage() {
 
             <button
               onClick={() => setAboutOpen((v) => !v)}
-              className="absolute left-1/2 -translate-x-1/2 -bottom-4 grid h-8 w-8 place-items-center rounded-full border bg-white shadow"
+              className="absolute left-1/2 -translate-x-1/2 -bottom-3 grid h-7 w-7 place-items-center rounded-full border bg-white shadow"
               aria-expanded={aboutOpen}
               aria-controls="about-skill-panel"
               type="button"
               title={aboutOpen ? 'See less' : 'See more'}
             >
               <svg
-                className={['h-4 w-4 transition-transform', aboutOpen ? 'rotate-180' : 'rotate-0'].join(' ')}
+                className={['h-3.5 w-3.5 transition-transform', aboutOpen ? 'rotate-180' : 'rotate-0'].join(' ')}
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
