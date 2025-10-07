@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -34,6 +34,24 @@ export default function NotificationsBell() {
   const [rows, setRows] = useState<Notif[]>([]);
   const unread = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
 
+  // Refs for close behavior
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const closeTimer = useRef<number | null>(null);
+
+  const scheduleClose = useCallback((delay = 0) => {
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => setOpen(false), delay);
+  }, []);
+
+  const cancelScheduledClose = useCallback(() => {
+    if (closeTimer.current) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }, []);
+
+  // Caches + de-dupe
   const titleCache = useRef(new Map<string, string>());
   const requesterCache = useRef(new Map<string, string>());
   const sigSeen = useRef<Set<string>>(new Set());
@@ -179,6 +197,7 @@ export default function NotificationsBell() {
     }`;
   }
 
+  // Load + realtime
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -243,25 +262,92 @@ export default function NotificationsBell() {
     })();
   }, []);
 
+  // Click-outside to close
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      const root = rootRef.current;
+      if (!root) return;
+      if (!root.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+    };
+  }, [open]);
+
+  // Escape key to close
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  // Close on scroll/resize
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = () => setOpen(false);
+    const onResize = () => setOpen(false);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [open]);
+
+  // Panel leave handler that only closes if leaving the whole bell+panel region
+  const handlePanelLeave = (evt: React.MouseEvent | React.PointerEvent) => {
+    const to = (evt as any).relatedTarget as Node | null;
+    const root = rootRef.current;
+    if (root && to && root.contains(to)) {
+      // moving back onto the bell/root — keep open
+      cancelScheduledClose();
+      return;
+    }
+    scheduleClose(0);
+  };
+
   return (
-    <div className="relative">
+    <div
+      ref={rootRef}
+      className="relative"
+      // Note: we intentionally DO NOT close on root mouseleave anymore.
+      onMouseEnter={cancelScheduledClose}
+    >
       <button
         className="hx-btn hx-btn--outline-primary text-sm px-3 py-2 relative"
         onClick={() => setOpen((v) => !v)}
         title="Notifications"
         aria-label="Open notifications"
+        aria-haspopup="menu"
+        aria-expanded={open}
         type="button"
       >
         <span aria-hidden>🔔</span>
         {unread > 0 && (
           <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-[var(--hx-brand)] px-1 text-[11px] font-bold text-white">
-            {unread}
+            {unread > 99 ? '99+' : unread}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-[360px] max-w-[92vw] hx-card p-0">
+        <div
+          ref={panelRef}
+          className="absolute right-0 z-50 mt-2 w-[360px] max-w-[92vw] hx-card p-0"
+          role="menu"
+          aria-label="Notifications"
+          onMouseEnter={cancelScheduledClose}
+          onMouseLeave={handlePanelLeave}
+          onPointerEnter={cancelScheduledClose}
+          onPointerLeave={handlePanelLeave}
+        >
           <div className="flex items-center justify-between border-b px-3 py-2">
             <strong className="text-sm">Notifications</strong>
             <button onClick={markAllRead} className="hx-btn hx-btn--secondary text-xs px-2 py-1" type="button">
