@@ -1,3 +1,4 @@
+// /app/chapters/[slug]/page.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -68,8 +69,8 @@ export default function ChapterPage() {
   const [isAnchor, setIsAnchor] = useState(false);
 
   const [events, setEvents] = useState<EventRow[]>([]);
-  const [offers, setOffers] = useState<OfferPreview[]>([]); // fetched but not rendered
-  const [cityOffers, setCityOffers] = useState<CityOffer[] | null>(null); // carousel under About
+  const [offers, setOffers] = useState<OfferPreview[]>([]);
+  const [cityOffers, setCityOffers] = useState<CityOffer[] | null>(null);
 
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [postText, setPostText] = useState('');
@@ -89,6 +90,9 @@ export default function ChapterPage() {
   const [evOnline, setEvOnline] = useState(false);
   const [evLocation, setEvLocation] = useState('');
   const [creatingEvent, setCreatingEvent] = useState(false);
+
+  // NEW: Members dialog open state
+  const [membersOpen, setMembersOpen] = useState(false);
 
   const offerTrackRef = useRef<HTMLDivElement | null>(null);
 
@@ -193,7 +197,7 @@ export default function ChapterPage() {
         }
         if (!cancelled) setEvents(eList);
 
-        // 4) Posts (chapter feed)
+        // 4) Posts
         const { data: pRows, error: pErr } = await supabase
           .from('posts')
           .select('id,profile_id,body,created_at,images,group_id,profiles(display_name)')
@@ -211,7 +215,7 @@ export default function ChapterPage() {
         );
         if (!cancelled) setPosts(pList);
 
-        // 5) Offers explicitly attached to this group (fetched but not rendered)
+        // 5) Offers attached to this group (not rendered here)
         const { data: oRows } = await supabase
           .from('offers')
           .select('id,title,status,created_at,owner_id,images')
@@ -326,7 +330,7 @@ export default function ChapterPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
-  const anchors = useMemo(() => members.filter((m) => m.role === 'anchor'), [members]); // kept for now but not rendered
+  const anchors = useMemo(() => members.filter((m) => m.role === 'anchor'), [members]);
 
   async function joinChapter() {
     if (!group) return;
@@ -538,17 +542,36 @@ export default function ChapterPage() {
               )}
             </div>
           </div>
+
+          {/* Buttons row: Members, Anchor, Join/Leave (Leave smaller) */}
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMembersOpen(true)}
+              className="hx-btn hx-btn--primary px-3 py-2"
+              title="See all members"
+            >
+              Members
+            </button>
+
+            <Link
+              href={`/u/${group.created_by}`}
+              className="hx-btn hx-btn--secondary px-3 py-2"
+              title="View the anchor's profile"
+            >
+              Anchor
+            </Link>
+
             {isMember ? (
-              <>
-                <span className="rounded-full border px-3 py-1 text-sm">Member</span>
-                {isAnchor && <span className="rounded-full border px-3 py-1 text-sm">Anchor</span>}
-                <button onClick={leaveChapter} className="hx-btn hx-btn--outline-primary">
-                  Leave
-                </button>
-              </>
+              <button
+                onClick={leaveChapter}
+                className="hx-btn hx-btn--outline-primary text-xs px-2 py-1"
+                title="Leave this chapter"
+              >
+                Leave
+              </button>
             ) : (
-              <button onClick={joinChapter} className="hx-btn hx-btn--primary">
+              <button onClick={joinChapter} className="hx-btn hx-btn--primary px-3 py-2">
                 Join
               </button>
             )}
@@ -600,10 +623,10 @@ export default function ChapterPage() {
           )}
         </div>
 
-        {/* Soft separation so the carousel feels like its own block */}
+        {/* Soft separation */}
         <div className="mt-4 border-t border-neutral-200" />
 
-        {/* KEEP: Auto-populated carousel (Local + Online) */}
+        {/* Auto-populated Local & Online */}
         {cityOffers && cityOffers.length > 0 && (
           <CityOffersRail
             offers={cityOffers}
@@ -613,20 +636,21 @@ export default function ChapterPage() {
             )}&online=true`}
           />
         )}
-
-        {/* Anchors REMOVED */}
       </section>
 
       {/* Events */}
       <section className="hx-card p-4 sm:p-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Upcoming events</h2>
-          {isAnchor && (
+        </div>
+
+        {isAnchor && (
+          <div className="mb-4">
             <button onClick={() => setShowEventForm((s) => !s)} className="hx-btn hx-btn--outline-primary">
               {showEventForm ? 'Close' : 'Create event'}
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
         {isAnchor && showEventForm && (
           <div className="mb-4 rounded border p-3">
@@ -803,6 +827,48 @@ export default function ChapterPage() {
       </section>
 
       {msg && <p className="text-sm text-amber-700">{msg}</p>}
+
+      {/* Members dialog */}
+      {membersOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-xl rounded-xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <h3 className="text-base font-semibold">Members</h3>
+              <button onClick={() => setMembersOpen(false)} className="rounded border px-2 py-1 text-sm hover:bg-gray-50" type="button">
+                Close
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto p-3">
+              {members.length === 0 ? (
+                <p className="text-sm text-gray-600">No members yet.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {members.map((m) => (
+                    <li key={m.profile_id} className="flex items-center justify-between rounded border p-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <div className="truncate font-medium">
+                            {m.display_name || 'Unnamed'}
+                          </div>
+                          <span className="rounded-full border px-2 py-0.5 text-[11px] capitalize text-gray-700">
+                            {m.role}
+                          </span>
+                        </div>
+                      </div>
+                      <Link
+                        href={`/u/${m.profile_id}`}
+                        className="hx-btn hx-btn--outline-primary text-xs px-2 py-1 whitespace-nowrap"
+                      >
+                        View profile
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
