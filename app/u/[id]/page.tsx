@@ -237,13 +237,22 @@ function ProfileContent() {
               </div>
             </div>
 
-            {/* RIGHT: compact badges row (aligned right, with captions, clickable) */}
-            <div className="mt-3 md:mt-0 md:pr-2 flex justify-end">
+            {/* RIGHT: badges (desktop right-aligned; mobile centered + scrollable) */}
+            <div className="mt-3 md:mt-0 md:pr-2">
               {badgesMsg && <span className="text-xs text-amber-700">{badgesMsg}</span>}
               {badgeIcons.length > 0 && (
-                <div className="flex items-center gap-6">
+                <div
+                  className="
+                    -mx-2 px-2
+                    flex items-center gap-4 md:gap-6
+                    justify-center md:justify-end
+                    overflow-x-auto md:overflow-visible overscroll-contain
+                    snap-x snap-mandatory md:snap-none scrollbar-thin
+                  "
+                  aria-label="Badges"
+                >
                   {badgeIcons.map((b) => (
-                    <div key={b.key} className="flex flex-col items-center">
+                    <div key={b.key} className="flex flex-col items-center snap-start">
                       <Link
                         href={`/profile/badges?id=${profile.id}`}
                         title={`See all badges — ${b.title}`}
@@ -256,10 +265,12 @@ function ProfileContent() {
                           alt={b.title}
                           width={44}
                           height={44}
-                          className="h-11 w-11 rounded-full"
+                          className="h-9 w-9 md:h-11 md:w-11 rounded-full"
+                          loading="lazy"
+                          decoding="async"
                         />
                       </Link>
-                      <span className="mt-1 text-xs text-gray-700">{b.caption}</span>
+                      <span className="mt-0.5 md:mt-1 text-[11px] md:text-xs text-gray-700">{b.caption}</span>
                     </div>
                   ))}
                 </div>
