@@ -25,7 +25,7 @@ export default function Badge({ icon, size = 40, title, className = '' }: Props)
       <img
         src={icon}
         alt={title || 'Badge'}
-        style={{ width: Math.floor(s * 0.78), height: Math.floor(s * 0.78) }}
+        style={{ width: Math.floor(s * 1.78), height: Math.floor(s * 1) }}
       />
     </div>
   );
