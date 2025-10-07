@@ -32,7 +32,6 @@ interface ProfileHeaderProps {
 }
 
 export default function ProfileHeader({ profile, isOwner = false }: ProfileHeaderProps) {
-  // Use the client without a missing generic type
   const supabase = useMemo(() => createClientComponentClient(), []);
   const [badges, setBadges] = useState<ExpandedBadge[] | null>(null);
   const [loadingBadges, setLoadingBadges] = useState<boolean>(true);
@@ -70,7 +69,7 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
   return (
     <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
       {/* Cover */}
-      <div className="h-32 w-full bg-[url('/cover-default.jpg')] bg-cover bg-center" />
+      <div className="h-28 sm:h-32 w-full bg-[url('/cover-default.jpg')] bg-cover bg-center" />
 
       {/* Header row */}
       <div className="px-4 sm:px-6 -mt-10 pb-4">
@@ -83,6 +82,7 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
                 alt={profile?.full_name || 'Avatar'}
                 width={80}
                 height={80}
+                sizes="(max-width: 640px) 80px, 80px"
                 className="h-full w-full object-cover"
               />
             ) : (
@@ -90,9 +90,9 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
             )}
           </div>
 
-          {/* Name + meta + badges inline */}
+          {/* Name + meta */}
           <div className="flex-1 min-w-0">
-            {/* Top line: name, admin pill, badges cluster to the right */}
+            {/* Top line: name, admin pill, badges inline (desktop/tablet only) */}
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl sm:text-2xl font-semibold truncate">
                 {profile?.full_name || 'Member'}
@@ -103,19 +103,14 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
                 </span>
               ) : null}
 
-              {/* Inline badges cluster (no captions) */}
-              <div className="ml-2 flex-1 min-w-[140px]">
+              {/* Inline badges beside name — keep for sm+ only to preserve desktop look */}
+              <div className="ml-2 flex-1 min-w-[140px] hidden sm:block">
                 {loadingBadges ? (
                   <span className="text-xs text-slate-500">Loading badges…</span>
                 ) : error ? (
                   <span className="text-xs text-rose-600">Badges: {error}</span>
                 ) : badges && badges.length > 0 ? (
-                  <BadgeCluster
-                    badges={badges}
-                    size={24}
-                    href="/profile/badges"
-                    /* inline beside name -> no titles to keep it compact */
-                  />
+                  <BadgeCluster badges={badges} size={24} href="/profile/badges" />
                 ) : (
                   <span className="text-xs text-slate-500">No badges yet.</span>
                 )}
@@ -125,7 +120,7 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
               {isOwner && (
                 <Link
                   href="/profile/badges"
-                  className="text-xs text-emerald-700 hover:underline whitespace-nowrap"
+                  className="hidden sm:inline text-xs text-emerald-700 hover:underline whitespace-nowrap"
                 >
                   Learn how to earn
                 </Link>
@@ -143,9 +138,32 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
                 </span>
               )}
             </div>
+
+            {/* Mobile badges: centered, scrollable; shows only on small screens */}
+            <div className="sm:hidden mt-3 -mx-2 px-2">
+              {loadingBadges ? (
+                <span className="text-xs text-slate-500">Loading badges…</span>
+              ) : error ? (
+                <span className="text-xs text-rose-600">Badges: {error}</span>
+              ) : badges && badges.length > 0 ? (
+                <div className="flex items-center justify-center gap-4 overflow-x-auto overscroll-contain snap-x snap-mandatory scrollbar-thin">
+                  <BadgeCluster badges={badges} size={22} href="/profile/badges" />
+                </div>
+              ) : (
+                <span className="text-xs text-slate-500">No badges yet.</span>
+              )}
+
+              {isOwner && (
+                <div className="mt-2 text-center">
+                  <Link href="/profile/badges" className="text-xs text-emerald-700 hover:underline">
+                    Learn how to earn
+                  </Link>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Owner actions */}
+          {/* Owner actions (desktop only) */}
           <div className="hidden sm:block">
             {isOwner && (
               <Link

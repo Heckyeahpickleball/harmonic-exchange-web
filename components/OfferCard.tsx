@@ -1,3 +1,4 @@
+// components/OfferCard.tsx
 'use client';
 
 import Link from 'next/link';
@@ -21,11 +22,8 @@ export type OfferRow = {
 type Props = {
   offer: OfferRow;
   mine?: boolean;
-  /** If the viewing user is an admin/moderator, pass true to expose approval actions */
   isAdmin?: boolean;
-  /** Called after a successful delete */
   onDeleted?: (id: string) => void;
-  /** Called after a successful approve (status -> active) */
   onApproved?: (id: string) => void;
 };
 
@@ -57,7 +55,6 @@ export default function OfferCard({
   const [approving, setApproving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Keep a local status so the card reflects changes immediately
   const [status, setStatus] = useState<OfferRow['status']>(offer.status);
 
   const thumb = useMemo(
@@ -81,7 +78,6 @@ export default function OfferCard({
   }
 
   async function handleApprove() {
-    // Try secured RPC first; fallback to direct update if RPC is missing.
     setErr(null);
     try {
       setApproving(true);
@@ -98,7 +94,6 @@ export default function OfferCard({
 
         if (!fnMissing) throw rpc.error;
 
-        // Fallback: direct update (requires correct RLS for admin/mod)
         const { error: upErr } = await supabase
           .from('offers')
           .update({ status: 'active' })
@@ -113,7 +108,6 @@ export default function OfferCard({
           throw upErr;
         }
 
-        // Best-effort admin action log (non-blocking)
         try {
           const { data: auth } = await supabase.auth.getUser();
           await supabase.from('admin_actions').insert({
@@ -126,8 +120,8 @@ export default function OfferCard({
         } catch {}
       }
 
-      setStatus('active');      // optimistic UI
-      onApproved?.(offer.id);   // let parent refresh if needed
+      setStatus('active');
+      onApproved?.(offer.id);
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to approve');
     } finally {
@@ -141,14 +135,15 @@ export default function OfferCard({
   return (
     <article className="hx-card transition hover:shadow-md">
       <Link href={href} className="block">
-        <div className="relative h-48 w-full overflow-hidden rounded-t bg-gray-100">
+        <div className="relative h-40 sm:h-48 md:h-56 w-full overflow-hidden rounded-t bg-gray-100">
           {thumb ? (
             <Image
               src={thumb}
               alt={offer.title}
               fill
               className="object-cover"
-              sizes="(max-width: 768px) 100vw, 50vw"
+              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+              priority={false}
             />
           ) : (
             <div className="flex h-full items-center justify-center text-xs text-gray-400">
@@ -191,7 +186,6 @@ export default function OfferCard({
             </Link>
           )}
 
-          {/* View Provider */}
           {offer.owner_id && (
             <Link
               href={`/u/${offer.owner_id}`}
@@ -202,7 +196,6 @@ export default function OfferCard({
             </Link>
           )}
 
-          {/* Admin: Approve pending */}
           {isAdmin && status === 'pending' && (
             <button
               type="button"
@@ -215,7 +208,6 @@ export default function OfferCard({
             </button>
           )}
 
-          {/* Owner: Delete */}
           {mine && (
             <button
               type="button"
