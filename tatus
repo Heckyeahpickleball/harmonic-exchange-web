@@ -1,0 +1,44 @@
+  backup/local-wip-2025-10-04-201957       [m 8c30696 WIP before restore to Vercel-stable
+  chore/tailwind-mobile-foundation         [m bc911c4 Mobile polish batch 2: badges component, earned badges row, provider header
+  chore/test-pr-template                   [m 46a7af3 [[34morigin/chore/test-pr-template[m] Merge branch 'chore/test-pr-template' # Please enter a commit message to explain why this merge is necessary, # especially if it merges an updated upstream into a topic branch. # # Lines starting with '#' will be ignored, and an empty message aborts # the commit.
+  feat/badge-awarded-notification          [m 96ed7c5 [[34morigin/feat/badge-awarded-notification[m] Fix badge notification + header menus
+  feat/badges-clickable                    [m 8c30696 [[34morigin/feat/badges-clickable[m] WIP before restore to Vercel-stable
+  feat/badges-clickable-tier-replace       [m 4b2f27e BadgeCluster: clickable badges -> /badges; show only highest tier per track
+  feat/clickable-badges                    [m c3d0287 [[34morigin/feat/clickable-badges[m] Badges: clickable link to /profile/badges + highest-tier per track, gap/showTitles props
+  feat/header-signout-fix                  [m ce7f71f [[34morigin/feat/header-signout-fix[m] Fix: header sign-out + stabilize
+  feat/mobile-batch-1                      [m 27915ac Mobile polish: header badges, notif panel, offer card hero sizes
+  feat/mobile-batch-2                      [m bc911c4 Mobile polish batch 2: badges component, earned badges row, provider header
+  feat/mobile-header                       [m bc911c4 Mobile polish batch 2: badges component, earned badges row, provider header
+  feat/notifications-scroll-badges         [m 58d08bb Fix notifications dropdown scrolling; tweak Badge size on provider & Badge component
+  feat/profile-mobile-polish               [m e2a9d28 Mobile profile polish: fix avatar/cover, compact 3-badge row, about collapse, offers carousel
+  feat/public-profile-badges               [m 3613727 Public profile: right-aligned badges with captions + link to /profile/badges
+  feature/offer-request-gate               [m 0b8860a Admin: owner emails + delete member; Browse: show all active offers
+  fix/badge-cluster                        [m 7df162f [[34morigin/fix/badge-cluster[m: ahead 1] Profile: increase badge size and spacing
+  fix/chapter-carousel                     [m 2d3e128 Chapters: fix TS error and auto-populate carousel (local city+country and online), derive thumbs from images[0]
+  fix/nav-hydration-and-bell               [m 97aba25 [[34morigin/fix/nav-hydration-and-bell[m: ahead 1] feat(notifications): celebratory badge_awarded support + copy
+  fix/profile-badge-cluster                [m 7beeb37 Profile: move badge cluster next to name, 40px size, add captions
+* [32mfix/profile-mobile-collapsed-and-carousel[m eae8e4d Mobile profile polish: header alignment, tighter About
+  main                                     [m 4967d0f [[34morigin/main[m] Public profile: show provider badges (streak/give/receive) with stable PNG mapping
+  stable/from-vercel                       [m ce7f71f Fix: header sign-out + stabilize
+  backup/local-wip-2025-10-04-201957       [m 8c30696 WIP before restore to Vercel-stable
+  chore/tailwind-mobile-foundation         [m bc911c4 Mobile polish batch 2: badges component, earned badges row, provider header
+  chore/test-pr-template                   [m 46a7af3 [[34morigin/chore/test-pr-template[m] Merge branch 'chore/test-pr-template' # Please enter a commit message to explain why this merge is necessary, # especially if it merges an updated upstream into a topic branch. # # Lines starting with '#' will be ignored, and an empty message aborts # the commit.
+  feat/badge-awarded-notification          [m 96ed7c5 [[34morigin/feat/badge-awarded-notification[m] Fix badge notification + header menus
+  feat/badges-clickable                    [m 8c30696 [[34morigin/feat/badges-clickable[m] WIP before restore to Vercel-stable
+  feat/badges-clickable-tier-replace       [m 4b2f27e BadgeCluster: clickable badges -> /badges; show only highest tier per track
+  feat/clickable-badges                    [m c3d0287 [[34morigin/feat/clickable-badges[m] Badges: clickable link to /profile/badges + highest-tier per track, gap/showTitles props
+  feat/header-signout-fix                  [m ce7f71f [[34morigin/feat/header-signout-fix[m] Fix: header sign-out + stabilize
+  feat/mobile-batch-1                      [m 27915ac Mobile polish: header badges, notif panel, offer card hero sizes
+  feat/mobile-batch-2                      [m bc911c4 Mobile polish batch 2: badges component, earned badges row, provider header
+  feat/mobile-header                       [m bc911c4 Mobile polish batch 2: badges component, earned badges row, provider header
+  feat/notifications-scroll-badges         [m 58d08bb Fix notifications dropdown scrolling; tweak Badge size on provider & Badge component
+  feat/profile-mobile-polish               [m e2a9d28 Mobile profile polish: fix avatar/cover, compact 3-badge row, about collapse, offers carousel
+  feat/public-profile-badges               [m 3613727 Public profile: right-aligned badges with captions + link to /profile/badges
+  feature/offer-request-gate               [m 0b8860a Admin: owner emails + delete member; Browse: show all active offers
+  fix/badge-cluster                        [m 7df162f [[34morigin/fix/badge-cluster[m: ahead 1] Profile: increase badge size and spacing
+  fix/chapter-carousel                     [m 2d3e128 Chapters: fix TS error and auto-populate carousel (local city+country and online), derive thumbs from images[0]
+  fix/nav-hydration-and-bell               [m 97aba25 [[34morigin/fix/nav-hydration-and-bell[m: ahead 1] feat(notifications): celebratory badge_awarded support + copy
+  fix/profile-badge-cluster                [m 7beeb37 Profile: move badge cluster next to name, 40px size, add captions
+* [32mfix/profile-mobile-collapsed-and-carousel[m eae8e4d Mobile profile polish: header alignment, tighter About
+  main                                     [m 4967d0f [[34morigin/main[m] Public profile: show provider badges (streak/give/receive) with stable PNG mapping
+  stable/from-vercel                       [m ce7f71f Fix: header sign-out + stabilize
