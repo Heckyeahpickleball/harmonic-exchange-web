@@ -136,3 +136,18 @@ button,[role="button"],input[type="button"],input[type="submit"]{ cursor:pointer
   border-radius: 999px;
   margin-top: .5rem;
 }
+
+/* === Mobile utilities === */
+@media (hover: none) and (pointer: coarse) {
+  .tap-big { min-height: 44px; min-width: 44px; }
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

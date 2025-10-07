@@ -184,7 +184,7 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, [userId]);
 
-  // Load badges for this profile (from the expanded view)
+  // Load badges
   useEffect(() => {
     if (!profile?.id) return;
     let cancelled = false;
@@ -209,7 +209,7 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, [profile?.id]);
 
-  // Map ExpandedBadge -> BadgeCluster shape, filter to earned only
+  // ExpandedBadge -> BadgeCluster props
   const clusterBadges = useMemo(() => {
     const list = (badges ?? []).filter((b) => {
       const tr = String(b.track ?? '');
@@ -242,6 +242,19 @@ export default function ProfilePage() {
         .filter(Boolean),
     [form.skillsCSV]
   );
+
+  // ✅ Stable, SSR-safe date string to avoid hydration mismatch
+  const memberSince = useMemo(() => {
+    if (!profile?.created_at) return null;
+    const d = new Date(profile.created_at);
+    // Fixed locale + timezone so server and client render the same text
+    return new Intl.DateTimeFormat('en-US', {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      timeZone: 'UTC',
+    }).format(d);
+  }, [profile?.created_at]);
 
   async function uploadTo(bucket: 'avatars' | 'covers', file: File): Promise<string> {
     if (!userId) throw new Error('Not signed in');
@@ -302,7 +315,7 @@ export default function ProfilePage() {
     }
   }
 
-  // Carousel helpers for mobile
+  // Carousel helpers (mobile)
   const railRef = useRef<HTMLDivElement | null>(null);
   const scrollBy = (dx: number) => railRef.current?.scrollBy({ left: dx, behavior: 'smooth' });
 
@@ -330,13 +343,27 @@ export default function ProfilePage() {
           ) : (
             <div className="h-full w-full bg-gradient-to-r from-slate-200 to-slate-100" />
           )}
+
+          {/* Mobile-only edit button on the cover */}
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="md:hidden absolute bottom-2 right-2 grid h-9 w-9 place-items-center rounded-full bg-white/95 shadow border"
+            aria-label="Edit profile"
+            title="Edit profile"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" />
+              <path d="M14.06 4.94l3.75 3.75" />
+            </svg>
+          </button>
         </div>
 
         {/* Header content */}
         <div className="relative px-4 pb-3 pt-2 md:px-6">
-          {/* MOBILE: no overlap — avatar + name row */}
-          <div className="md:hidden flex items-end gap-3">
-            <div className="h-16 w-16 rounded-full border-4 border-white overflow-hidden bg-slate-100 -mt-8 shrink-0">
+          {/* MOBILE */}
+          <div className="md:hidden relative">
+            <div className="absolute -top-10 left-3 h-20 w-20 rounded-full border-4 border-white overflow-hidden bg-slate-100">
               {form.avatar_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={form.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
@@ -345,46 +372,46 @@ export default function ProfilePage() {
               )}
             </div>
 
-            <div className="min-w-0 flex-1">
+            <div className="pl-[112px] pt-[2px]">
               <div className="flex flex-wrap items-center gap-2 leading-tight">
-                <h1 className="truncate text-lg font-semibold">{form.display_name || 'Unnamed'}</h1>
+                <h1 className="truncate text-base font-semibold">{form.display_name || 'Unnamed'}</h1>
                 {profile?.role && (
-                  <span className="rounded-full border px-2 py-0.5 text-[11px] capitalize text-gray-700">
+                  <span className="rounded-full border px-2 py-0.5 text-[10px] capitalize text-gray-700">
                     {profile.role}
                   </span>
                 )}
               </div>
-              <div className="mt-0.5 flex flex-wrap gap-2 text-[13px] text-gray-600">
+              <div className="mt-1 flex flex-wrap gap-2 text-[12px] text-gray-600">
                 {form.area_city || form.area_country ? (
                   <span>{[form.area_city, form.area_country].filter(Boolean).join(', ')}</span>
                 ) : (
                   <span>—</span>
                 )}
-                {profile?.created_at && (
+                {memberSince && (
                   <>
                     <span>•</span>
-                    <span>Member since {new Date(profile.created_at).toLocaleDateString()}</span>
+                    <span>Member since {memberSince}</span>
                   </>
                 )}
               </div>
 
-              {/* Mobile badges: 3 across, tight spacing */}
-              <div className="mt-2">
-                {!!clusterBadges.length ? (
+              {!!clusterBadges.length && (
+                <div className="mt-2">
                   <BadgeCluster
                     badges={clusterBadges.slice(0, 3)}
-                    size={22}
-                    className="gap-3"
+                    size={20}
+                    className="gap-1.5"
                     href="/profile/badges"
                   />
-                ) : badgesMsg ? (
-                  <p className="text-xs text-amber-700">{badgesMsg}</p>
-                ) : null}
-              </div>
+                </div>
+              )}
+              {!clusterBadges.length && badgesMsg && (
+                <p className="text-xs text-amber-700">{badgesMsg}</p>
+              )}
             </div>
           </div>
 
-          {/* DESKTOP/TABLET: original overlap style */}
+          {/* DESKTOP/TABLET */}
           <div className="hidden md:grid md:grid-cols-12 md:items-start">
             <div className="absolute -top-10 left-4 h-24 w-24 overflow-hidden rounded-full border-4 border-white md:left-6">
               {form.avatar_url ? (
@@ -395,7 +422,6 @@ export default function ProfilePage() {
               )}
             </div>
 
-            {/* LEFT */}
             <div className="md:col-span-8 md:pl-28">
               <div className="flex flex-wrap items-center gap-2 leading-tight">
                 <h1 className="text-2xl font-semibold">{form.display_name || 'Unnamed'}</h1>
@@ -412,10 +438,10 @@ export default function ProfilePage() {
                 ) : (
                   <span>—</span>
                 )}
-                {profile?.created_at && (
+                {memberSince && (
                   <>
                     <span>•</span>
-                    <span>Member since {new Date(profile.created_at).toLocaleDateString()}</span>
+                    <span>Member since {memberSince}</span>
                   </>
                 )}
               </div>
@@ -437,7 +463,6 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* RIGHT badges (unchanged desktop) */}
             <div className="md:col-span-4 md:relative md:h-[100px]">
               {!!clusterBadges.length ? (
                 <div className="absolute inset-0 hidden items-center justify-end md:flex">
@@ -451,47 +476,18 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* About + Skills (together collapsed on mobile) */}
+      {/* About + Skills (mobile collapsed to "About" title; centered chevron half outside) */}
       {(form.bio || skillsList.length) && (
-        <div className="rounded-xl border p-4">
-          {/* Mobile: one-line preview + centered round chevron */}
+        <div className="relative rounded-xl border px-4 pt-3 pb-10">
           <div className="md:hidden">
-            <p className="truncate text-center text-sm text-gray-800">
-              {form.bio || 'About & Skills'}
-            </p>
-            <div className="mt-2 flex items-center justify-center">
-              <button
-                onClick={() => setAboutOpen((v) => !v)}
-                className="flex flex-col items-center"
-                aria-expanded={aboutOpen}
-                aria-controls="about-skill-panel"
-                type="button"
-              >
-                <span className="grid h-8 w-8 place-items-center rounded-full border">
-                  <svg
-                    className={['h-4 w-4 transition-transform', aboutOpen ? 'rotate-180' : 'rotate-0'].join(' ')}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                  >
-                    <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-                  </svg>
-                </span>
-                <span className="mt-1 text-[11px] text-gray-600">{aboutOpen ? 'See less' : 'See more'}</span>
-              </button>
-            </div>
-
-            {aboutOpen && (
-              <div id="about-skill-panel" className="mt-3 space-y-3">
-                {form.bio && (
-                  <>
-                    <h3 className="text-sm font-semibold">About</h3>
-                    <p className="whitespace-pre-wrap text-sm text-gray-800">{form.bio}</p>
-                  </>
-                )}
+            {!aboutOpen ? (
+              <h3 className="text-center text-sm font-semibold">About</h3>
+            ) : (
+              <div id="about-skill-panel" className="space-y-3">
+                {form.bio && <p className="whitespace-pre-wrap text-sm text-gray-800">{form.bio}</p>}
                 {skillsList.length > 0 && (
                   <div>
-                    <h3 className="mb-1 text-sm font-semibold">Skills</h3>
+                    <h4 className="mb-1 text-sm font-semibold">Skills</h4>
                     <div className="flex flex-wrap gap-2">
                       {skillsList.map((s, i) => (
                         <span key={i} className="rounded-full border px-2 py-1 text-xs">{s}</span>
@@ -501,9 +497,27 @@ export default function ProfilePage() {
                 )}
               </div>
             )}
+
+            <button
+              onClick={() => setAboutOpen((v) => !v)}
+              className="absolute left-1/2 -translate-x-1/2 -bottom-4 grid h-8 w-8 place-items-center rounded-full border bg-white shadow"
+              aria-expanded={aboutOpen}
+              aria-controls="about-skill-panel"
+              type="button"
+              title={aboutOpen ? 'See less' : 'See more'}
+            >
+              <svg
+                className={['h-4 w-4 transition-transform', aboutOpen ? 'rotate-180' : 'rotate-0'].join(' ')}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+              >
+                <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
           </div>
 
-          {/* Desktop: unchanged (always open) */}
+          {/* Desktop: unchanged */}
           <div className="hidden md:block">
             {form.bio && (
               <>
@@ -586,7 +600,7 @@ export default function ProfilePage() {
             )}
           </div>
 
-          {/* Desktop grid (unchanged) */}
+          {/* Desktop grid */}
           <div className="hidden md:grid md:grid-cols-1 md:gap-3">
             {offers.map((o) => (
               <OfferCard
