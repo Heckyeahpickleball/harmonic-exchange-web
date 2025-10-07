@@ -1,7 +1,7 @@
 // /app/u/[id]/page.tsx
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
@@ -22,6 +22,15 @@ type ProfileRow = {
   created_at?: string;
 };
 
+type ExpandedBadgeRow = {
+  profile_id: string;
+  badge_code: string | null;
+  label: string | null;
+  track: 'give' | 'receive' | 'streak' | 'milestone' | null;
+  tier: number | null;
+  earned_at: string | null;
+};
+
 export default function PublicProfilePage() {
   return (
     <Suspense fallback={<div className="p-4 text-sm text-gray-600">Loading…</div>}>
@@ -38,6 +47,10 @@ function ProfileContent() {
   const [loadingOffers, setLoadingOffers] = useState(false);
   const [msg, setMsg] = useState<string>('');
 
+  // badges (public view, fetched here to keep things simple and robust)
+  const [badges, setBadges] = useState<ExpandedBadgeRow[]>([]);
+  const [badgesMsg, setBadgesMsg] = useState<string>('');
+
   // load profile
   useEffect(() => {
     let cancelled = false;
@@ -52,8 +65,79 @@ function ProfileContent() {
 
       if (!cancelled) setProfile(error ? null : (data as ProfileRow));
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
+
+  // load public badges for this profile
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    (async () => {
+      setBadgesMsg('');
+      try {
+        const { data, error } = await supabase
+          .from('profile_badges_expanded')
+          .select('profile_id,badge_code,label,track,tier,earned_at')
+          .eq('profile_id', id);
+
+        if (error) throw error;
+        if (!cancelled) setBadges((data as ExpandedBadgeRow[]) ?? []);
+      } catch (e: any) {
+        if (!cancelled) {
+          setBadges([]);
+          setBadgesMsg('Badges unavailable');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  // choose highest tier per track and map to public PNGs
+  const badgeIcons = useMemo(() => {
+    // pick highest tier for give/receive; include streak if present
+    const best: Record<string, ExpandedBadgeRow | undefined> = {};
+    for (const b of badges) {
+      const tr = (b.track ?? '').toLowerCase();
+      if (!tr) continue;
+      if (tr === 'streak') {
+        best.streak = b;
+        continue;
+      }
+      if (tr === 'give' || tr === 'receive') {
+        const prev = best[tr];
+        if (!prev || (b.tier ?? 0) > (prev.tier ?? 0)) best[tr] = b;
+      }
+    }
+
+    // map to icon src + title
+    const out: { key: string; src: string; title: string }[] = [];
+    if (best.streak) {
+      out.push({
+        key: 'streak',
+        src: '/badges/streak_wave.png',
+        title: 'Streak',
+      });
+    }
+    if (best.give && (best.give.tier ?? 0) > 0) {
+      out.push({
+        key: `give-${best.give.tier}`,
+        src: `/badges/give_rays_t${best.give.tier}.png`,
+        title: `Giver • Tier ${best.give.tier}`,
+      });
+    }
+    if (best.receive && (best.receive.tier ?? 0) > 0) {
+      out.push({
+        key: `receive-${best.receive.tier}`,
+        src: `/badges/receive_bowl_t${best.receive.tier}.png`,
+        title: `Receiver • Tier ${best.receive.tier}`,
+      });
+    }
+    return out;
+  }, [badges]);
 
   // load active offers by this owner
   useEffect(() => {
@@ -93,7 +177,9 @@ function ProfileContent() {
         if (!cancelled) setLoadingOffers(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   if (!profile) {
@@ -101,7 +187,9 @@ function ProfileContent() {
       <section className="max-w-5xl">
         <p className="p-4 text-sm text-red-700">Profile not found.</p>
         <p className="px-4">
-          <Link href="/offers" className="underline">← Back to Browse</Link>
+          <Link href="/offers" className="underline">
+            ← Back to Browse
+          </Link>
         </p>
       </section>
     );
@@ -160,6 +248,29 @@ function ProfileContent() {
                   </>
                 )}
               </div>
+
+              {/* Public badges row (matches the three icons style) */}
+              <div className="mt-3">
+                {badgesMsg && <span className="text-xs text-amber-700">{badgesMsg}</span>}
+                {badgeIcons.length > 0 && (
+                  <div className="flex items-center gap-5">
+                    {badgeIcons.map((b) => (
+                      <div key={b.key} className="flex flex-col items-center">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={b.src}
+                          alt={b.title}
+                          title={b.title}
+                          width={44}
+                          height={44}
+                          className="h-11 w-11 rounded-full"
+                        />
+                        {/* hide labels to match compact profile look; add if you want */}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* No edit/sign-out buttons on public view */}
@@ -181,7 +292,9 @@ function ProfileContent() {
               <h3 className="mb-1 text-sm font-semibold">Skills</h3>
               <div className="flex flex-wrap gap-2">
                 {profile.skills!.map((s, i) => (
-                  <span key={i} className="rounded-full border px-2 py-1 text-xs">{s}</span>
+                  <span key={i} className="rounded-full border px-2 py-1 text-xs">
+                    {s}
+                  </span>
                 ))}
               </div>
             </div>
