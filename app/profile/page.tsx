@@ -68,13 +68,13 @@ export default function ProfilePage() {
   const [offersLoading, setOffersLoading] = useState(false);
   const [offersMsg, setOffersMsg] = useState('');
 
-  // Badges
   const [badges, setBadges] = useState<ExpandedBadge[] | null>(null);
   const [badgesMsg, setBadgesMsg] = useState<string>('');
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
 
+  // Cropper modal state
   const [cropper, setCropper] = useState<{
     src: string;
     aspect: number;
@@ -84,8 +84,22 @@ export default function ProfilePage() {
     title: string;
   } | null>(null);
 
-  // About collapse (mobile-friendly)
+  // Mobile: collapse About+Skills
   const [aboutOpen, setAboutOpen] = useState(false);
+
+  /** Upload helper to Supabase Storage and return public URL */
+  async function uploadTo(bucket: 'avatars' | 'covers', file: File): Promise<string> {
+    if (!userId) throw new Error('Not signed in');
+    const path = `${userId}/${Date.now()}_${file.name}`;
+    const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, {
+      cacheControl: '3600',
+      upsert: true,
+      contentType: file.type,
+    });
+    if (upErr) throw upErr;
+    const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+    return data.publicUrl;
+  }
 
   // Load current user + profile
   useEffect(() => {
@@ -114,9 +128,7 @@ export default function ProfilePage() {
         .single();
 
       if (profErr) {
-        setStatus(
-          `Heads up: profile not found yet. Try Sign Out then Sign In again to create it. (${profErr.message})`
-        );
+        setStatus(`Heads up: profile not found yet. Try Sign Out then Sign In again to create it. (${profErr.message})`);
         setLoading(false);
         return;
       }
@@ -184,7 +196,7 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, [userId]);
 
-  // Load badges for this profile (from the expanded view)
+  // Load badges
   useEffect(() => {
     if (!profile?.id) return;
     let cancelled = false;
@@ -209,7 +221,7 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, [profile?.id]);
 
-  // Map ExpandedBadge -> BadgeCluster shape, filter to earned only
+  // ExpandedBadge -> BadgeCluster props
   const clusterBadges = useMemo(() => {
     const list = (badges ?? []).filter((b) => {
       const tr = String(b.track ?? '');
@@ -243,18 +255,17 @@ export default function ProfilePage() {
     [form.skillsCSV]
   );
 
-  async function uploadTo(bucket: 'avatars' | 'covers', file: File): Promise<string> {
-    if (!userId) throw new Error('Not signed in');
-    const path = `${userId}/${Date.now()}_${file.name}`;
-    const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, {
-      cacheControl: '3600',
-      upsert: true,
-      contentType: file.type,
-    });
-    if (upErr) throw upErr;
-    const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-    return data.publicUrl;
-  }
+  // SSR-stable "member since"
+  const memberSince = useMemo(() => {
+    if (!profile?.created_at) return null;
+    const d = new Date(profile.created_at);
+    return new Intl.DateTimeFormat('en-US', {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      timeZone: 'UTC',
+    }).format(d);
+  }, [profile?.created_at]);
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
@@ -302,7 +313,7 @@ export default function ProfilePage() {
     }
   }
 
-  // Carousel helpers for mobile
+  // Carousel helpers (mobile)
   const railRef = useRef<HTMLDivElement | null>(null);
   const scrollBy = (dx: number) => railRef.current?.scrollBy({ left: dx, behavior: 'smooth' });
 
@@ -330,56 +341,115 @@ export default function ProfilePage() {
           ) : (
             <div className="h-full w-full bg-gradient-to-r from-slate-200 to-slate-100" />
           )}
+
+          {/* Mobile edit button on cover (pencil) */}
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="md:hidden absolute bottom-2 right-2 grid h-9 w-9 place-items-center rounded-full bg-white/95 shadow border"
+            aria-label="Edit profile"
+            title="Edit profile"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" />
+              <path d="M14.06 4.94l3.75 3.75" />
+            </svg>
+          </button>
         </div>
 
         {/* Header content */}
         <div className="relative px-4 pb-3 pt-2 md:px-6">
-          {/* Avatar */}
-          <div className="absolute -top-10 left-4 h-20 w-20 overflow-hidden rounded-full border-4 border-white md:left-6 md:h-24 md:w-24">
-            {form.avatar_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={form.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
-            ) : (
-              <div className="grid h-full w-full place-items-center bg-slate-200 text-slate-500">☺</div>
-            )}
-          </div>
+          {/* MOBILE */}
+          <div className="md:hidden relative">
+            {/* Avatar — nudged a tad left */}
+            <div className="absolute -top-12 left-0.5 h-24 w-24 rounded-full border-4 border-white overflow-hidden bg-slate-100">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={form.avatar_url || '/images/placeholder-avatar.png'}
+                alt="Avatar"
+                className="h-full w-full object-cover"
+              />
+            </div>
 
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-12 md:items-start">
-            {/* LEFT */}
-            <div className="md:col-span-8 md:pl-28">
-              <div className="flex flex-wrap items-center gap-2 leading-tight">
-                <h1 className="text-xl font-semibold md:text-2xl">{form.display_name || 'Unnamed'}</h1>
+            {/* Name row — tiny gap under cover */}
+            <div className="pl-[123px] mt-0">
+              <div className="flex items-end gap-2">
+                <h1 className="truncate text-[25px] leading-[1.1] font-bold">{form.display_name || 'Unnamed'}</h1>
                 {profile?.role && (
-                  <span className="rounded-full border px-2 py-0.5 text-xs capitalize text-gray-700">
+                  <span className="mb-[2px] rounded-full border px-2 py-0.5 text-[10px] capitalize text-gray-700">
                     {profile.role}
                   </span>
                 )}
               </div>
+            </div>
 
-              <div className="mt-0.5 flex flex-wrap gap-2 text-[13px] text-gray-600">
+            {/* Location + Member since */}
+            <div className="pl-[116px] mt-0.5 text-[12px] text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis">
+              {form.area_city || form.area_country
+                ? [form.area_city, form.area_country].filter(Boolean).join(', ')
+                : '—'}
+              {memberSince && ` • Member since ${memberSince}`}
+            </div>
+
+            {/* Badges — centered line */}
+            {!!clusterBadges.length && (
+              <div className="mt-1 flex justify-center">
+                <BadgeCluster
+                  badges={clusterBadges.slice(0, 3)}
+                  size={48}
+                  className="gap-1.5"
+                  href="/profile/badges"
+                />
+              </div>
+            )}
+            {!clusterBadges.length && badgesMsg && (
+              <p className="text-xs text-amber-700 mt-1 text-center">{badgesMsg}</p>
+            )}
+          </div>
+
+          {/* DESKTOP/TABLET (unchanged) */}
+          <div className="hidden md:grid md:grid-cols-12 md:items-start">
+            <div className="absolute -top-10 left-4 h-24 w-24 overflow-hidden rounded-full border-4 border-white md:left-6">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={form.avatar_url || '/images/placeholder-avatar.png'}
+                alt="Avatar"
+                className="h-full w-full object-cover"
+              />
+            </div>
+
+            <div className="md:col-span-8 md:pl-28">
+              <div className="flex flex-wrap items-center gap-2 leading-tight">
+                <h1 className="text-2xl font-semibold">{form.display_name || 'Unnamed'}</h1>
+                {profile?.role && (
+                  <span className="rounded-full border px-2 py-0.5 text-xs capitalize text-gray-700">{profile.role}</span>
+                )}
+              </div>
+
+              <div className="mt-0.5 flex flex-wrap gap-2 text-sm text-gray-600">
                 {form.area_city || form.area_country ? (
                   <span>{[form.area_city, form.area_country].filter(Boolean).join(', ')}</span>
                 ) : (
                   <span>—</span>
                 )}
-                {profile?.created_at && (
+                {memberSince && (
                   <>
                     <span>•</span>
-                    <span>Member since {new Date(profile.created_at).toLocaleDateString()}</span>
+                    <span>Member since {memberSince}</span>
                   </>
                 )}
               </div>
 
               <div className="mt-3 flex items-center gap-2">
-                <button
-                  onClick={() => setEditing(true)}
-                  className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
-                >
+                <button onClick={() => setEditing(true)} className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50">
                   Edit Profile
                 </button>
                 <button
                   type="button"
-                  onClick={async () => { await supabase.auth.signOut(); location.href = '/'; }}
+                  onClick={async () => {
+                    await supabase.auth.signOut();
+                    location.href = '/';
+                  }}
                   className="rounded border px-3 py-1.5 text-sm"
                 >
                   Sign Out
@@ -387,17 +457,11 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* RIGHT: badges (unchanged on desktop; compact on mobile) */}
             <div className="md:col-span-4 md:relative md:h-[100px]">
               {!!clusterBadges.length ? (
-                <>
-                  <div className="absolute inset-0 hidden items-center justify-end md:flex">
-                    <BadgeCluster badges={clusterBadges} size={48} href="/profile/badges" className="gap-8" />
-                  </div>
-                  <div className="flex justify-start md:hidden">
-                    <BadgeCluster badges={clusterBadges.slice(0, 3)} size={22} href="/profile/badges" className="gap-3" />
-                  </div>
-                </>
+                <div className="absolute inset-0 hidden items-center justify-end md:flex">
+                  <BadgeCluster badges={clusterBadges} size={48} href="/profile/badges" className="gap-8" />
+                </div>
               ) : badgesMsg ? (
                 <p className="text-xs text-amber-700">{badgesMsg}</p>
               ) : null}
@@ -406,78 +470,89 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* About / Skills */}
+      {/* About + Skills (mobile collapsed) */}
       {(form.bio || skillsList.length) && (
-        <div className="rounded-xl border p-4">
-          {form.bio && (
-            <div>
-              {/* Mobile: collapsed preview; Desktop: unchanged full text */}
-              <div className="md:hidden">
-                <button
-                  onClick={() => setAboutOpen((v) => !v)}
-                  className="group flex w-full items-center justify-between text-left"
-                  aria-expanded={aboutOpen}
-                  aria-controls="about-panel"
-                >
-                  <div className="min-w-0 text-sm text-gray-800">
-                    {!aboutOpen ? (
-                      <p className="truncate">{form.bio}</p>
-                    ) : (
-                      <p id="about-panel" className="whitespace-pre-wrap">
-                        {form.bio}
-                      </p>
-                    )}
+        <div className="relative rounded-xl border px-4 pt-0 pb-4">
+          <div className="md:hidden">
+            {!aboutOpen ? (
+              <h3 className="text-center text-sm font-semibold">About</h3>
+            ) : (
+              <div id="about-skill-panel" className="space-y-3 pt-2">
+                {form.bio && <p className="whitespace-pre-wrap text-sm text-gray-800">{form.bio}</p>}
+                {skillsList.length > 0 && (
+                  <div>
+                    <h4 className="mb-1 text-sm font-semibold">Skills</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {skillsList.map((s, i) => (
+                        <span key={i} className="rounded-full border px-2 py-1 text-xs">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                  <span className="ml-2 inline-flex items-center gap-1 text-xs text-gray-600">
-                    {aboutOpen ? 'See less' : 'See more'}
-                    <svg
-                      className={['h-4 w-4 transition-transform', aboutOpen ? 'rotate-180' : 'rotate-0'].join(' ')}
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                    >
-                      <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-                    </svg>
-                  </span>
-                </button>
+                )}
               </div>
+            )}
 
-              <div className="hidden md:block">
+            <button
+              onClick={() => setAboutOpen((v) => !v)}
+              className="absolute left-1/2 -translate-x-1/2 -bottom-3 grid h-7 w-7 place-items-center rounded-full border bg-white shadow"
+              aria-expanded={aboutOpen}
+              aria-controls="about-skill-panel"
+              type="button"
+              title={aboutOpen ? 'See less' : 'See more'}
+            >
+              <svg
+                className={['h-3.5 w-3.5 transition-transform', aboutOpen ? 'rotate-180' : 'rotate-0'].join(' ')}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+              >
+                <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Desktop: unchanged */}
+          <div className="hidden md:block">
+            {form.bio && (
+              <>
                 <h3 className="mb-1 text-sm font-semibold">About</h3>
                 <p className="whitespace-pre-wrap text-sm text-gray-800">{form.bio}</p>
+              </>
+            )}
+            {skillsList.length > 0 && (
+              <div className="mt-3">
+                <h3 className="mb-1 text-sm font-semibold">Skills</h3>
+                <div className="flex flex-wrap gap-2">
+                  {skillsList.map((s, i) => (
+                    <span key={i} className="rounded-full border px-2 py-1 text-xs">
+                      {s}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-
-          {skillsList.length > 0 && (
-            <div className="mt-3">
-              <h3 className="mb-1 text-sm font-semibold">Skills</h3>
-              <div className="flex flex-wrap gap-2">
-                {skillsList.map((s, i) => (
-                  <span key={i} className="rounded-full border px-2 py-1 text-xs">{s}</span>
-                ))}
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
       {status && <p className="px-1 text-sm text-gray-700">{status}</p>}
 
-      {/* Main content */}
+      {/* Two-column layout */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-        {/* Offers: carousel on mobile, grid on desktop */}
+        {/* Offers (left) */}
         <section className="space-y-2 md:col-span-5">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold">Active Offers</h2>
-            <Link href="/offers/new" className="text-xs underline">New offer</Link>
+            <Link href="/offers/new" className="text-xs underline">
+              New offer
+            </Link>
           </div>
 
           {offersLoading && <p className="text-sm text-gray-600">Loading…</p>}
           {offersMsg && <p className="text-sm text-amber-700">{offersMsg}</p>}
-          {!offersLoading && offers.length === 0 && (
-            <p className="text-sm text-gray-600">No active offers yet.</p>
-          )}
+          {!offersLoading && offers.length === 0 && <p className="text-sm text-gray-600">No active offers yet.</p>}
 
           {/* Mobile carousel */}
           <div className="md:hidden">
@@ -523,7 +598,7 @@ export default function ProfilePage() {
             )}
           </div>
 
-          {/* Desktop grid stays as-is */}
+          {/* Desktop grid */}
           <div className="hidden md:grid md:grid-cols-1 md:gap-3">
             {offers.map((o) => (
               <OfferCard
@@ -536,7 +611,7 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        {/* Posts (unchanged) */}
+        {/* Posts (right) */}
         <section className="space-y-2 md:col-span-7">
           <h2 className="text-base font-semibold">Posts</h2>
           {userId && <PostComposer profileId={userId} />}
@@ -544,10 +619,10 @@ export default function ProfilePage() {
         </section>
       </div>
 
-      {/* EDIT DIALOG */}
+      {/* EDIT DIALOG — now scrollable */}
       {editing && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
-          <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-xl">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-xl max-h-[85vh] overflow-y-auto">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-lg font-semibold">Edit Profile</h3>
               <button onClick={() => setEditing(false)} className="rounded border px-2 py-1 text-sm hover:bg-gray-50">
@@ -562,7 +637,7 @@ export default function ProfilePage() {
               }}
               className="grid gap-4 md:grid-cols-2"
             >
-              {/* left column */}
+              {/* LEFT column */}
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium">Display name *</label>
@@ -618,8 +693,9 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* right column */}
+              {/* RIGHT column */}
               <div className="space-y-4">
+                {/* Cover */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Cover photo</label>
                   {form.cover_url ? (
@@ -633,7 +709,7 @@ export default function ProfilePage() {
                     <button
                       type="button"
                       onClick={() => coverInputRef.current?.click()}
-                      className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
+                      className="rounded px-3 py-2 text-sm border bg-[var(--hx-brand,#0f766e)] text-white hover:opacity-90"
                     >
                       Upload cover
                     </button>
@@ -660,6 +736,7 @@ export default function ProfilePage() {
                   </div>
                 </div>
 
+                {/* Avatar */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Profile picture</label>
                   {form.avatar_url ? (
@@ -675,7 +752,7 @@ export default function ProfilePage() {
                     <button
                       type="button"
                       onClick={() => avatarInputRef.current?.click()}
-                      className="rounded border px-3 py-2 text-sm hover:bg-gray-50"
+                      className="rounded px-3 py-2 text-sm border bg-[var(--hx-brand,#0f766e)] text-white hover:opacity-90"
                     >
                       Upload photo
                     </button>
@@ -707,7 +784,7 @@ export default function ProfilePage() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
+                  className="rounded bg-[var(--hx-brand,#0f766e)] px-4 py-2 text-white disabled:opacity-50"
                 >
                   {saving ? 'Saving…' : 'Save Profile'}
                 </button>
@@ -718,12 +795,38 @@ export default function ProfilePage() {
                 >
                   Cancel
                 </button>
+                {status && <span className="text-sm text-gray-700">{status}</span>}
               </div>
             </form>
-
-            {status && <p className="mt-3 text-sm text-gray-700">{status}</p>}
           </div>
         </div>
+      )}
+
+      {/* Image Cropper dialog */}
+      {cropper && (
+        <ImageCropperModal
+          src={cropper.src}
+          aspect={cropper.aspect}
+          targetWidth={cropper.targetWidth}
+          targetHeight={cropper.targetHeight}
+          title={cropper.title}
+          onCancel={() => setCropper(null)}
+          onConfirm={async (blob) => {
+            try {
+              const file = new File([blob], `${cropper.kind}.jpg`, { type: 'image/jpeg' });
+              const url = await uploadTo(cropper.kind === 'avatar' ? 'avatars' : 'covers', file);
+              if (cropper.kind === 'avatar') {
+                setForm((f) => ({ ...f, avatar_url: url }));
+              } else {
+                setForm((f) => ({ ...f, cover_url: url }));
+              }
+              setCropper(null);
+            } catch (err: any) {
+              setStatus(err?.message ?? 'Upload failed');
+              setCropper(null);
+            }
+          }}
+        />
       )}
     </section>
   );
