@@ -47,7 +47,7 @@ function ProfileContent() {
   const [loadingOffers, setLoadingOffers] = useState(false);
   const [msg, setMsg] = useState<string>('');
 
-  // badges (public view, fetched here to keep things simple and robust)
+  // badges (public view)
   const [badges, setBadges] = useState<ExpandedBadgeRow[]>([]);
   const [badgesMsg, setBadgesMsg] = useState<string>('');
 
@@ -65,9 +65,7 @@ function ProfileContent() {
 
       if (!cancelled) setProfile(error ? null : (data as ProfileRow));
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [id]);
 
   // load public badges for this profile
@@ -91,14 +89,11 @@ function ProfileContent() {
         }
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [id]);
 
   // choose highest tier per track and map to public PNGs
   const badgeIcons = useMemo(() => {
-    // pick highest tier for give/receive; include streak if present
     const best: Record<string, ExpandedBadgeRow | undefined> = {};
     for (const b of badges) {
       const tr = (b.track ?? '').toLowerCase();
@@ -113,20 +108,16 @@ function ProfileContent() {
       }
     }
 
-    // map to icon src + title
-    const out: { key: string; src: string; title: string }[] = [];
+    const out: { key: string; src: string; title: string; caption: string }[] = [];
     if (best.streak) {
-      out.push({
-        key: 'streak',
-        src: '/badges/streak_wave.png',
-        title: 'Streak',
-      });
+      out.push({ key: 'streak', src: '/badges/streak_wave.png', title: 'Streak', caption: 'Streak' });
     }
     if (best.give && (best.give.tier ?? 0) > 0) {
       out.push({
         key: `give-${best.give.tier}`,
         src: `/badges/give_rays_t${best.give.tier}.png`,
         title: `Giver • Tier ${best.give.tier}`,
+        caption: 'Giver',
       });
     }
     if (best.receive && (best.receive.tier ?? 0) > 0) {
@@ -134,6 +125,7 @@ function ProfileContent() {
         key: `receive-${best.receive.tier}`,
         src: `/badges/receive_bowl_t${best.receive.tier}.png`,
         title: `Receiver • Tier ${best.receive.tier}`,
+        caption: 'Receiver',
       });
     }
     return out;
@@ -177,9 +169,7 @@ function ProfileContent() {
         if (!cancelled) setLoadingOffers(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [id]);
 
   if (!profile) {
@@ -187,9 +177,7 @@ function ProfileContent() {
       <section className="max-w-5xl">
         <p className="p-4 text-sm text-red-700">Profile not found.</p>
         <p className="px-4">
-          <Link href="/offers" className="underline">
-            ← Back to Browse
-          </Link>
+          <Link href="/offers" className="underline">← Back to Browse</Link>
         </p>
       </section>
     );
@@ -210,7 +198,7 @@ function ProfileContent() {
         </div>
 
         {/* Header content */}
-        <div className="relative px-4 pb-4 pt-12 md:px-6">
+        <div className="relative px-4 pb-4 pt-12 md:px-8">
           {/* Avatar */}
           <div className="absolute -top-10 left-4 h-20 w-20 overflow-hidden rounded-full border-4 border-white md:left-6 md:h-24 md:w-24">
             {profile.avatar_url ? (
@@ -222,6 +210,7 @@ function ProfileContent() {
           </div>
 
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            {/* LEFT: name + meta */}
             <div className="mt-2 md:mt-0 md:pl-24">
               <div className="flex items-center gap-2">
                 <h1 className="text-xl font-semibold md:text-2xl">
@@ -235,9 +224,7 @@ function ProfileContent() {
               </div>
               <div className="mt-1 text-sm text-gray-600">
                 {profile.area_city || profile.area_country ? (
-                  <span>
-                    {[profile.area_city, profile.area_country].filter(Boolean).join(', ')}
-                  </span>
+                  <span>{[profile.area_city, profile.area_country].filter(Boolean).join(', ')}</span>
                 ) : (
                   <span>—</span>
                 )}
@@ -248,32 +235,36 @@ function ProfileContent() {
                   </>
                 )}
               </div>
+            </div>
 
-              {/* Public badges row (matches the three icons style) */}
-              <div className="mt-3">
-                {badgesMsg && <span className="text-xs text-amber-700">{badgesMsg}</span>}
-                {badgeIcons.length > 0 && (
-                  <div className="flex items-center gap-5">
-                    {badgeIcons.map((b) => (
-                      <div key={b.key} className="flex flex-col items-center">
+            {/* RIGHT: compact badges row (aligned right, with captions, clickable) */}
+            <div className="mt-3 md:mt-0 md:pr-2 flex justify-end">
+              {badgesMsg && <span className="text-xs text-amber-700">{badgesMsg}</span>}
+              {badgeIcons.length > 0 && (
+                <div className="flex items-center gap-6">
+                  {badgeIcons.map((b) => (
+                    <div key={b.key} className="flex flex-col items-center">
+                      <Link
+                        href={`/profile/badges?id=${profile.id}`}
+                        title={`See all badges — ${b.title}`}
+                        aria-label={`See all badges — ${b.title}`}
+                        className="rounded-full focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={b.src}
                           alt={b.title}
-                          title={b.title}
                           width={44}
                           height={44}
                           className="h-11 w-11 rounded-full"
                         />
-                        {/* hide labels to match compact profile look; add if you want */}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      </Link>
+                      <span className="mt-1 text-xs text-gray-700">{b.caption}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-
-            {/* No edit/sign-out buttons on public view */}
           </div>
         </div>
       </div>
@@ -292,9 +283,7 @@ function ProfileContent() {
               <h3 className="mb-1 text-sm font-semibold">Skills</h3>
               <div className="flex flex-wrap gap-2">
                 {profile.skills!.map((s, i) => (
-                  <span key={i} className="rounded-full border px-2 py-1 text-xs">
-                    {s}
-                  </span>
+                  <span key={i} className="rounded-full border px-2 py-1 text-xs">{s}</span>
                 ))}
               </div>
             </div>
