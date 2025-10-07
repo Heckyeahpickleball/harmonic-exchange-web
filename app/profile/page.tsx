@@ -68,7 +68,6 @@ export default function ProfilePage() {
   const [offersLoading, setOffersLoading] = useState(false);
   const [offersMsg, setOffersMsg] = useState('');
 
-  // Badges
   const [badges, setBadges] = useState<ExpandedBadge[] | null>(null);
   const [badgesMsg, setBadgesMsg] = useState<string>('');
 
@@ -84,10 +83,8 @@ export default function ProfilePage() {
     title: string;
   } | null>(null);
 
-  // Collapsible (mobile) — About + Skills together
   const [aboutOpen, setAboutOpen] = useState(false);
 
-  // Load current user + profile
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -114,9 +111,7 @@ export default function ProfilePage() {
         .single();
 
       if (profErr) {
-        setStatus(
-          `Heads up: profile not found yet. Try Sign Out then Sign In again to create it. (${profErr.message})`
-        );
+        setStatus(`Heads up: profile not found yet. Try Sign Out then Sign In again to create it. (${profErr.message})`);
         setLoading(false);
         return;
       }
@@ -139,7 +134,6 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Load my active offers
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
@@ -184,7 +178,6 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, [userId]);
 
-  // Load badges
   useEffect(() => {
     if (!profile?.id) return;
     let cancelled = false;
@@ -209,7 +202,6 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, [profile?.id]);
 
-  // ExpandedBadge -> BadgeCluster props
   const clusterBadges = useMemo(() => {
     const list = (badges ?? []).filter((b) => {
       const tr = String(b.track ?? '');
@@ -243,7 +235,6 @@ export default function ProfilePage() {
     [form.skillsCSV]
   );
 
-  // Stable, SSR-safe date
   const memberSince = useMemo(() => {
     if (!profile?.created_at) return null;
     const d = new Date(profile.created_at);
@@ -299,7 +290,6 @@ export default function ProfilePage() {
     }
   }
 
-  // Carousel helpers (mobile)
   const railRef = useRef<HTMLDivElement | null>(null);
   const scrollBy = (dx: number) => railRef.current?.scrollBy({ left: dx, behavior: 'smooth' });
 
@@ -328,7 +318,7 @@ export default function ProfilePage() {
             <div className="h-full w-full bg-gradient-to-r from-slate-200 to-slate-100" />
           )}
 
-          {/* Mobile-only edit button on the cover */}
+          {/* Mobile edit button on cover */}
           <button
             type="button"
             onClick={() => setEditing(true)}
@@ -347,22 +337,20 @@ export default function ProfilePage() {
         <div className="relative px-4 pb-3 pt-2 md:px-6">
           {/* MOBILE */}
           <div className="md:hidden relative">
-            {/* Larger avatar, left; name should bottom-align with avatar */}
+            {/* Avatar */}
             <div className="absolute -top-12 left-3 h-24 w-24 rounded-full border-4 border-white overflow-hidden bg-slate-100">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={form.avatar_url || '/images/placeholder-avatar.png'} alt="Avatar"
+                src={form.avatar_url || '/images/placeholder-avatar.png'}
+                alt="Avatar"
                 className="h-full w-full object-cover"
               />
             </div>
 
-            {/* Reserve width for avatar; bottom-align name with avatar bottom */}
-            <div className="pl-[120px] pt-1 min-h-[96px] flex flex-col justify-end">
-              {/* NAME — closer to avatar */}
+            {/* Name row — pulled up tight under cover, aligned to avatar bottom */}
+            <div className="pl-[116px] -mt-2">
               <div className="flex items-end gap-2">
-                <h1 className="truncate text-[22px] leading-[1.1] font-bold">
-                  {form.display_name || 'Unnamed'}
-                </h1>
+                <h1 className="truncate text-[22px] leading-[1.1] font-bold">{form.display_name || 'Unnamed'}</h1>
                 {profile?.role && (
                   <span className="mb-[2px] rounded-full border px-2 py-0.5 text-[10px] capitalize text-gray-700">
                     {profile.role}
@@ -371,17 +359,17 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* LOCATION + MEMBER SINCE — separate line, starts at left edge below avatar */}
-            <div className="-ml-[120px] pl-[120px] mt-1 text-[12px] text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis">
+            {/* Location + Member since — separate line, starts under avatar, minimal gap */}
+            <div className="pl-[116px] mt-0.5 text-[12px] text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis">
               {form.area_city || form.area_country
                 ? [form.area_city, form.area_country].filter(Boolean).join(', ')
                 : '—'}
               {memberSince && ` • Member since ${memberSince}`}
             </div>
 
-            {/* BADGES — own line, horizontally centered */}
+            {/* Badges — its own centered row, nudged up */}
             {!!clusterBadges.length && (
-              <div className="mt-2 flex justify-center">
+              <div className="mt-1 flex justify-center">
                 <BadgeCluster
                   badges={clusterBadges.slice(0, 3)}
                   size={20}
@@ -391,7 +379,7 @@ export default function ProfilePage() {
               </div>
             )}
             {!clusterBadges.length && badgesMsg && (
-              <p className="text-xs text-amber-700 mt-2 text-center">{badgesMsg}</p>
+              <p className="text-xs text-amber-700 mt-1 text-center">{badgesMsg}</p>
             )}
           </div>
 
@@ -400,7 +388,8 @@ export default function ProfilePage() {
             <div className="absolute -top-10 left-4 h-24 w-24 overflow-hidden rounded-full border-4 border-white md:left-6">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={form.avatar_url || '/images/placeholder-avatar.png'} alt="Avatar"
+                src={form.avatar_url || '/images/placeholder-avatar.png'}
+                alt="Avatar"
                 className="h-full w-full object-cover"
               />
             </div>
@@ -409,9 +398,7 @@ export default function ProfilePage() {
               <div className="flex flex-wrap items-center gap-2 leading-tight">
                 <h1 className="text-2xl font-semibold">{form.display_name || 'Unnamed'}</h1>
                 {profile?.role && (
-                  <span className="rounded-full border px-2 py-0.5 text-xs capitalize text-gray-700">
-                    {profile.role}
-                  </span>
+                  <span className="rounded-full border px-2 py-0.5 text-xs capitalize text-gray-700">{profile.role}</span>
                 )}
               </div>
 
@@ -430,15 +417,15 @@ export default function ProfilePage() {
               </div>
 
               <div className="mt-3 flex items-center gap-2">
-                <button
-                  onClick={() => setEditing(true)}
-                  className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
-                >
+                <button onClick={() => setEditing(true)} className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50">
                   Edit Profile
                 </button>
                 <button
                   type="button"
-                  onClick={async () => { await supabase.auth.signOut(); location.href = '/'; }}
+                  onClick={async () => {
+                    await supabase.auth.signOut();
+                    location.href = '/';
+                  }}
                   className="rounded border px-3 py-1.5 text-sm"
                 >
                   Sign Out
@@ -461,7 +448,7 @@ export default function ProfilePage() {
 
       {/* About + Skills (mobile collapsed, slimmer preview) */}
       {(form.bio || skillsList.length) && (
-        <div className="relative rounded-xl border px-4 pt-1 pb-5">
+        <div className="relative rounded-xl border px-4 pt-0 pb-4">
           <div className="md:hidden">
             {!aboutOpen ? (
               <h3 className="text-center text-sm font-semibold">About</h3>
@@ -473,7 +460,9 @@ export default function ProfilePage() {
                     <h4 className="mb-1 text-sm font-semibold">Skills</h4>
                     <div className="flex flex-wrap gap-2">
                       {skillsList.map((s, i) => (
-                        <span key={i} className="rounded-full border px-2 py-1 text-xs">{s}</span>
+                        <span key={i} className="rounded-full border px-2 py-1 text-xs">
+                          {s}
+                        </span>
                       ))}
                     </div>
                   </div>
@@ -513,7 +502,9 @@ export default function ProfilePage() {
                 <h3 className="mb-1 text-sm font-semibold">Skills</h3>
                 <div className="flex flex-wrap gap-2">
                   {skillsList.map((s, i) => (
-                    <span key={i} className="rounded-full border px-2 py-1 text-xs">{s}</span>
+                    <span key={i} className="rounded-full border px-2 py-1 text-xs">
+                      {s}
+                    </span>
                   ))}
                 </div>
               </div>
@@ -530,14 +521,14 @@ export default function ProfilePage() {
         <section className="space-y-2 md:col-span-5">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold">Active Offers</h2>
-            <Link href="/offers/new" className="text-xs underline">New offer</Link>
+            <Link href="/offers/new" className="text-xs underline">
+              New offer
+            </Link>
           </div>
 
           {offersLoading && <p className="text-sm text-gray-600">Loading…</p>}
           {offersMsg && <p className="text-sm text-amber-700">{offersMsg}</p>}
-          {!offersLoading && offers.length === 0 && (
-            <p className="text-sm text-gray-600">No active offers yet.</p>
-          )}
+          {!offersLoading && offers.length === 0 && <p className="text-sm text-gray-600">No active offers yet.</p>}
 
           {/* Mobile carousel */}
           <div className="md:hidden">
@@ -604,7 +595,7 @@ export default function ProfilePage() {
         </section>
       </div>
 
-      {/* EDIT DIALOG (unchanged) */}
+      {/* EDIT DIALOG (unchanged – keep your existing modal form) */}
       {editing && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
           <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-xl">
@@ -614,9 +605,7 @@ export default function ProfilePage() {
                 Close
               </button>
             </div>
-
-            {/* form unchanged for brevity */}
-            {/* ... keep your existing edit form code here ... */}
+            {/* keep your existing form fields here */}
           </div>
         </div>
       )}
