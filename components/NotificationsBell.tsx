@@ -1,3 +1,4 @@
+// components/NotificationsBell.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
@@ -34,7 +35,6 @@ export default function NotificationsBell() {
   const [rows, setRows] = useState<Notif[]>([]);
   const unread = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
 
-  // Refs for close behavior
   const rootRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeTimer = useRef<number | null>(null);
@@ -51,7 +51,6 @@ export default function NotificationsBell() {
     }
   }, []);
 
-  // Caches + de-dupe
   const titleCache = useRef(new Map<string, string>());
   const requesterCache = useRef(new Map<string, string>());
   const sigSeen = useRef<Set<string>>(new Set());
@@ -288,11 +287,19 @@ export default function NotificationsBell() {
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
-  // Close on scroll/resize
+  // Close on page scroll/resize — but NOT when scrolling inside the dropdown
   useEffect(() => {
     if (!open) return;
-    const onScroll = () => setOpen(false);
+
+    const onScroll = (ev: Event) => {
+      const panel = panelRef.current;
+      const tgt = ev.target as Node | null;
+      if (panel && tgt && panel.contains(tgt)) return; // ignore scrolls inside panel
+      setOpen(false);
+    };
+
     const onResize = () => setOpen(false);
+
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onResize);
     return () => {
@@ -301,25 +308,8 @@ export default function NotificationsBell() {
     };
   }, [open]);
 
-  // Panel leave handler that only closes if leaving the whole bell+panel region
-  const handlePanelLeave = (evt: React.MouseEvent | React.PointerEvent) => {
-    const to = (evt as any).relatedTarget as Node | null;
-    const root = rootRef.current;
-    if (root && to && root.contains(to)) {
-      // moving back onto the bell/root — keep open
-      cancelScheduledClose();
-      return;
-    }
-    scheduleClose(0);
-  };
-
   return (
-    <div
-      ref={rootRef}
-      className="relative"
-      // Note: we intentionally DO NOT close on root mouseleave anymore.
-      onMouseEnter={cancelScheduledClose}
-    >
+    <div ref={rootRef} className="relative" onMouseEnter={cancelScheduledClose}>
       <button
         className="hx-btn hx-btn--outline-primary text-sm px-3 py-2 relative"
         onClick={() => setOpen((v) => !v)}
@@ -340,13 +330,13 @@ export default function NotificationsBell() {
       {open && (
         <div
           ref={panelRef}
-          className="absolute right-0 z-50 mt-2 w-[360px] max-w-[92vw] hx-card p-0"
           role="menu"
           aria-label="Notifications"
-          onMouseEnter={cancelScheduledClose}
-          onMouseLeave={handlePanelLeave}
-          onPointerEnter={cancelScheduledClose}
-          onPointerLeave={handlePanelLeave}
+          className="
+            z-50 hx-card p-0
+            fixed inset-x-2 top-14 w-auto
+            sm:absolute sm:inset-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-[360px] sm:max-w-[92vw]
+          "
         >
           <div className="flex items-center justify-between border-b px-3 py-2">
             <strong className="text-sm">Notifications</strong>
@@ -355,7 +345,11 @@ export default function NotificationsBell() {
             </button>
           </div>
 
-          <ul className="max-h-[55vh] overflow-auto">
+          {/* stop wheel events from bubbling to parents just in case */}
+          <ul
+            className="max-h-[65vh] overflow-auto overscroll-contain scrollbar-thin"
+            onWheel={(e) => e.stopPropagation()}
+          >
             {rows.length === 0 && <li className="px-3 py-3 text-sm text-[var(--hx-muted)]">No notifications.</li>}
 
             {rows.map((n) => {

@@ -1,8 +1,7 @@
-// app/layout.tsx
 'use client';
 
 import './globals.css';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import ClientHeaderNav from '@/components/ClientHeaderNav';
 
 export default function RootLayout({ children }: { children: ReactNode }) {
