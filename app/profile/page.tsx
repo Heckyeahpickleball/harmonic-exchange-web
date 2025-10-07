@@ -396,7 +396,7 @@ export default function ProfilePage() {
               <div className="mt-1 flex justify-center">
                 <BadgeCluster
                   badges={clusterBadges.slice(0, 3)}
-                  size={20}
+                  size={40}
                   className="gap-1.5"
                   href="/profile/badges"
                 />
