@@ -74,6 +74,7 @@ export default function ProfilePage() {
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
 
+  // Cropper modal state
   const [cropper, setCropper] = useState<{
     src: string;
     aspect: number;
@@ -83,8 +84,24 @@ export default function ProfilePage() {
     title: string;
   } | null>(null);
 
+  // Mobile: collapse About+Skills
   const [aboutOpen, setAboutOpen] = useState(false);
 
+  /** Upload helper to Supabase Storage and return public URL */
+  async function uploadTo(bucket: 'avatars' | 'covers', file: File): Promise<string> {
+    if (!userId) throw new Error('Not signed in');
+    const path = `${userId}/${Date.now()}_${file.name}`;
+    const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, {
+      cacheControl: '3600',
+      upsert: true,
+      contentType: file.type,
+    });
+    if (upErr) throw upErr;
+    const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+    return data.publicUrl;
+  }
+
+  // Load current user + profile
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -134,6 +151,7 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, []);
 
+  // Load my active offers
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
@@ -178,6 +196,7 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, [userId]);
 
+  // Load badges
   useEffect(() => {
     if (!profile?.id) return;
     let cancelled = false;
@@ -202,6 +221,7 @@ export default function ProfilePage() {
     return () => { cancelled = true; };
   }, [profile?.id]);
 
+  // ExpandedBadge -> BadgeCluster props
   const clusterBadges = useMemo(() => {
     const list = (badges ?? []).filter((b) => {
       const tr = String(b.track ?? '');
@@ -235,6 +255,7 @@ export default function ProfilePage() {
     [form.skillsCSV]
   );
 
+  // SSR-stable "member since"
   const memberSince = useMemo(() => {
     if (!profile?.created_at) return null;
     const d = new Date(profile.created_at);
@@ -272,6 +293,8 @@ export default function ProfilePage() {
         area_country: form.area_country.trim() || null,
         bio: form.bio.trim() || null,
         skills,
+        avatar_url: form.avatar_url,
+        cover_url: form.cover_url,
       })
       .eq('id', userId)
       .select(
@@ -290,6 +313,7 @@ export default function ProfilePage() {
     }
   }
 
+  // Carousel helpers (mobile)
   const railRef = useRef<HTMLDivElement | null>(null);
   const scrollBy = (dx: number) => railRef.current?.scrollBy({ left: dx, behavior: 'smooth' });
 
@@ -318,7 +342,7 @@ export default function ProfilePage() {
             <div className="h-full w-full bg-gradient-to-r from-slate-200 to-slate-100" />
           )}
 
-          {/* Mobile edit button on cover */}
+          {/* Mobile edit button on cover (pencil) */}
           <button
             type="button"
             onClick={() => setEditing(true)}
@@ -337,8 +361,8 @@ export default function ProfilePage() {
         <div className="relative px-4 pb-3 pt-2 md:px-6">
           {/* MOBILE */}
           <div className="md:hidden relative">
-            {/* Avatar */}
-            <div className="absolute -top-12 left-3 h-24 w-24 rounded-full border-4 border-white overflow-hidden bg-slate-100">
+            {/* Avatar — nudged a tad left */}
+            <div className="absolute -top-12 left-0.5 h-24 w-24 rounded-full border-4 border-white overflow-hidden bg-slate-100">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={form.avatar_url || '/images/placeholder-avatar.png'}
@@ -347,10 +371,10 @@ export default function ProfilePage() {
               />
             </div>
 
-            {/* Name row — pulled up tight under cover, aligned to avatar bottom */}
-            <div className="pl-[116px] -mt-2">
+            {/* Name row — tiny gap under cover */}
+            <div className="pl-[123px] mt-0">
               <div className="flex items-end gap-2">
-                <h1 className="truncate text-[22px] leading-[1.1] font-bold">{form.display_name || 'Unnamed'}</h1>
+                <h1 className="truncate text-[25px] leading-[1.1] font-bold">{form.display_name || 'Unnamed'}</h1>
                 {profile?.role && (
                   <span className="mb-[2px] rounded-full border px-2 py-0.5 text-[10px] capitalize text-gray-700">
                     {profile.role}
@@ -359,7 +383,7 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* Location + Member since — separate line, starts under avatar, minimal gap */}
+            {/* Location + Member since */}
             <div className="pl-[116px] mt-0.5 text-[12px] text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis">
               {form.area_city || form.area_country
                 ? [form.area_city, form.area_country].filter(Boolean).join(', ')
@@ -367,7 +391,7 @@ export default function ProfilePage() {
               {memberSince && ` • Member since ${memberSince}`}
             </div>
 
-            {/* Badges — its own centered row, nudged up */}
+            {/* Badges — centered line */}
             {!!clusterBadges.length && (
               <div className="mt-1 flex justify-center">
                 <BadgeCluster
@@ -446,14 +470,14 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* About + Skills (mobile collapsed, slimmer preview) */}
+      {/* About + Skills (mobile collapsed) */}
       {(form.bio || skillsList.length) && (
         <div className="relative rounded-xl border px-4 pt-0 pb-4">
           <div className="md:hidden">
             {!aboutOpen ? (
               <h3 className="text-center text-sm font-semibold">About</h3>
             ) : (
-              <div id="about-skill-panel" className="space-y-3">
+              <div id="about-skill-panel" className="space-y-3 pt-2">
                 {form.bio && <p className="whitespace-pre-wrap text-sm text-gray-800">{form.bio}</p>}
                 {skillsList.length > 0 && (
                   <div>
@@ -595,19 +619,214 @@ export default function ProfilePage() {
         </section>
       </div>
 
-      {/* EDIT DIALOG (unchanged – keep your existing modal form) */}
+      {/* EDIT DIALOG — now scrollable */}
       {editing && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
-          <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-xl">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-xl max-h-[85vh] overflow-y-auto">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-lg font-semibold">Edit Profile</h3>
               <button onClick={() => setEditing(false)} className="rounded border px-2 py-1 text-sm hover:bg-gray-50">
                 Close
               </button>
             </div>
-            {/* keep your existing form fields here */}
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                onSave(e);
+              }}
+              className="grid gap-4 md:grid-cols-2"
+            >
+              {/* LEFT column */}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium">Display name *</label>
+                  <input
+                    className="mt-1 w-full rounded border p-2"
+                    value={form.display_name}
+                    onChange={(e) => setForm({ ...form, display_name: e.target.value })}
+                    placeholder="e.g., Sara W."
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium">City</label>
+                    <input
+                      className="mt-1 w-full rounded border p-2"
+                      value={form.area_city}
+                      onChange={(e) => setForm({ ...form, area_city: e.target.value })}
+                      placeholder="Ottawa"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium">Country</label>
+                    <input
+                      className="mt-1 w-full rounded border p-2"
+                      value={form.area_country}
+                      onChange={(e) => setForm({ ...form, area_country: e.target.value })}
+                      placeholder="Canada"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium">Skills (comma-separated)</label>
+                  <input
+                    className="mt-1 w-full rounded border p-2"
+                    value={form.skillsCSV}
+                    onChange={(e) => setForm({ ...form, skillsCSV: e.target.value })}
+                    placeholder="coaching, event planning, web design"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium">Short bio</label>
+                  <textarea
+                    className="mt-1 w-full rounded border p-2"
+                    rows={5}
+                    value={form.bio}
+                    onChange={(e) => setForm({ ...form, bio: e.target.value })}
+                    placeholder="What you care about and want to gift to the community..."
+                  />
+                </div>
+              </div>
+
+              {/* RIGHT column */}
+              <div className="space-y-4">
+                {/* Cover */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Cover photo</label>
+                  {form.cover_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={form.cover_url} alt="Cover" className="max-h-40 w-full rounded border object-cover" />
+                  ) : (
+                    <div className="rounded border p-4 text-sm text-gray-500">No cover set</div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => coverInputRef.current?.click()}
+                      className="rounded px-3 py-2 text-sm border bg-[var(--hx-brand,#0f766e)] text-white hover:opacity-90"
+                    >
+                      Upload cover
+                    </button>
+                    <input
+                      ref={coverInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.currentTarget.files?.[0];
+                        if (!file) return;
+                        const src = URL.createObjectURL(file);
+                        setCropper({
+                          src,
+                          aspect: 3,
+                          targetWidth: 1200,
+                          targetHeight: 400,
+                          kind: 'cover',
+                          title: 'Position your cover',
+                        });
+                        e.currentTarget.value = '';
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Avatar */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Profile picture</label>
+                  {form.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={form.avatar_url} alt="Avatar" className="h-32 w-32 rounded-full border object-cover" />
+                  ) : (
+                    <div className="grid h-32 w-32 place-items-center rounded-full border text-sm text-gray-500">
+                      No avatar
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => avatarInputRef.current?.click()}
+                      className="rounded px-3 py-2 text-sm border bg-[var(--hx-brand,#0f766e)] text-white hover:opacity-90"
+                    >
+                      Upload photo
+                    </button>
+                    <input
+                      ref={avatarInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.currentTarget.files?.[0];
+                        if (!file) return;
+                        const src = URL.createObjectURL(file);
+                        setCropper({
+                          src,
+                          aspect: 1,
+                          targetWidth: 512,
+                          targetHeight: 512,
+                          kind: 'avatar',
+                          title: 'Position your photo',
+                        });
+                        e.currentTarget.value = '';
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="md:col-span-2 mt-2 flex items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded bg-[var(--hx-brand,#0f766e)] px-4 py-2 text-white disabled:opacity-50"
+                >
+                  {saving ? 'Saving…' : 'Save Profile'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditing(false)}
+                  className="rounded border px-4 py-2"
+                >
+                  Cancel
+                </button>
+                {status && <span className="text-sm text-gray-700">{status}</span>}
+              </div>
+            </form>
           </div>
         </div>
+      )}
+
+      {/* Image Cropper dialog */}
+      {cropper && (
+        <ImageCropperModal
+          src={cropper.src}
+          aspect={cropper.aspect}
+          targetWidth={cropper.targetWidth}
+          targetHeight={cropper.targetHeight}
+          title={cropper.title}
+          onCancel={() => setCropper(null)}
+          onConfirm={async (blob) => {
+            try {
+              const file = new File([blob], `${cropper.kind}.jpg`, { type: 'image/jpeg' });
+              const url = await uploadTo(cropper.kind === 'avatar' ? 'avatars' : 'covers', file);
+              if (cropper.kind === 'avatar') {
+                setForm((f) => ({ ...f, avatar_url: url }));
+              } else {
+                setForm((f) => ({ ...f, cover_url: url }));
+              }
+              setCropper(null);
+            } catch (err: any) {
+              setStatus(err?.message ?? 'Upload failed');
+              setCropper(null);
+            }
+          }}
+        />
       )}
     </section>
   );
