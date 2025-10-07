@@ -35,6 +35,8 @@ function BrowseOffersPage() {
 
   const [offers, setOffers] = useState<OfferRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [warn, setWarn] = useState<string | null>(null);
 
   // pagination (client-side)
   const PAGE_SIZE = 12;
@@ -56,7 +58,10 @@ function BrowseOffersPage() {
           setSelectedTags(found);
         }
       })
-      .catch(console.error);
+      .catch((e) => {
+        console.error(e);
+        setWarn('Could not load tags (showing all offers without tag filter).');
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -83,26 +88,23 @@ function BrowseOffersPage() {
 
   const tagIds = useMemo(() => selectedTags.map((t) => t.id).filter((id) => id > 0), [selectedTags]);
 
-  // Helper: build base query (used for title search and owner search)
-  function makeBaseQuery() {
-    const tagJoin = tagIds.length ? 'offer_tags!inner' : 'offer_tags';
+  // Build the base offers query WITHOUT joins (joins can be blocked by RLS for public users)
+  function baseOffersQuery() {
     let qb = supabase
       .from('offers')
       .select(
-        `
-        id,
-        title,
-        offer_type,
-        is_online,
-        city,
-        country,
-        images,
-        status,
-        created_at,
-        owner_id,
-        profiles!inner ( id, display_name ),
-        ${tagJoin} ( tag_id, tags(name) )
-      `
+        [
+          'id',
+          'title',
+          'offer_type',
+          'is_online',
+          'city',
+          'country',
+          'images',
+          'status',
+          'created_at',
+          'owner_id',
+        ].join(',')
       )
       .eq('status', 'active')
       .order('created_at', { ascending: false })
@@ -111,79 +113,137 @@ function BrowseOffersPage() {
     if (type !== 'all types') qb = qb.eq('offer_type', type);
     if (onlineOnly) qb = qb.eq('is_online', true);
     if (!onlineOnly && city.trim()) qb = qb.ilike('city', `%${city.trim()}%`);
-    if (tagIds.length) qb = qb.in('offer_tags.tag_id', tagIds);
 
     return qb;
+  }
+
+  // Helper: get offer IDs that have ALL selected tagIds
+  async function filterIdsByAllTags(ids: number[]): Promise<string[]> {
+    if (!ids.length) return [];
+
+    try {
+      const { data, error } = await supabase
+        .from('offer_tags')
+        .select('offer_id, tag_id')
+        .in('tag_id', ids)
+        .limit(10000);
+
+      if (error) throw error;
+
+      // Count tags per offer_id and require all selected ids to be present
+      const byOffer = new Map<string, Set<number>>();
+      for (const row of data || []) {
+        const k = row.offer_id as string;
+        const t = row.tag_id as number;
+        if (!byOffer.has(k)) byOffer.set(k, new Set());
+        byOffer.get(k)!.add(t);
+      }
+      const result: string[] = [];
+      const need = new Set(ids);
+      for (const [offerId, got] of byOffer) {
+        let ok = true;
+        for (const needId of need) {
+          if (!got.has(needId)) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) result.push(offerId);
+      }
+      return result;
+    } catch (e) {
+      console.warn('Tag filter disabled due to RLS or error:', e);
+      setWarn('Tag filtering unavailable right now (showing results without tag filter).');
+      return [];
+    }
   }
 
   // --- Load offers whenever filters change
   async function load() {
     setLoading(true);
+    setErr(null);
+    setWarn(null);
     try {
       const qTrim = q.trim();
       const like = `%${qTrim}%`;
 
-      // 1) Title search (or all active if no q)
-      const titleQB = makeBaseQuery();
-      const byTitle = await (qTrim ? titleQB.ilike('title', like) : titleQB);
+      // 0) If tag filter is on, compute set of offer IDs that match ALL tags
+      let restrictToIds: string[] | null = null;
+      if (tagIds.length) {
+        const ids = await filterIdsByAllTags(tagIds);
+        // If we could not read offer_tags (RLS) we just skip tag filtering gracefully
+        restrictToIds = ids.length ? ids : [];
+        // If result is an empty array, no offers match; short-circuit
+        if (restrictToIds.length === 0) {
+          setOffers([]);
+          setPage(1);
+          setLoading(false);
+          return;
+        }
+      }
 
-      // 2) Owner search: find matching profile IDs then fetch offers by owner_id
-      let byOwnerData: any[] = [];
+      // 1) Title search (or all)
+      let qb = baseOffersQuery();
+      if (restrictToIds) qb = qb.in('id', restrictToIds);
+      if (qTrim) qb = qb.ilike('title', like);
+      const { data: byTitleRows, error: byTitleErr } = await qb;
+      if (byTitleErr) throw byTitleErr;
+
+      // 2) Optional owner-name search (best-effort; ignore if blocked by RLS)
+      let byOwnerRows: any[] = [];
       if (qTrim) {
-        const { data: profs } = await supabase
-          .from('profiles')
-          .select('id')
-          .ilike('display_name', like)
-          .limit(100);
+        try {
+          const { data: profs } = await supabase
+            .from('profiles')
+            .select('id')
+            .ilike('display_name', like)
+            .limit(100);
 
-        const ownerIds = ((profs || []) as { id: string }[]).map((p) => p.id);
-        if (ownerIds.length) {
-          const ownerQB = makeBaseQuery().in('owner_id', ownerIds);
-          const byOwner = await ownerQB;
-          byOwnerData = (byOwner?.data as any[]) || [];
+          const ownerIds = (profs || []).map((p: any) => p.id);
+          if (ownerIds.length) {
+            let qb2 = baseOffersQuery().in('owner_id', ownerIds);
+            if (restrictToIds) qb2 = qb2.in('id', restrictToIds);
+            const { data: ownerData } = await qb2;
+            byOwnerRows = ownerData || [];
+          }
+        } catch (e) {
+          // If profiles is protected, just skip owner search
+          console.warn('Owner search skipped due to RLS:', e);
         }
       }
 
-      const rows = ([] as any[]).concat((byTitle?.data as any[]) || [], byOwnerData);
-
-      // De-dupe by offer id and collect tags
-      const map = new Map<
-        string,
-        OfferRow & { tags?: { id: number; name: string }[]; owner_id?: string; owner_name?: string }
-      >();
-
-      for (const row of rows) {
-        const base =
-          map.get(row.id) ??
-          ({
-            id: row.id,
-            title: row.title,
-            offer_type: row.offer_type,
-            is_online: row.is_online,
-            city: row.city,
-            country: row.country,
-            status: row.status ?? 'active',
-            images: row.images ?? [],
-            created_at: row.created_at,
-            owner_id: row.owner_id,
-            owner_name: row.profiles?.display_name ?? '—',
-            tags: [],
-          } as OfferRow & { tags?: { id: number; name: string }[]; owner_id?: string; owner_name?: string });
-
-        const rowTags: { id: number; name: string }[] = (row.offer_tags ?? [])
-          .map((ot: any) => ({ id: ot?.tag_id as number, name: ot?.tags?.name as string }))
-          .filter((t: { id: number; name: string }) => t.id && t.name);
-
-        for (const t of rowTags) {
-          if (!base.tags!.some((x) => x.id === t.id)) base.tags!.push(t);
-        }
-        map.set(row.id, base);
+      // Merge + de-dupe
+      const allRows = ([] as any[]).concat(byTitleRows || [], byOwnerRows || []);
+      const seen = new Set<string>();
+      const cleaned: OfferRow[] = [];
+      for (const o of allRows) {
+        if (seen.has(o.id)) continue;
+        seen.add(o.id);
+        cleaned.push({
+          id: o.id,
+          title: o.title ?? 'Untitled offer',
+          offer_type: o.offer_type ?? 'other',
+          is_online: !!o.is_online,
+          city: o.city ?? null,
+          country: o.country ?? null,
+          status: o.status ?? 'active',
+          images: Array.isArray(o.images) ? o.images : o.images ? [o.images] : [],
+          created_at: o.created_at,
+          // OfferCard ignores missing owner name; we’re not joining profiles here.
+        } as OfferRow);
       }
 
-      setOffers(Array.from(map.values()));
+      setOffers(cleaned);
       setPage(1);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.error('[BrowseOffers] load error:', e);
+      const msg =
+        e?.message ||
+        e?.error?.message ||
+        e?.details ||
+        (typeof e === 'string' ? e : '') ||
+        'Failed to load offers.';
+      setErr(msg);
       setOffers([]);
     } finally {
       setLoading(false);
@@ -248,6 +308,18 @@ function BrowseOffersPage() {
         onChange={setSelectedTags}
         placeholder="Filter by tag(s)"
       />
+
+      {/* Messages */}
+      {err && (
+        <p className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+          {err}
+        </p>
+      )}
+      {warn && !err && (
+        <p className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          {warn}
+        </p>
+      )}
 
       {/* Results */}
       {loading ? (
