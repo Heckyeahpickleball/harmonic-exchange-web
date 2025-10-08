@@ -358,7 +358,7 @@ export default function ProfilePage() {
         </div>
 
         {/* Header content */}
-        <div className="relative px-4 pb-3 pt-2 md:px-6">
+        <div className="relative px-4 pb- pt-1 md:px-6">
           {/* MOBILE */}
           <div className="md:hidden relative">
             {/* Avatar — nudged a tad left */}
