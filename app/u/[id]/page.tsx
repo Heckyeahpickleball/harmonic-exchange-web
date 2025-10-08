@@ -1,7 +1,7 @@
 // /app/u/[id]/page.tsx
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
@@ -33,6 +33,75 @@ type ExpandedBadgeRow = {
   earned_at: string | null;
 };
 
+/* ---------------- Mobile-only offers rail ---------------- */
+function MobileOffersRail({ offers }: { offers: OfferRow[] }) {
+  if (!offers || offers.length === 0) return null;
+
+  return (
+    <div className="sm:hidden">
+      <div className="mb-2 flex items-center justify-between px-1">
+        <h3 className="text-sm font-semibold">Offers</h3>
+        <a href="#offers" className="text-xs underline">See list</a>
+      </div>
+
+      <div className="-mx-4 overflow-x-auto px-4 overscroll-x-contain">
+        <ul className="flex snap-x snap-mandatory gap-3 pb-1">
+          {offers.map((o) => {
+            const thumb =
+              Array.isArray(o.images) && o.images.length > 0 ? o.images[0] : null;
+            return (
+              <li key={o.id} className="snap-start" style={{ minWidth: '13.5rem' }}>
+                <a href={`/offers/${o.id}`} className="block overflow-hidden rounded-xl border bg-white">
+                  <div className="relative h-32 w-full bg-gray-100">
+                    {thumb ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={thumb} alt={o.title} className="h-full w-full object-cover" loading="lazy" />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-xs text-gray-400">No image</div>
+                    )}
+                  </div>
+                  <div className="p-2">
+                    <div className="line-clamp-2 text-[13px] font-medium leading-snug">{o.title}</div>
+                    <div className="mt-0.5 text-[11px] text-gray-600">
+                      {o.is_online ? 'Online' : [o.city, o.country].filter(Boolean).join(', ') || '—'}
+                    </div>
+                  </div>
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+}
+/* --------------------------------------------------------- */
+
+/* -------- Collapsible About (matches personal profile) --- */
+function AboutCollapsible({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <h3 className="mb-1 text-sm font-semibold">About</h3>
+      <div className={['text-sm text-gray-800', open ? '' : 'line-clamp-5'].join(' ')}>
+        <p className="whitespace-pre-wrap">{text}</p>
+      </div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="mt-1 inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-700 hover:bg-gray-100"
+        aria-expanded={open}
+      >
+        <span>{open ? 'Show less' : 'Show more'}</span>
+        <span className={['inline-block transition-transform', open ? 'rotate-180' : 'rotate-0'].join(' ')} aria-hidden>
+          ▾
+        </span>
+      </button>
+    </div>
+  );
+}
+/* --------------------------------------------------------- */
+
 export default function PublicProfilePage() {
   return (
     <Suspense fallback={<div className="p-4 text-sm text-gray-600">Loading…</div>}>
@@ -58,16 +127,14 @@ function ProfileContent() {
   const [badges, setBadges] = useState<ExpandedBadgeRow[]>([]);
   const [badgesMsg, setBadgesMsg] = useState<string>('');
 
-  // load viewer
+  // load viewer — keep Message button visible (disabled while unknown)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const { data } = await supabase.auth.getUser();
       if (!cancelled) setViewerId(data?.user?.id ?? null);
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   // load profile
@@ -84,9 +151,7 @@ function ProfileContent() {
 
       if (!cancelled) setProfile(error ? null : (data as ProfileRow));
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [id]);
 
   // load public badges for this profile
@@ -103,58 +168,34 @@ function ProfileContent() {
 
         if (error) throw error;
         if (!cancelled) setBadges((data as ExpandedBadgeRow[]) ?? []);
-      } catch (e: any) {
+      } catch {
         if (!cancelled) {
           setBadges([]);
           setBadgesMsg('Badges unavailable');
         }
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [id]);
 
   // choose highest tier per track and map to public PNGs
   const badgeIcons = useMemo(() => {
-    // pick highest tier for give/receive; include streak if present
     const best: Record<string, ExpandedBadgeRow | undefined> = {};
     for (const b of badges) {
       const tr = (b.track ?? '').toLowerCase();
       if (!tr) continue;
-      if (tr === 'streak') {
-        best.streak = b;
-        continue;
-      }
+      if (tr === 'streak') { best.streak = b; continue; }
       if (tr === 'give' || tr === 'receive') {
         const prev = best[tr];
         if (!prev || (b.tier ?? 0) > (prev.tier ?? 0)) best[tr] = b;
       }
     }
-
-    // map to icon src + title
     const out: { key: string; src: string; title: string }[] = [];
-    if (best.streak) {
-      out.push({
-        key: 'streak',
-        src: '/badges/streak_wave.png',
-        title: 'Streak',
-      });
-    }
-    if (best.give && (best.give.tier ?? 0) > 0) {
-      out.push({
-        key: `give-${best.give.tier}`,
-        src: `/badges/give_rays_t${best.give.tier}.png`,
-        title: `Giver • Tier ${best.give.tier}`,
-      });
-    }
-    if (best.receive && (best.receive.tier ?? 0) > 0) {
-      out.push({
-        key: `receive-${best.receive.tier}`,
-        src: `/badges/receive_bowl_t${best.receive.tier}.png`,
-        title: `Receiver • Tier ${best.receive.tier}`,
-      });
-    }
+    if (best.streak) out.push({ key: 'streak', src: '/badges/streak_wave.png', title: 'Streak' });
+    if (best.give && (best.give.tier ?? 0) > 0)
+      out.push({ key: `give-${best.give.tier}`, src: `/badges/give_rays_t${best.give.tier}.png`, title: `Giver • Tier ${best.give.tier}` });
+    if (best.receive && (best.receive.tier ?? 0) > 0)
+      out.push({ key: `receive-${best.receive.tier}`, src: `/badges/receive_bowl_t${best.receive.tier}.png`, title: `Receiver • Tier ${best.receive.tier}` });
     return out;
   }, [badges]);
 
@@ -196,19 +237,19 @@ function ProfileContent() {
         if (!cancelled) setLoadingOffers(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [id]);
 
   // Start (or resume) a chat with this profile
   async function startChat() {
-    if (!viewerId || !profile) return;
-    if (viewerId === profile.id) return; // don't message yourself
+    if (!profile) return;
+
+    // If viewing own profile, do nothing (button visible but disabled)
+    if (viewerId && viewerId === profile.id) return;
 
     setChatBusy(true);
     try {
-      // Existing request between viewer and this profile? (either direction)
+      // Check for an existing request between viewer and this profile
       const { data: existing } = await supabase
         .from('requests')
         .select('id, offer_id, requester_profile_id, offers!inner(id, owner_id)')
@@ -223,7 +264,7 @@ function ProfileContent() {
         return;
       }
 
-      // Otherwise, pick this user's most recent active offer to anchor a new request
+      // Otherwise, pick most recent active offer to anchor a new request
       const { data: peerOffers, error: offersErr } = await supabase
         .from('offers')
         .select('id')
@@ -241,7 +282,7 @@ function ProfileContent() {
         return;
       }
 
-      // Create a minimal request so the chat is immediately sendable
+      // Create a minimal request so chat is sendable
       const { data: newReq, error: insertErr } = await supabase
         .from('requests')
         .insert([{ offer_id: offerId, requester_profile_id: viewerId }])
@@ -251,7 +292,7 @@ function ProfileContent() {
       if (insertErr) throw insertErr;
 
       router.push(`/messages?request=${newReq.id}`);
-    } catch (e) {
+    } catch {
       router.push(`/messages?thread=${profile.id}`);
     } finally {
       setChatBusy(false);
@@ -263,20 +304,22 @@ function ProfileContent() {
       <section className="max-w-5xl">
         <p className="p-4 text-sm text-red-700">Profile not found.</p>
         <p className="px-4">
-          <Link href="/offers" className="underline">
-            ← Back to Browse
-          </Link>
+          <Link href="/offers" className="underline">← Back to Browse</Link>
         </p>
       </section>
     );
   }
 
-  const isOwner = viewerId && viewerId === profile.id;
+  // Keep the Message button present (no flicker): hide ONLY if definitely own profile
+  const isOwner = viewerId ? viewerId === profile.id : false;
+  const showMessageButton = !isOwner; // visible while viewer unknown or different user
+  const messageDisabled = chatBusy || !viewerId; // disable until viewerId known or while sending
+
   const badgesHref = `/profile/badges?id=${profile.id}`;
 
   return (
     <section className="mx-auto max-w-5xl space-y-4">
-      {/* Header card (read-only) */}
+      {/* Header card */}
       <div className="overflow-hidden rounded-xl border">
         {/* Cover */}
         <div className="relative h-40 w-full md:h-56">
@@ -288,7 +331,6 @@ function ProfileContent() {
           )}
         </div>
 
-        {/* Header content */}
         <div className="relative px-4 pb-4 pt-12 md:px-6">
           {/* Avatar */}
           <div className="absolute -top-10 left-4 h-20 w-20 overflow-hidden rounded-full border-4 border-white md:left-6 md:h-24 md:w-24">
@@ -314,9 +356,7 @@ function ProfileContent() {
               </div>
               <div className="mt-1 text-sm text-gray-600">
                 {profile.area_city || profile.area_country ? (
-                  <span>
-                    {[profile.area_city, profile.area_country].filter(Boolean).join(', ')}
-                  </span>
+                  <span>{[profile.area_city, profile.area_country].filter(Boolean).join(', ')}</span>
                 ) : (
                   <span>—</span>
                 )}
@@ -328,7 +368,7 @@ function ProfileContent() {
                 )}
               </div>
 
-              {/* Desktop badges — NOW CLICKABLE */}
+              {/* Desktop badges — clickable */}
               <div className="mt-3 hidden sm:block">
                 {badgesMsg && <span className="text-xs text-amber-700">{badgesMsg}</span>}
                 {badgeIcons.length > 0 && (
@@ -337,7 +377,7 @@ function ProfileContent() {
                       <Link
                         key={b.key}
                         href={badgesHref}
-                        className="group focus:outline-none focus:ring-2 focus:ring-blue-400 rounded-full"
+                        className="group rounded-full focus:outline-none focus:ring-2 focus:ring-blue-400"
                         title={`See all badges — ${b.title}`}
                         aria-label={`See all badges — ${b.title}`}
                       >
@@ -356,7 +396,7 @@ function ProfileContent() {
                 )}
               </div>
 
-              {/* Mobile badges + Message button to the RIGHT — NOW CLICKABLE */}
+              {/* Mobile badges + Message button (right) — clickable & stable */}
               <div className="mt-3 sm:hidden">
                 {badgesMsg && <span className="text-xs text-amber-700">{badgesMsg}</span>}
                 <div className="mt-1 flex items-center justify-between">
@@ -365,7 +405,7 @@ function ProfileContent() {
                       <Link
                         key={b.key}
                         href={badgesHref}
-                        className="group focus:outline-none focus:ring-2 focus:ring-blue-400 rounded-full"
+                        className="group rounded-full focus:outline-none focus:ring-2 focus:ring-blue-400"
                         title={`See all badges — ${b.title}`}
                         aria-label={`See all badges — ${b.title}`}
                       >
@@ -382,11 +422,11 @@ function ProfileContent() {
                     ))}
                   </div>
 
-                  {!isOwner && (
+                  {showMessageButton && (
                     <button
                       type="button"
                       onClick={startChat}
-                      disabled={!viewerId || chatBusy}
+                      disabled={messageDisabled}
                       className="ml-3 shrink-0 rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-60"
                       title="Message"
                       aria-label="Message this member"
@@ -400,11 +440,11 @@ function ProfileContent() {
 
             {/* Desktop actions (right side) */}
             <div className="hidden md:flex items-center gap-2 md:pr-1">
-              {!isOwner && (
+              {showMessageButton && (
                 <button
                   type="button"
                   onClick={startChat}
-                  disabled={!viewerId || chatBusy}
+                  disabled={messageDisabled}
                   className="hx-btn hx-btn--primary text-sm disabled:opacity-60"
                   title="Message"
                   aria-label="Message this member"
@@ -417,15 +457,10 @@ function ProfileContent() {
         </div>
       </div>
 
-      {/* About/skills (read-only) */}
+      {/* About/skills (collapsible About to match your own profile) */}
       {(profile.bio || (profile.skills?.length ?? 0) > 0) && (
         <div className="rounded-xl border p-4">
-          {profile.bio && (
-            <>
-              <h3 className="mb-1 text-sm font-semibold">About</h3>
-              <p className="whitespace-pre-wrap text-sm text-gray-800">{profile.bio}</p>
-            </>
-          )}
+          {profile.bio && <AboutCollapsible text={profile.bio} />}
           {(profile.skills?.length ?? 0) > 0 && (
             <div className="mt-3">
               <h3 className="mb-1 text-sm font-semibold">Skills</h3>
@@ -441,10 +476,10 @@ function ProfileContent() {
         </div>
       )}
 
-      {/* Two-column layout to match /profile */}
+      {/* Two-column layout */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-        {/* Offers (left) */}
-        <section className="space-y-2 md:col-span-5">
+        {/* Offers (left column list on desktop) */}
+        <section id="offers" className="space-y-2 md:col-span-5">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold">Active Offers</h2>
           </div>
@@ -455,15 +490,18 @@ function ProfileContent() {
             <p className="text-sm text-gray-600">No active offers yet.</p>
           )}
 
-          <div className="grid grid-cols-1 gap-3">
+          <div className="hidden grid-cols-1 gap-3 sm:grid">
             {offers.map((o) => (
               <OfferCard key={o.id} offer={o} />
             ))}
           </div>
         </section>
 
-        {/* Posts (right) – read-only feed */}
+        {/* Posts (right) */}
         <section className="space-y-2 md:col-span-7">
+          {/* MOBILE-ONLY: Offers carousel ABOVE composer/feed */}
+          <MobileOffersRail offers={offers} />
+
           <h2 className="text-base font-semibold">Posts</h2>
           <UserFeed profileId={profile.id} />
         </section>
