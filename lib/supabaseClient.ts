@@ -8,8 +8,8 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
  * Avoids reconnecting Realtime channels on re-renders/HMR.
  */
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
 // Allow stashing a singleton on the global.
 declare global {
@@ -19,6 +19,7 @@ declare global {
 
 function makeBrowserClient(): SupabaseClient {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    // Soft warn rather than throwing so local builds don't crash hard.
     console.warn(
       'Supabase env vars are missing: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY'
     );
