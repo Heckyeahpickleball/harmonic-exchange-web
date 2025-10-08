@@ -1,17 +1,26 @@
+// components/MessagesUnreadBadge.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 /** Small bubble that shows how many unread chat messages you have. */
 export default function MessagesUnreadBadge() {
   const [uid, setUid] = useState<string | null>(null);
   const [count, setCount] = useState(0);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   // fetch auth uid
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
+      if (!mounted.current) return;
       setUid(data?.user?.id ?? null);
     })();
   }, []);
@@ -25,6 +34,7 @@ export default function MessagesUnreadBadge() {
       .eq('profile_id', uid)
       .eq('type', 'message_received')
       .is('read_at', null);
+    if (!mounted.current) return;
     setCount(count ?? 0);
   }
 
@@ -34,7 +44,7 @@ export default function MessagesUnreadBadge() {
     void refresh();
 
     const chIns = supabase
-      .channel('realtime:msg_unread:ins')
+      .channel(`realtime:msg_unread:ins:${uid}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications', filter: `profile_id=eq.${uid}` },
@@ -48,7 +58,7 @@ export default function MessagesUnreadBadge() {
       .subscribe();
 
     const chUpd = supabase
-      .channel('realtime:msg_unread:upd')
+      .channel(`realtime:msg_unread:upd:${uid}`)
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `profile_id=eq.${uid}` },

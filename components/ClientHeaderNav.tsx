@@ -2,7 +2,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import NotificationsBell from '@/components/NotificationsBell';
@@ -90,10 +90,14 @@ export default function ClientHeaderNav() {
   const [role, setRole] = useState<Role>('user');
   const [busy, setBusy] = useState(false);
 
-  // desktop dropdowns
+  // dropdowns
   const [openExchange, setOpenExchange] = useState(false);
   const [openChapters, setOpenChapters] = useState(false);
   const [openProfile, setOpenProfile] = useState(false);
+
+  const exchangeRef = useRef<HTMLDivElement | null>(null);
+  const chaptersRef = useRef<HTMLDivElement | null>(null);
+  const profileRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -105,6 +109,32 @@ export default function ClientHeaderNav() {
         if (p?.role) setRole(p.role as Role);
       }
     })();
+  }, []);
+
+  // click-outside + Escape to close dropdowns (no onMouseLeave)
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      const t = e.target as Node | null;
+      const hitExchange = exchangeRef.current && t && exchangeRef.current.contains(t);
+      const hitChapters = chaptersRef.current && t && chaptersRef.current.contains(t);
+      const hitProfile = profileRef.current && t && profileRef.current.contains(t);
+      if (!hitExchange) setOpenExchange(false);
+      if (!hitChapters) setOpenChapters(false);
+      if (!hitProfile) setOpenProfile(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setOpenExchange(false);
+        setOpenChapters(false);
+        setOpenProfile(false);
+      }
+    }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
   }, []);
 
   async function signOut() {
@@ -122,23 +152,22 @@ export default function ClientHeaderNav() {
 
   return (
     <header className="w-full border-b bg-white">
-      {/* ===== Desktop / tablet (unchanged) ===== */}
+      {/* ===== Desktop / tablet ===== */}
       <nav className="hidden md:flex items-center justify-between gap-3 py-2 max-w-6xl mx-auto px-4">
-        {/* LEFT: brand + primary links */}
+        {/* LEFT */}
         <div className="flex flex-wrap items-center gap-3">
           <Link href="/" className="underline-offset-4 hover:underline">Home</Link>
 
-          {/* Global Exchange (no dropdown) */}
           <Link href="/global" className="hx-btn hx-btn--secondary text-sm px-3 py-2">
             Global Exchange
           </Link>
 
           {/* Exchange menu */}
-          <div className="relative">
+          <div className="relative" ref={exchangeRef}>
             <button
               className="hx-btn hx-btn--secondary text-sm px-3 py-2"
               onClick={() => {
-                setOpenExchange(v => !v);
+                setOpenExchange((v) => !v);
                 setOpenChapters(false);
                 setOpenProfile(false);
               }}
@@ -148,7 +177,7 @@ export default function ClientHeaderNav() {
               Exchange
             </button>
             {openExchange && (
-              <div className="absolute z-50 mt-2 w-56 hx-card p-2" role="menu" onMouseLeave={() => setOpenExchange(false)}>
+              <div className="absolute z-50 mt-2 w-56 hx-card p-2" role="menu">
                 <Link href="/browse" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
                   Browse Offers
                 </Link>
@@ -163,11 +192,11 @@ export default function ClientHeaderNav() {
           </div>
 
           {/* Local Chapters menu */}
-          <div className="relative">
+          <div className="relative" ref={chaptersRef}>
             <button
               className="hx-btn hx-btn--secondary text-sm px-3 py-2"
               onClick={() => {
-                setOpenChapters(v => !v);
+                setOpenChapters((v) => !v);
                 setOpenExchange(false);
                 setOpenProfile(false);
               }}
@@ -177,7 +206,7 @@ export default function ClientHeaderNav() {
               Local Chapters
             </button>
             {openChapters && (
-              <div className="absolute z-50 mt-2 w-60 hx-card p-2" role="menu" onMouseLeave={() => setOpenChapters(false)}>
+              <div className="absolute z-50 mt-2 w-60 hx-card p-2" role="menu">
                 <Link href="/chapters" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
                   Explore Chapters
                 </Link>
@@ -189,11 +218,11 @@ export default function ClientHeaderNav() {
           </div>
 
           {/* Profile menu */}
-          <div className="relative">
+          <div className="relative" ref={profileRef}>
             <button
               className="hx-btn hx-btn--secondary text-sm px-3 py-2"
               onClick={() => {
-                setOpenProfile(v => !v);
+                setOpenProfile((v) => !v);
                 setOpenExchange(false);
                 setOpenChapters(false);
               }}
@@ -203,12 +232,12 @@ export default function ClientHeaderNav() {
               Profile
             </button>
             {openProfile && (
-              <div className="absolute z-50 mt-2 w-56 hx-card p-2" role="menu" onMouseLeave={() => setOpenProfile(false)}>
+              <div className="absolute z-50 mt-2 w-56 hx-card p-2" role="menu">
                 <Link href="/profile" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
                   My Profile
                 </Link>
                 <Link href="/messages" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
-                  Inbox <span className="ml-1 align-middle"><MessagesUnreadBadge /></span>
+                  Messages <span className="ml-1 align-middle"><MessagesUnreadBadge /></span>
                 </Link>
               </div>
             )}
@@ -219,7 +248,7 @@ export default function ClientHeaderNav() {
           )}
         </div>
 
-        {/* RIGHT: bell + auth */}
+        {/* RIGHT */}
         <div className="flex items-center gap-2">
           <NotificationsBell />
           {!uid ? (
@@ -239,28 +268,41 @@ export default function ClientHeaderNav() {
         </div>
       </nav>
 
-      {/* ===== Mobile (icons in a single line; bell + sign-in above) ===== */}
+      {/* ===== Mobile: Admin button + bell/sign-out on same line ===== */}
       <div className="md:hidden px-3 pt-2 pb-1">
-        <div className="flex items-center justify-end gap-2">
-          <NotificationsBell />
-          {!uid ? (
-            <Link
-              href="/sign-in"
-              className="inline-flex items-center rounded-full border border-[var(--hx-brand)] text-[var(--hx-brand)] px-3 py-1.5 text-sm font-medium hover:bg-emerald-50"
-            >
-              Sign in
-            </Link>
-          ) : (
-            <button
-              onClick={signOut}
-              disabled={busy}
-              className="inline-flex items-center rounded-full border border-gray-300 text-gray-700 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
-            >
-              {busy ? '…' : 'Sign out'}
-            </button>
-          )}
+        <div className="flex items-center justify-between">
+          <div>
+            {showAdmin && (
+              <Link
+                href="/admin"
+                className="inline-flex items-center rounded-full border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Admin
+              </Link>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <NotificationsBell />
+            {!uid ? (
+              <Link
+                href="/sign-in"
+                className="inline-flex items-center rounded-full border border-[var(--hx-brand)] text-[var(--hx-brand)] px-3 py-1.5 text-sm font-medium hover:bg-emerald-50"
+              >
+                Sign in
+              </Link>
+            ) : (
+              <button
+                onClick={signOut}
+                disabled={busy}
+                className="inline-flex items-center rounded-full border border-gray-300 text-gray-700 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
+              >
+                {busy ? '…' : 'Sign out'}
+              </button>
+            )}
+          </div>
         </div>
 
+        {/* mobile icon row */}
         <nav className="mt-2 flex items-center justify-between gap-1 rounded-xl border bg-white px-2 py-1.5" aria-label="Primary">
           <NavIcon href="/"        icon={<Icon name="home" />}  label="Home"     active={is('/')} />
           <NavIcon href="/global"  icon={<Icon name="globe" />} label="Global"   active={is('/global')} />

@@ -10,22 +10,34 @@ import {
   useRef,
   memo,
 } from 'react';
-import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
 
 export const dynamic = 'force-dynamic';
 
 type ChatMsg = { id: string; created_at: string; text: string; sender_id: string };
+
 type Thread = {
-  request_id: string;
-  offer_id: string;
-  offer_title?: string;
+  // person-to-person thread (merged across requests with this peer)
   peer_id: string;
   peer_name?: string;
+  peer_avatar?: string | null;
+
+  // all underlying requests with this peer (newest first)
+  request_ids: string[];
+  offer_ids: string[];
+
+  // display helpers taken from the newest underlying request
+  offer_id: string;
+  offer_title?: string;
+
+  // last activity/preview across all requests
   last_text?: string;
   last_at: string;
   unread: number;
 };
+
+type SharedOffer = { id: string; title: string };
 
 const formatTS = (ts: string) => new Date(ts).toLocaleString();
 
@@ -41,48 +53,95 @@ function useMe() {
   return me;
 }
 
+function Avatar({
+  url,
+  size = 36,
+  alt = 'User',
+}: {
+  url?: string | null;
+  size?: number;
+  alt?: string;
+}) {
+  const s = size + 'px';
+  return url ? (
+    <Image
+      src={url}
+      alt={alt}
+      width={size}
+      height={size}
+      className="rounded-full object-cover"
+      style={{ width: s, height: s }}
+    />
+  ) : (
+    <div
+      className="rounded-full bg-gray-200"
+      style={{ width: s, height: s }}
+      title={alt}
+      aria-label={alt}
+    />
+  );
+}
+
 /* ---------- left column ---------- */
 const ThreadsList = memo(function ThreadsList({
   threads,
-  selected,
+  selectedPeer,
   onSelect,
 }: {
   threads: Thread[];
-  selected?: string;
+  selectedPeer?: string;
   onSelect: (t: Thread) => void;
 }) {
   return (
-    <aside className="w-72 shrink-0">
-      <h2 className="mb-3 text-xl font-bold">Messages</h2>
-      <ul className="rounded border">
+    <aside className="w-full md:w-80 shrink-0 md:border-r md:pr-2">
+      <div className="mb-2 flex items-center justify-between md:mb-3">
+        <h2 className="text-xl font-bold">Messages</h2>
+        <span className="hidden text-xs text-gray-500 md:block">
+          {threads.length} conversation{threads.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      <ul className="divide-y rounded border md:border-0">
         {threads.length === 0 && (
-          <li className="px-3 py-3 text-sm text-gray-600">No conversations yet.</li>
+          <li className="px-3 py-3 text-sm text-gray-600">
+            No conversations yet.
+          </li>
         )}
+
         {threads.map((t) => {
-          const active = selected === t.request_id;
+          const active = selectedPeer === t.peer_id;
           return (
             <li
-              key={t.request_id}
-              className={`cursor-pointer border-b px-3 py-3 text-sm hover:bg-gray-50 ${
-                active ? 'bg-gray-100' : ''
-              }`}
+              key={t.peer_id}
+              className={['cursor-pointer px-3 py-3 hover:bg-gray-50', active ? 'bg-gray-100' : ''].join(' ')}
               onClick={() => onSelect(t)}
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="truncate font-semibold">{t.peer_name || 'Someone'}</div>
-                  <div className="truncate text-gray-700">{t.offer_title || '—'}</div>
-                  <div className="truncate text-xs text-gray-500">{t.last_text || ''}</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-[11px] text-gray-500">
-                    {t.last_at ? new Date(t.last_at).toLocaleTimeString() : ''}
+              <div className="flex items-center gap-3">
+                <Avatar url={t.peer_avatar ?? null} alt={t.peer_name || 'Someone'} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold">
+                        {t.peer_name || 'Someone'}
+                      </div>
+                      <div className="truncate text-gray-700 text-[13px]">
+                        {t.offer_title || '—'}
+                      </div>
+                      <div className="truncate text-xs text-gray-500">
+                        {t.last_text || ''}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className="text-[11px] text-gray-500">
+                        {t.last_at ? new Date(t.last_at).toLocaleTimeString() : ''}
+                      </div>
+                      {t.unread > 0 && (
+                        <span className="mt-1 inline-flex min-w-[18px] justify-center rounded-full bg-amber-500 px-1 text-[11px] font-bold text-white">
+                          {t.unread}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  {t.unread > 0 && (
-                    <span className="mt-1 inline-flex min-w-[18px] justify-center rounded-full bg-amber-500 px-1 text-[11px] font-bold text-white">
-                      {t.unread}
-                    </span>
-                  )}
                 </div>
               </div>
             </li>
@@ -93,49 +152,50 @@ const ThreadsList = memo(function ThreadsList({
   );
 });
 
-/* ---------- right column ---------- */
+/* ---------- right column (chat) ---------- */
 function ChatPane({
   me,
   thread,
   initialMsgs,
   onCache,
-  onLeave,
+  onBackMobile,
 }: {
   me: string;
   thread?: Thread;
   initialMsgs?: ChatMsg[];
-  onCache: (rid: string, msgs: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])) => void;
-  onLeave: (rid: string) => void;
+  onCache: (peerId: string, msgs: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])) => void;
+  onBackMobile: () => void;
 }) {
-  const router = useRouter();
   const [msgs, setMsgs] = useState<ChatMsg[]>(initialMsgs ?? []);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [shared, setShared] = useState<SharedOffer[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setMsgs(initialMsgs ?? []);
-  }, [thread?.request_id, initialMsgs]);
+  }, [thread?.peer_id, initialMsgs]);
 
   const canSend = useMemo(
-    () => !!thread && !!draft.trim() && !!me && !!thread.peer_id,
+    () => !!thread && !!draft.trim() && !!me && !!thread.peer_id && thread.request_ids.length > 0,
     [thread, draft, me]
   );
 
-  // cancel stale fetches if user switches threads quickly
+  // Load/mark messages across ALL request_ids in this peer thread
   const reqCounter = useRef(0);
   const loadThread = useCallback(async () => {
     if (!thread) return;
     setErr(null);
     const myTurn = ++reqCounter.current;
 
+    // Pull all notifications for any of the request_ids
     const { data, error } = await supabase
       .from('notifications')
-      .select('id, created_at, type, data')
+      .select('id, created_at, type, data, read_at')
       .eq('profile_id', me)
       .or('type.eq.message,type.eq.message_received')
-      .contains('data', { request_id: thread.request_id })
+      .in('data->>request_id', thread.request_ids) // key change: merge across requests
       .order('created_at', { ascending: true });
 
     if (reqCounter.current !== myTurn) return;
@@ -149,35 +209,57 @@ function ChatPane({
     }));
 
     setMsgs(mapped);
-    onCache(thread.request_id, mapped);
+    onCache(thread.peer_id, mapped);
 
-    // mark incoming messages read
+    // mark all unread from this peer (across request_ids)
     await supabase
       .from('notifications')
       .update({ read_at: new Date().toISOString() })
       .eq('profile_id', me)
       .eq('type', 'message_received')
       .is('read_at', null)
-      .contains('data', { request_id: thread.request_id });
+      .in('data->>request_id', thread.request_ids);
   }, [me, thread, onCache]);
+
+  // shared offers strip between the two users
+  const loadSharedOffers = useCallback(async () => {
+    if (!thread) return;
+    try {
+      const ids = [me, thread.peer_id];
+      const { data, error } = await supabase
+        .from('requests')
+        .select(`id, offer_id, offers!inner ( id, title, owner_id ), requester_profile_id`)
+        .or(`and(offers.owner_id.in.(${ids.join(',')}),requester_profile_id.in.(${ids.join(',')}))`)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      const uniq = new Map<string, SharedOffer>();
+      for (const r of (data || []) as any[]) {
+        if (r.offers?.id) uniq.set(r.offers.id, { id: r.offers.id, title: r.offers.title });
+      }
+      setShared(Array.from(uniq.values()));
+    } catch {
+      setShared([]);
+    }
+  }, [me, thread]);
 
   useEffect(() => {
     void loadThread();
-  }, [loadThread]);
+    void loadSharedOffers();
+  }, [loadThread, loadSharedOffers]);
 
+  // realtime across all request_ids (filter by profile_id; guard in handler)
   useEffect(() => {
     if (!thread) return;
     const ch = supabase
-      .channel(`realtime:messages:${thread.request_id}:${me}`)
+      .channel(`realtime:messages:peer:${thread.peer_id}:${me}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications', filter: `profile_id=eq.${me}` },
         (payload) => {
           const n = payload.new as any;
-          // only this thread
-          if (n?.data?.request_id !== thread.request_id) return;
-
-          // IMPORTANT: ignore our own 'message' inserts to avoid duplicating the optimistic message
+          const rid = n?.data?.request_id;
+          if (!rid || !thread.request_ids.includes(rid)) return;
           if (n.type === 'message' && n?.data?.sender_id === me) return;
 
           const msg: ChatMsg = {
@@ -188,7 +270,7 @@ function ChatPane({
           };
 
           setMsgs((prev) => (prev.some((x) => x.id === msg.id) ? prev : [...prev, msg]));
-          onCache(thread.request_id, (prev) => {
+          onCache(thread.peer_id, (prev) => {
             const arr = prev || [];
             return arr.some((x) => x.id === msg.id) ? arr : [...arr, msg];
           });
@@ -205,10 +287,11 @@ function ChatPane({
     };
   }, [me, thread, onCache]);
 
+  // Send on the newest underlying request so new requests don't fork a new chat
   const handleSend = useCallback(async () => {
-    if (!thread || !draft.trim()) return;
-    setSending(true);
+    if (!thread || !draft.trim() || thread.request_ids.length === 0) return;
     setErr(null);
+    setSending(true);
 
     const text = draft.trim();
     const optimistic: ChatMsg = {
@@ -218,11 +301,14 @@ function ChatPane({
       sender_id: me,
     };
     setMsgs((m) => [...m, optimistic]);
-    onCache(thread.request_id, (prev) => [...(prev || []), optimistic]);
+    onCache(thread.peer_id, (prev) => [...(prev || []), optimistic]);
     setDraft('');
 
     try {
-      const payload = { request_id: thread.request_id, offer_id: thread.offer_id, sender_id: me, text };
+      const canonicalRequestId = thread.request_ids[0]; // newest
+      const canonicalOfferId = thread.offer_id;
+
+      const payload = { request_id: canonicalRequestId, offer_id: canonicalOfferId, sender_id: me, text };
       const now = new Date().toISOString();
       const { error } = await supabase.from('notifications').insert([
         { profile_id: me, type: 'message', data: payload, read_at: now },
@@ -232,7 +318,7 @@ function ChatPane({
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to send message.');
       setMsgs((m) => m.filter((x) => x.id !== optimistic.id));
-      onCache(thread.request_id, (prev) => (prev || []).filter((x) => x.id !== optimistic.id));
+      onCache(thread.peer_id, (prev) => (prev || []).filter((x) => x.id !== optimistic.id));
       setDraft(text);
     } finally {
       setSending(false);
@@ -240,51 +326,12 @@ function ChatPane({
     }
   }, [draft, me, thread, onCache]);
 
-  const deleteMsg = useCallback(
-    async (msgId: string) => {
-      if (!thread) return;
-      try {
-        await supabase.from('notifications').delete().eq('id', msgId).eq('profile_id', me);
-        setMsgs((m) => m.filter((x) => x.id !== msgId));
-        onCache(thread.request_id, (prev) => (prev || []).filter((x) => x.id !== msgId));
-      } catch {}
-    },
-    [me, thread, onCache]
-  );
-
-  const leaveChat = useCallback(async () => {
-    if (!thread) return;
-    const ok = confirm('Leave this conversation? This removes it from your inbox (does not affect the other person).');
-    if (!ok) return;
-    await supabase
-      .from('notifications')
-      .delete()
-      .eq('profile_id', me)
-      .contains('data', { request_id: thread.request_id });
-
-    onLeave(thread.request_id);
-  }, [me, thread, onLeave]);
-
-  const insertNewlineAtCursor = useCallback(() => {
-    const el = inputRef.current;
-    if (!el) return setDraft((v) => v + '\n');
-    const start = el.selectionStart ?? draft.length;
-    const end = el.selectionEnd ?? draft.length;
-    const nextVal = draft.slice(0, start) + '\n' + draft.slice(end);
-    setDraft(nextVal);
-    requestAnimationFrame(() => {
-      const pos = start + 1;
-      if (inputRef.current) {
-        inputRef.current.selectionStart = pos;
-        inputRef.current.selectionEnd = pos;
-      }
-    });
-  }, [draft]);
-
   if (!thread) {
     return (
-      <div className="flex-1">
-        <div className="rounded border p-6 text-sm text-gray-600">Select a conversation on the left to start chatting.</div>
+      <div className="flex-1 md:block">
+        <div className="rounded border p-6 text-sm text-gray-600">
+          Select a conversation on the left to start chatting.
+        </div>
       </div>
     );
   }
@@ -292,47 +339,65 @@ function ChatPane({
   return (
     <div className="flex-1">
       <div className="rounded border">
-        <div className="flex items-center justify-between border-b px-3 py-2">
-          <div className="min-w-0">
-            <div className="truncate text-sm text-gray-600">Chat with {thread.peer_name || 'Someone'}</div>
-            <div className="truncate font-semibold">{thread.offer_title || '—'}</div>
+        {/* Header: Back (mobile) + peer + shared offers */}
+        <div className="border-b">
+          <div className="flex items-center justify-between px-3 py-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                type="button"
+                className="md:hidden mr-1 rounded border px-2 py-1 text-xs hover:bg-gray-50"
+                onClick={onBackMobile}
+                aria-label="Back to conversations"
+                title="Back"
+              >
+                ← Back
+              </button>
+
+              <Avatar url={thread.peer_avatar ?? null} alt={thread.peer_name || 'Someone'} size={28} />
+              <div className="min-w-0">
+                <div className="truncate text-sm text-gray-600">
+                  Chat with {thread.peer_name || 'Someone'}
+                </div>
+                <div className="truncate font-semibold">
+                  {thread.offer_title || '—'}
+                </div>
+              </div>
+            </div>
+
+            <div className="hidden md:flex items-center gap-2">
+              <a className="rounded border px-2 py-1 text-xs hover:bg-gray-50" href={`/offers/${thread.offer_id}`}>
+                View offer
+              </a>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="rounded border px-2 py-1 text-xs hover:bg-gray-50"
-              onClick={() => router.push(`/offers/${thread.offer_id}`)}
-              title="View Offer"
-            >
-              View offer
-            </button>
-            <button
-              type="button"
-              className="rounded border px-2 py-1 text-xs hover:bg-gray-50"
-              onClick={leaveChat}
-              title="Leave chat"
-            >
-              Leave chat
-            </button>
-          </div>
+          {shared.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto px-3 pb-2">
+              {shared.map((o) => (
+                <a
+                  key={o.id}
+                  href={`/offers/${o.id}`}
+                  className="shrink-0 rounded-full border px-3 py-1 text-xs hover:bg-gray-50"
+                  title={o.title}
+                >
+                  {o.title}
+                </a>
+              ))}
+            </div>
+          )}
         </div>
 
+        {/* Messages */}
         <div className="max-h-[55vh] min-h-[45vh] overflow-auto p-3">
           {msgs.map((m) => {
             const mine = m.sender_id === me;
             return (
-              <div key={m.id} className={`group relative mb-2 max-w-[85%] rounded px-3 py-2 text-sm ${mine ? 'ml-auto bg-black text-white' : 'bg-gray-100'}`}>
-                <button
-                  aria-label="Delete message"
-                  title="Delete message"
-                  onClick={() => deleteMsg(m.id)}
-                  className={`absolute right-1 top-1 hidden rounded px-1 text-[11px] ${
-                    mine ? 'group-hover:inline-block bg-white/10 hover:bg-white/20' : 'group-hover:inline-block bg-black/5 hover:bg-black/10'
-                  }`}
-                >
-                  🗑
-                </button>
+              <div
+                key={m.id}
+                className={`group relative mb-2 max-w-[85%] rounded px-3 py-2 text-sm ${
+                  mine ? 'ml-auto bg-black text-white' : 'bg-gray-100'
+                }`}
+              >
                 <div className="text-[11px] opacity-70">{formatTS(m.created_at)}</div>
                 <div className="mt-1 whitespace-pre-wrap">{m.text}</div>
               </div>
@@ -340,6 +405,7 @@ function ChatPane({
           })}
         </div>
 
+        {/* Composer */}
         <div className="border-t p-3">
           {err && <div className="mb-2 text-sm text-red-600">{err}</div>}
           <form
@@ -354,9 +420,9 @@ function ChatPane({
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  if (e.shiftKey) { e.preventDefault(); insertNewlineAtCursor(); }
-                  else { e.preventDefault(); if (!sending) void handleSend(); }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  if (!sending) void handleSend();
                 }
               }}
               rows={2}
@@ -364,178 +430,268 @@ function ChatPane({
               className="flex-1 resize-none rounded border px-3 py-2 text-sm"
               aria-label="Type a message"
             />
-            <button type="submit" disabled={sending || !canSend} className="rounded bg-black px-3 py-2 text-sm text-white disabled:opacity-60">
+            <button
+              type="submit"
+              disabled={sending || !canSend}
+              className="rounded bg-black px-3 py-2 text-sm text-white disabled:opacity-60"
+            >
               {sending ? 'Sending…' : 'Send'}
             </button>
           </form>
-          <div className="mt-1 text-[11px] text-gray-500">Press <kbd>Enter</kbd> to send • <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line</div>
+
+          <div className="mt-1 text-[11px] text-gray-500">
+            Enter to send • Shift+Enter for a new line
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-/* ---------- page shell ---------- */
+/* ---------- page shell (peer-grouped) ---------- */
 function MessagesContent() {
   const me = useMe();
 
   const [threads, setThreads] = useState<Thread[]>([]);
   const [selected, setSelected] = useState<Thread | undefined>(undefined);
   const [msgCache, setMsgCache] = useState<Record<string, ChatMsg[]>>({});
-  const [initialThreadId, setInitialThreadId] = useState<string | null>(null);
 
-  // Read ?thread= once on mount (deep link), then ignore URL changes
+  // purely for mobile show/hide of the list; CSS handles desktop
+  const [showListOnMobile, setShowListOnMobile] = useState(true);
+
+  // Read ?thread (peer id) once on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const sp = new URLSearchParams(window.location.search);
-      setInitialThreadId(sp.get('thread'));
+      const pid = sp.get('thread');
+      if (pid) setShowListOnMobile(false);
     }
   }, []);
 
-  const setCache = useCallback((rid: string, next: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])) => {
-    setMsgCache((prev) => {
-      const prevArr = prev[rid] || [];
-      const arr = typeof next === 'function' ? (next as any)(prevArr) : next;
-      return { ...prev, [rid]: arr };
-    });
-  }, []);
+  const setCache = useCallback(
+    (peerId: string, next: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])) => {
+      setMsgCache((prev) => {
+        const prevArr = prev[peerId] || [];
+        const arr = typeof next === 'function' ? (next as any)(prevArr) : next;
+        return { ...prev, [peerId]: arr };
+      });
+    },
+    []
+  );
 
-  const buildThreads = useCallback(async (uid: string) => {
-    const { data, error } = await supabase
-      .from('notifications')
-      .select('id, created_at, type, read_at, data')
-      .eq('profile_id', uid)
-      .or('type.eq.message,type.eq.message_received')
-      .order('created_at', { ascending: false })
-      .limit(500);
-    if (error) throw error;
-
-    const byReq = new Map<string, { last_at: string; last_text?: string; offer_id?: string; offer_title?: string; unread: number }>();
-    for (const row of (data || []) as any[]) {
-      const rid = row.data?.request_id as string | undefined;
-      if (!rid) continue;
-      const prev = byReq.get(rid);
-      const isUnread = row.type === 'message_received' && !row.read_at;
-      if (!prev) {
-        byReq.set(rid, { last_at: row.created_at, last_text: (row.data?.text ?? row.data?.message) ?? '', offer_id: row.data?.offer_id, offer_title: row.data?.offer_title, unread: isUnread ? 1 : 0 });
-      } else {
-        if (row.created_at > prev.last_at) {
-          prev.last_at = row.created_at;
-          prev.last_text = (row.data?.text ?? row.data?.message) ?? prev.last_text;
-        }
-        prev.unread += isUnread ? 1 : 0;
-      }
-    }
-
-    const reqIds = Array.from(byReq.keys());
-    if (reqIds.length === 0) {
-      setThreads([]);
-      setSelected(undefined);
-      return;
-    }
-
-    const { data: reqRows } = await supabase
-      .from('requests')
-      .select(`id, offer_id, requester_profile_id, offers!inner ( id, title, owner_id )`)
-      .in('id', reqIds);
-
-    const tmp: Thread[] = [];
-    for (const r of (reqRows || []) as any[]) {
-      const agg = byReq.get(r.id); if (!agg) continue;
-      const owner_id = r.offers?.owner_id as string;
-      const requester_id = r.requester_profile_id as string;
-      const peer_id = uid === owner_id ? requester_id : owner_id;
-      tmp.push({ request_id: r.id as string, offer_id: r.offer_id as string, offer_title: agg.offer_title ?? (r.offers?.title as string | undefined), peer_id, peer_name: undefined, last_text: agg.last_text, last_at: agg.last_at, unread: agg.unread });
-    }
-
-    const peerIds = Array.from(new Set(tmp.map((t) => t.peer_id)));
-    const { data: peers } = await supabase.from('profiles').select('id, display_name').in('id', peerIds);
-    const nameMap = new Map<string, string>(); for (const p of (peers || []) as any[]) nameMap.set(p.id, p.display_name || 'Someone');
-
-    const builtSorted = tmp.map((t) => ({ ...t, peer_name: nameMap.get(t.peer_id) || t.peer_name })).sort((a, b) => (a.last_at < b.last_at ? 1 : -1));
-    setThreads(builtSorted);
-
-    // Prefetch first 3 threads
-    const toPrefetch = builtSorted.slice(0, 3).map((t) => t.request_id);
-    for (const rid of toPrefetch) {
-      if (msgCache[rid]) continue;
-      const { data: m } = await supabase
+  // Build peer-grouped threads
+  const buildThreads = useCallback(
+    async (uid: string) => {
+      // 1) pull all message notifications for me
+      const { data, error } = await supabase
         .from('notifications')
-        .select('id, created_at, type, data')
+        .select('id, created_at, type, read_at, data')
         .eq('profile_id', uid)
         .or('type.eq.message,type.eq.message_received')
-        .contains('data', { request_id: rid })
-        .order('created_at', { ascending: true });
-      const mapped: ChatMsg[] = (m || []).map((row: any) => ({
-        id: row.id,
-        created_at: row.created_at,
-        text: (row.data?.text ?? row.data?.message) ?? '',
-        sender_id: row.data?.sender_id ?? '',
-      }));
-      setMsgCache((prev) => ({ ...prev, [rid]: mapped }));
-    }
-  }, [msgCache]);
+        .order('created_at', { ascending: false })
+        .limit(800);
+      if (error) throw error;
+
+      // Aggregate by request first (to compute per-request last activity/unread)
+      type Agg = { last_at: string; last_text?: string; offer_id?: string; unread: number };
+      const byReq = new Map<string, Agg>();
+
+      for (const row of (data || []) as any[]) {
+        const rid = row.data?.request_id as string | undefined;
+        if (!rid) continue;
+        const prev = byReq.get(rid);
+        const isUnread = row.type === 'message_received' && !row.read_at;
+        if (!prev) {
+          byReq.set(rid, {
+            last_at: row.created_at,
+            last_text: (row.data?.text ?? row.data?.message) ?? '',
+            offer_id: row.data?.offer_id,
+            unread: isUnread ? 1 : 0,
+          });
+        } else {
+          if (row.created_at > prev.last_at) {
+            prev.last_at = row.created_at;
+            prev.last_text = (row.data?.text ?? row.data?.message) ?? prev.last_text;
+          }
+          prev.unread += isUnread ? 1 : 0;
+        }
+      }
+
+      const reqIds = Array.from(byReq.keys());
+      if (reqIds.length === 0) {
+        setThreads([]);
+        setSelected(undefined);
+        setShowListOnMobile(true);
+        return;
+      }
+
+      // 2) join requests to learn each request's owner/requester and offer title
+      const { data: reqRows } = await supabase
+        .from('requests')
+        .select(`id, offer_id, requester_profile_id, offers!inner ( id, title, owner_id )`)
+        .in('id', reqIds);
+
+      type PartialReq = {
+        id: string;
+        offer_id: string;
+        owner_id: string;
+        requester_id: string;
+        title?: string;
+      };
+
+      const reqList: PartialReq[] = [];
+      for (const r of (reqRows || []) as any[]) {
+        reqList.push({
+          id: r.id,
+          offer_id: r.offer_id,
+          owner_id: r.offers?.owner_id,
+          requester_id: r.requester_profile_id,
+          title: r.offers?.title,
+        });
+      }
+
+      // 3) group requests by peer (other person)
+      const byPeer = new Map<string, Thread>();
+
+      for (const r of reqList) {
+        const peer_id = uid === r.owner_id ? r.requester_id : r.owner_id;
+        const agg = byReq.get(r.id)!;
+
+        const existing = byPeer.get(peer_id);
+        if (!existing) {
+          byPeer.set(peer_id, {
+            peer_id,
+            request_ids: [r.id],
+            offer_ids: [r.offer_id],
+            offer_id: r.offer_id,
+            offer_title: r.title,
+            last_text: agg.last_text,
+            last_at: agg.last_at,
+            unread: agg.unread,
+          });
+        } else {
+          // push and keep newest-first ordering of request_ids
+          existing.request_ids.push(r.id);
+          existing.offer_ids.push(r.offer_id);
+          // Update "display" fields if this request is newer
+          if (agg.last_at > existing.last_at) {
+            existing.last_at = agg.last_at;
+            existing.last_text = agg.last_text;
+            existing.offer_id = r.offer_id;
+            existing.offer_title = r.title;
+          }
+          existing.unread += agg.unread;
+        }
+      }
+
+      // 4) hydrate peer names/avatars
+      const peers = Array.from(byPeer.keys());
+      if (peers.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, display_name, avatar_url')
+          .in('id', peers);
+
+        const pmap = new Map<string, { name: string; avatar: string | null }>();
+        for (const p of (profiles || []) as any[]) {
+          pmap.set(p.id, { name: p.display_name || 'Someone', avatar: p.avatar_url ?? null });
+        }
+
+        for (const t of byPeer.values()) {
+          const info = pmap.get(t.peer_id);
+          if (info) {
+            t.peer_name = info.name;
+            t.peer_avatar = info.avatar;
+          }
+          // newest-first for request_ids
+          t.request_ids.sort((a, b) => {
+            const aa = byReq.get(a)!.last_at;
+            const bb = byReq.get(b)!.last_at;
+            return aa < bb ? 1 : -1;
+          });
+        }
+      }
+
+      const sorted = Array.from(byPeer.values()).sort((a, b) => (a.last_at < b.last_at ? 1 : -1));
+      setThreads(sorted);
+
+      // Desktop: auto-select first thread if none picked
+      if (!selected && sorted.length > 0) {
+        setSelected(sorted[0]);
+      }
+
+      // Prefetch first few peer threads into cache
+      const toPrefetch = sorted.slice(0, 3);
+      for (const t of toPrefetch) {
+        if (msgCache[t.peer_id]) continue;
+        const { data: m } = await supabase
+          .from('notifications')
+          .select('id, created_at, type, data')
+          .eq('profile_id', uid)
+          .or('type.eq.message,type.eq.message_received')
+          .in('data->>request_id', t.request_ids)
+          .order('created_at', { ascending: true });
+        const mapped: ChatMsg[] = (m || []).map((row: any) => ({
+          id: row.id,
+          created_at: row.created_at,
+          text: (row.data?.text ?? row.data?.message) ?? '',
+          sender_id: row.data?.sender_id ?? '',
+        }));
+        setMsgCache((prev) => ({ ...prev, [t.peer_id]: mapped }));
+      }
+    },
+    [msgCache, selected]
+  );
 
   useEffect(() => {
     if (!me) return;
     void buildThreads(me);
   }, [me, buildThreads]);
 
-  // Pick selected based on initial ?thread= (once), else first thread
-  useEffect(() => {
-    if (threads.length === 0) { setSelected(undefined); return; }
-    if (initialThreadId) {
-      const found = threads.find((t) => t.request_id === initialThreadId);
-      setSelected(found || threads[0]);
-      setInitialThreadId(null); // only apply once
-    } else if (!selected) {
-      setSelected(threads[0]);
-    }
-  }, [threads, initialThreadId, selected]);
-
   const selectThread = useCallback((t: Thread) => {
     setSelected(t);
+    setShowListOnMobile(false);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
-      url.searchParams.set('thread', t.request_id);
+      url.searchParams.set('thread', t.peer_id); // store peer_id in URL
       window.history.replaceState({}, '', url.toString());
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, []);
 
-  const leaveThread = useCallback((rid: string) => {
-    setThreads((prev) => prev.filter((t) => t.request_id !== rid));
-    setMsgCache((prev) => {
-      const { [rid]: _, ...rest } = prev;
-      return rest;
-    });
-    setSelected((prev) => {
-      if (!prev || prev.request_id !== rid) return prev;
-      const next = threads.find((t) => t.request_id !== rid);
-      return next;
-    });
+  const backToListMobile = useCallback(() => {
+    setShowListOnMobile(true);
+    setSelected(undefined);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
-      if (url.searchParams.get('thread') === rid) {
-        url.searchParams.delete('thread');
-        window.history.replaceState({}, '', url.toString());
-      }
+      url.searchParams.delete('thread');
+      window.history.replaceState({}, '', url.toString());
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  }, [threads]);
+  }, []);
+
+  const leftClasses = ['md:block', showListOnMobile ? 'block' : 'hidden md:block'].join(' ');
+  const rightClasses = ['md:block md:flex-1', showListOnMobile ? 'hidden md:block' : 'block'].join(' ');
 
   return (
-    <section className="flex gap-4">
-      <ThreadsList
-        threads={threads}
-        selected={selected?.request_id}
-        onSelect={selectThread}
-      />
-      <ChatPane
-        me={me || ''}
-        thread={selected}
-        initialMsgs={selected ? msgCache[selected.request_id] : undefined}
-        onCache={setCache}
-        onLeave={leaveThread}
-      />
+    <section className="md:flex md:gap-4">
+      <div className={leftClasses}>
+        <ThreadsList
+          threads={threads}
+          selectedPeer={selected?.peer_id}
+          onSelect={selectThread}
+        />
+      </div>
+
+      <div className={rightClasses}>
+        <ChatPane
+          me={me || ''}
+          thread={selected}
+          initialMsgs={selected ? msgCache[selected.peer_id] : undefined}
+          onCache={setCache}
+          onBackMobile={backToListMobile}
+        />
+      </div>
     </section>
   );
 }

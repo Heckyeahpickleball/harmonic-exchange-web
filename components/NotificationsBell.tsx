@@ -1,6 +1,7 @@
+// components/NotificationsBell.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -32,29 +33,26 @@ export default function NotificationsBell() {
   const [open, setOpen] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [rows, setRows] = useState<Notif[]>([]);
-  const unread = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
-
-  // Refs for close behavior
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const closeTimer = useRef<number | null>(null);
 
-  const scheduleClose = useCallback((delay = 0) => {
-    if (closeTimer.current) window.clearTimeout(closeTimer.current);
-    closeTimer.current = window.setTimeout(() => setOpen(false), delay);
-  }, []);
+  // counts
+  const unreadTotal = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
+  const unreadMessages = useMemo(
+    () => rows.filter((r) => r.type === 'message_received' && !r.read_at).length,
+    [rows]
+  );
+  const badgeNumber = unreadMessages > 0 ? unreadMessages : unreadTotal;
 
-  const cancelScheduledClose = useCallback(() => {
-    if (closeTimer.current) {
-      window.clearTimeout(closeTimer.current);
-      closeTimer.current = null;
-    }
-  }, []);
-
-  // Caches + de-dupe
+  // De-dupe caches
   const titleCache = useRef(new Map<string, string>());
   const requesterCache = useRef(new Map<string, string>());
   const sigSeen = useRef<Set<string>>(new Set());
+
+  function sig(n: Notif) {
+    return `${n.profile_id}|${n.type}|${n.data?.offer_id ?? ''}|${n.data?.request_id ?? ''}|${n.data?.track ?? ''}|${
+      n.data?.tier ?? ''
+    }`;
+  }
 
   async function enrichOfferTitles(notifs: Notif[]) {
     const missing = Array.from(
@@ -136,19 +134,13 @@ export default function NotificationsBell() {
         const track = n.data?.track as string | undefined;
         const tier = n.data?.tier as number | undefined;
         const niceTrack =
-          track === 'give'
-            ? 'Giver'
-            : track === 'receive'
-            ? 'Receiver'
-            : track === 'streak'
-            ? 'Streak'
-            : track === 'completed_exchange'
-            ? 'Completed Exchanges'
-            : track === 'requests_made'
-            ? 'Requests Made'
-            : track === 'shared_offers'
-            ? 'Offers Shared'
-            : track ?? 'Badge';
+          track === 'give' ? 'Giver'
+          : track === 'receive' ? 'Receiver'
+          : track === 'streak' ? 'Streak'
+          : track === 'completed_exchange' ? 'Completed Exchanges'
+          : track === 'requests_made' ? 'Requests Made'
+          : track === 'shared_offers' ? 'Offers Shared'
+          : track ?? 'Badge';
         const text = `🎉 New badge earned — ${niceTrack}${tier != null ? ` (Tier ${tier})` : ''}`;
         return { text, href: '/profile#badges' };
       }
@@ -157,7 +149,9 @@ export default function NotificationsBell() {
       case 'message_received': {
         const snip = body ? `: ${body.slice(0, 80)}` : '';
         const on = offerTitle ? ` on “${offerTitle}”` : '';
-        return { text: `New message${on}${snip}`, href: reqId ? `/messages?thread=${reqId}` : '/messages' };
+        // IMPORTANT: go straight to /messages and pass the request id for preselect
+        const href = reqId ? `/messages?request=${encodeURIComponent(reqId)}` : '/messages';
+        return { text: `New message${on}${snip}`, href };
       }
 
       case 'fulfillment_reminder': {
@@ -178,7 +172,6 @@ export default function NotificationsBell() {
     const ids = rows.filter((r) => !r.read_at).map((r) => r.id);
     if (!ids.length) return;
     const now = new Date().toISOString();
-
     setRows((prev) => prev.map((r) => (ids.includes(r.id) ? { ...r, read_at: now, _fresh: false } : r)));
     await supabase.from('notifications').update({ read_at: now }).in('id', ids);
   }
@@ -189,12 +182,6 @@ export default function NotificationsBell() {
     const now = new Date().toISOString();
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, read_at: now, _fresh: false } : r)));
     await supabase.from('notifications').update({ read_at: now }).eq('id', id);
-  }
-
-  function sig(n: Notif) {
-    return `${n.profile_id}|${n.type}|${n.data?.offer_id ?? ''}|${n.data?.request_id ?? ''}|${n.data?.track ?? ''}|${
-      n.data?.tier ?? ''
-    }`;
   }
 
   // Load + realtime
@@ -262,67 +249,53 @@ export default function NotificationsBell() {
     })();
   }, []);
 
-  // Click-outside to close
+  // Click-outside + Escape to close
   useEffect(() => {
     if (!open) return;
+
     const onDown = (e: MouseEvent | TouchEvent) => {
       const root = rootRef.current;
       if (!root) return;
-      if (!root.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node | null;
+      if (t && root.contains(t)) return;
+      setOpen(false);
     };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('touchstart', onDown, { passive: true });
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('touchstart', onDown);
-    };
-  }, [open]);
-
-  // Escape key to close
-  useEffect(() => {
-    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open]);
 
-  // Close on scroll/resize
-  useEffect(() => {
-    if (!open) return;
-    const onScroll = () => setOpen(false);
-    const onResize = () => setOpen(false);
-    window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', onResize);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown, { passive: true });
+    document.addEventListener('keydown', onKey);
     return () => {
-      window.removeEventListener('scroll', onScroll, true);
-      window.removeEventListener('resize', onResize);
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+      document.removeEventListener('keydown', onKey);
     };
   }, [open]);
 
-  // Panel leave handler that only closes if leaving the whole bell+panel region
-  const handlePanelLeave = (evt: React.MouseEvent | React.PointerEvent) => {
-    const to = (evt as any).relatedTarget as Node | null;
-    const root = rootRef.current;
-    if (root && to && root.contains(to)) {
-      // moving back onto the bell/root — keep open
-      cancelScheduledClose();
-      return;
+  // smooth, glitch-free navigation after closing the panel
+  function navigateSafely(href: string) {
+    setOpen(false);
+    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
     }
-    scheduleClose(0);
-  };
+    requestAnimationFrame(() => {
+      router.push(href);
+    });
+  }
+
+  const listClass =
+    'overflow-auto sm:max-h-[55vh] sm:rounded-b-xl ' +
+    'max-h-[calc(85dvh-110px)] pb-[env(safe-area-inset-bottom)]';
 
   return (
-    <div
-      ref={rootRef}
-      className="relative"
-      // Note: we intentionally DO NOT close on root mouseleave anymore.
-      onMouseEnter={cancelScheduledClose}
-    >
+    <div ref={rootRef} className="relative">
       <button
         className="hx-btn hx-btn--outline-primary text-sm px-3 py-2 relative"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setOpen((v) => !v);
+        }}
         title="Notifications"
         aria-label="Open notifications"
         aria-haspopup="menu"
@@ -330,43 +303,72 @@ export default function NotificationsBell() {
         type="button"
       >
         <span aria-hidden>🔔</span>
-        {unread > 0 && (
+        {badgeNumber > 0 && (
           <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-[var(--hx-brand)] px-1 text-[11px] font-bold text-white">
-            {unread > 99 ? '99+' : unread}
+            {badgeNumber > 99 ? '99+' : badgeNumber}
           </span>
         )}
       </button>
 
       {open && (
         <div
-          ref={panelRef}
-          className="absolute right-0 z-50 mt-2 w-[360px] max-w-[92vw] hx-card p-0"
           role="menu"
           aria-label="Notifications"
-          onMouseEnter={cancelScheduledClose}
-          onMouseLeave={handlePanelLeave}
-          onPointerEnter={cancelScheduledClose}
-          onPointerLeave={handlePanelLeave}
+          className={[
+            'hx-card z-50 p-0',
+            'sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:w-[360px] sm:max-w-[92vw]',
+            'fixed inset-x-2 top-2 mx-auto w-[calc(100vw-1rem)] max-w-[560px] sm:static',
+            'max-h-[85dvh] rounded-xl overflow-hidden',
+          ].join(' ')}
         >
-          <div className="flex items-center justify-between border-b px-3 py-2">
+          {/* MOBILE header: Notifications / Messages */}
+          <div className="block sm:hidden p-2 border-b">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {}}
+                className="hx-btn hx-btn--outline-primary text-sm w-full"
+              >
+                Notifications
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  navigateSafely('/messages');
+                }}
+                className="hx-btn hx-btn--primary text-sm w-full"
+              >
+                Messages
+              </button>
+            </div>
+          </div>
+
+          {/* DESKTOP header */}
+          <div className="hidden sm:flex items-center justify-between border-b px-3 py-2">
             <strong className="text-sm">Notifications</strong>
             <button onClick={markAllRead} className="hx-btn hx-btn--secondary text-xs px-2 py-1" type="button">
               Mark all read
             </button>
           </div>
 
-          <ul className="max-h-[55vh] overflow-auto">
-            {rows.length === 0 && <li className="px-3 py-3 text-sm text-[var(--hx-muted)]">No notifications.</li>}
-
+          {/* CONTENT (scrollable list) */}
+          <ul className={listClass}>
+            {rows.length === 0 && (
+              <li className="px-3 py-3 text-sm text-[var(--hx-muted)]">No notifications.</li>
+            )}
             {rows.map((n) => {
               const { text, href } = label(n);
               const ts = new Date(n.created_at).toLocaleString();
               const isUnread = !n.read_at;
-
               return (
                 <li
                   key={n.id}
-                  className={['border-b px-3 py-2 text-sm transition-colors', isUnread ? 'bg-teal-50/50' : ''].join(' ')}
+                  className={[
+                    'border-b px-3 py-2 text-sm transition-colors',
+                    isUnread ? 'bg-teal-50/50' : '',
+                  ].join(' ')}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -389,10 +391,11 @@ export default function NotificationsBell() {
                       <button
                         type="button"
                         className="hx-btn hx-btn--outline-primary text-xs px-2 py-1 shrink-0"
-                        onClick={async () => {
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
                           await markOneRead(n.id);
-                          setOpen(false);
-                          router.push(href);
+                          navigateSafely(href);
                         }}
                         aria-label="View"
                         title="View"
@@ -405,6 +408,21 @@ export default function NotificationsBell() {
               );
             })}
           </ul>
+
+          {/* DESKTOP: quick Messages button */}
+          <div className="hidden sm:block border-t p-2">
+            <button
+              type="button"
+              className="hx-btn hx-btn--primary w-full text-sm"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                navigateSafely('/messages');
+              }}
+            >
+              Messages
+            </button>
+          </div>
         </div>
       )}
     </div>
