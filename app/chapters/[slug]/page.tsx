@@ -164,10 +164,15 @@ export default function ChapterPage() {
       .select('event_id,profile_id,status')
       .in('event_id', eventIds);
 
+    // ALWAYS seed requested ids with empty buckets
     const byEvent: Record<
       string,
       { going: ProfileMini[]; interested: ProfileMini[]; cant_go: ProfileMini[] }
     > = {};
+    for (const ev of eventIds) {
+      byEvent[ev] = { going: [], interested: [], cant_go: [] };
+    }
+
     if (!rsvpRows?.length) return byEvent;
 
     const pids = Array.from(new Set(rsvpRows.map((r: any) => r.profile_id)));
@@ -185,9 +190,6 @@ export default function ChapterPage() {
       });
     }
 
-    for (const ev of eventIds) {
-      byEvent[ev] = { going: [], interested: [], cant_go: [] };
-    }
     for (const r of (rsvpRows as RSVPRow[])) {
       const mini = pmap.get(r.profile_id) || { id: r.profile_id, display_name: null, avatar_url: null };
       byEvent[r.event_id][r.status].push(mini);
@@ -249,7 +251,7 @@ export default function ChapterPage() {
           setIsAnchor(mine?.role === 'anchor' || uid === gRow.created_by);
         }
 
-        // 3) Events (extended fields cover_url + created_by if they exist)
+        // 3) Events
         const { data: eRows } = await supabase
           .from('group_events')
           .select('id,title,description,starts_at,ends_at,location,is_online,cover_url,created_by')
@@ -750,20 +752,16 @@ export default function ChapterPage() {
       await supabase.from('event_rsvps').insert({ event_id: eventId, profile_id: auth.user.id, status });
 
       setMyRsvp((prev) => ({ ...prev, [eventId]: status }));
+
+      // Reload attendees for this event (now safely returns an entry even if empty)
       const map = await loadAttendeesForEvents([eventId]);
-      setRsvpByEvent((prev) => ({ ...prev, ...map }));
+      const buckets = map[eventId] ?? { going: [], interested: [], cant_go: [] };
+      setRsvpByEvent((prev) => ({ ...prev, [eventId]: buckets }));
+
+      // Update count badge on the tile from buckets (no undefined access)
+      const nextCount = buckets.going.length + buckets.interested.length + buckets.cant_go.length;
       setEvents((prev) =>
-        prev.map((e) =>
-          e.id === eventId
-            ? {
-                ...e,
-                rsvp_count:
-                  map[eventId].going.length +
-                  map[eventId].interested.length +
-                  map[eventId].cant_go.length,
-              }
-            : e
-        )
+        prev.map((e) => (e.id === eventId ? { ...e, rsvp_count: nextCount } : e))
       );
     } catch (e: any) {
       setMsg(e?.message ?? 'Could not RSVP.');
@@ -837,7 +835,7 @@ export default function ChapterPage() {
             </div>
           </div>
 
-        {/* Buttons row: Members, Anchor, Join/Leave */}
+          {/* Buttons row: Members, Anchor, Join/Leave */}
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
