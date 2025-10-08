@@ -1,7 +1,7 @@
 // /app/u/[id]/page.tsx
 'use client';
 
-import { Suspense, useEffect, useMemo, useState, useRef } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
@@ -77,27 +77,79 @@ function MobileOffersRail({ offers }: { offers: OfferRow[] }) {
 }
 /* --------------------------------------------------------- */
 
-/* -------- Collapsible About (matches personal profile) --- */
-function AboutCollapsible({ text }: { text: string }) {
+/* ----------- Single collapsible for About + Skills -------- */
+function AboutSkillsSection({
+  bio,
+  skills,
+}: {
+  bio: string | null;
+  skills: string[] | null;
+}) {
   const [open, setOpen] = useState(false);
+  const hasSkills = (skills?.length ?? 0) > 0;
+  const hasBio = !!bio;
+
+  if (!hasBio && !hasSkills) return null;
+
   return (
-    <div>
-      <h3 className="mb-1 text-sm font-semibold">About</h3>
-      <div className={['text-sm text-gray-800', open ? '' : 'line-clamp-5'].join(' ')}>
-        <p className="whitespace-pre-wrap">{text}</p>
+    <section className="relative rounded-xl border bg-white p-2 md:p-4">
+      {/* Header line + centered toggle */}
+      <div className="flex items-center justify-center">
+        <span className="text-base font-medium">About</span>
       </div>
+
+      {/* Centered circular chevron toggle (overlaps bottom edge like your screenshots) */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="mt-1 inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-700 hover:bg-gray-100"
         aria-expanded={open}
+        aria-controls="about-skills-content"
+        className={[
+          'absolute left-1/2 z-10 -translate-x-1/2',
+          open ? 'bottom-[-15px]' : 'bottom-[-25px]',
+          'grid h-8 w-8 place-items-center rounded-full border bg-white shadow-sm hover:bg-gray-50',
+          'transition-transform',
+        ].join(' ')}
+        title={open ? 'Collapse' : 'Expand'}
       >
-        <span>{open ? 'Show less' : 'Show more'}</span>
-        <span className={['inline-block transition-transform', open ? 'rotate-180' : 'rotate-0'].join(' ')} aria-hidden>
+        <span
+          className={[
+            'inline-block text-lg leading-none transition-transform duration-150',
+            open ? 'rotate-180' : 'rotate-0',
+          ].join(' ')}
+          aria-hidden
+        >
           ▾
         </span>
       </button>
-    </div>
+
+      {/* Collapsible content */}
+      <div
+        id="about-skills-content"
+        className={['mt-2', open ? 'block' : 'hidden'].join(' ')}
+      >
+        {hasBio && (
+          <div className="mb-3">
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">
+              {bio}
+            </p>
+          </div>
+        )}
+
+        {hasSkills && (
+          <div>
+            <h3 className="mb-1 text-sm font-semibold">Skills</h3>
+            <div className="flex flex-wrap gap-2">
+              {skills!.map((s, i) => (
+                <span key={i} className="rounded-full border px-2 py-1 text-xs">
+                  {s}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 /* --------------------------------------------------------- */
@@ -127,7 +179,7 @@ function ProfileContent() {
   const [badges, setBadges] = useState<ExpandedBadgeRow[]>([]);
   const [badgesMsg, setBadgesMsg] = useState<string>('');
 
-  // load viewer — keep Message button visible (disabled while unknown)
+  // load viewer
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -244,12 +296,11 @@ function ProfileContent() {
   async function startChat() {
     if (!profile) return;
 
-    // If viewing own profile, do nothing (button visible but disabled)
-    if (viewerId && viewerId === profile.id) return;
+    if (viewerId && viewerId === profile.id) return; // own profile
 
-    setChatBusy(true);
     try {
-      // Check for an existing request between viewer and this profile
+      setChatBusy(true);
+      // check existing request in either direction
       const { data: existing } = await supabase
         .from('requests')
         .select('id, offer_id, requester_profile_id, offers!inner(id, owner_id)')
@@ -264,16 +315,14 @@ function ProfileContent() {
         return;
       }
 
-      // Otherwise, pick most recent active offer to anchor a new request
-      const { data: peerOffers, error: offersErr } = await supabase
+      // new request anchored to most recent active offer if available
+      const { data: peerOffers } = await supabase
         .from('offers')
         .select('id')
         .eq('owner_id', profile.id)
         .eq('status', 'active')
         .order('created_at', { ascending: false })
         .limit(1);
-
-      if (offersErr) throw offersErr;
 
       const offerId = peerOffers?.[0]?.id as string | undefined;
 
@@ -282,18 +331,15 @@ function ProfileContent() {
         return;
       }
 
-      // Create a minimal request so chat is sendable
-      const { data: newReq, error: insertErr } = await supabase
+      const { data: newReq } = await supabase
         .from('requests')
         .insert([{ offer_id: offerId, requester_profile_id: viewerId }])
         .select('id')
         .single();
 
-      if (insertErr) throw insertErr;
-
-      router.push(`/messages?request=${newReq.id}`);
+      router.push(`/messages?request=${newReq?.id}`);
     } catch {
-      router.push(`/messages?thread=${profile.id}`);
+      router.push(`/messages?thread=${profile?.id}`);
     } finally {
       setChatBusy(false);
     }
@@ -310,10 +356,10 @@ function ProfileContent() {
     );
   }
 
-  // Keep the Message button present (no flicker): hide ONLY if definitely own profile
+  // Keep Message button visible unless definitively own profile
   const isOwner = viewerId ? viewerId === profile.id : false;
-  const showMessageButton = !isOwner; // visible while viewer unknown or different user
-  const messageDisabled = chatBusy || !viewerId; // disable until viewerId known or while sending
+  const showMessageButton = !isOwner;
+  const messageDisabled = chatBusy || !viewerId;
 
   const badgesHref = `/profile/badges?id=${profile.id}`;
 
@@ -396,7 +442,7 @@ function ProfileContent() {
                 )}
               </div>
 
-              {/* Mobile badges + Message button (right) — clickable & stable */}
+              {/* Mobile badges + Message button (right) — clickable */}
               <div className="mt-3 sm:hidden">
                 {badgesMsg && <span className="text-xs text-amber-700">{badgesMsg}</span>}
                 <div className="mt-1 flex items-center justify-between">
@@ -457,24 +503,8 @@ function ProfileContent() {
         </div>
       </div>
 
-      {/* About/skills (collapsible About to match your own profile) */}
-      {(profile.bio || (profile.skills?.length ?? 0) > 0) && (
-        <div className="rounded-xl border p-4">
-          {profile.bio && <AboutCollapsible text={profile.bio} />}
-          {(profile.skills?.length ?? 0) > 0 && (
-            <div className="mt-3">
-              <h3 className="mb-1 text-sm font-semibold">Skills</h3>
-              <div className="flex flex-wrap gap-2">
-                {profile.skills!.map((s, i) => (
-                  <span key={i} className="rounded-full border px-2 py-1 text-xs">
-                    {s}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* NEW: A single collapsible wrapping ALL of About + Skills (no “see more”) */}
+      <AboutSkillsSection bio={profile.bio} skills={profile.skills} />
 
       {/* Two-column layout */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
@@ -502,7 +532,7 @@ function ProfileContent() {
           {/* MOBILE-ONLY: Offers carousel ABOVE composer/feed */}
           <MobileOffersRail offers={offers} />
 
-          <h2 className="text-base font-semibold">Posts</h2>
+          <h2 className="hidden sm:block text-base font-semibold">Posts</h2>
           <UserFeed profileId={profile.id} />
         </section>
       </div>

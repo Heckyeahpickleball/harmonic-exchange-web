@@ -172,7 +172,8 @@ export default function PostComposer({ profileId, onPost, limit = 600, groupId =
               e.currentTarget.value = '';
             }}
           />
-          <span className="text-[11px] text-gray-500">
+          {/* Hide this helper text on mobile, show from sm+ */}
+          <span className="hidden sm:inline text-[11px] text-gray-500">
             Enter = Post · Shift+Enter = newline · Up to 6 images
           </span>
         </div>
