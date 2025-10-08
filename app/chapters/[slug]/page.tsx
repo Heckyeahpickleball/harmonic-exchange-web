@@ -740,33 +740,60 @@ export default function ChapterPage() {
     }
   }
 
-  async function setRsvp(eventId: string, status: RSVPStatus) {
-    const { data: auth } = await supabase.auth.getUser();
-    if (!auth.user) {
-      router.push('/signin');
-      return;
-    }
-    try {
-      // Upsert via delete+insert to keep it simple
-      await supabase.from('event_rsvps').delete().eq('event_id', eventId).eq('profile_id', auth.user.id);
-      await supabase.from('event_rsvps').insert({ event_id: eventId, profile_id: auth.user.id, status });
-
-      setMyRsvp((prev) => ({ ...prev, [eventId]: status }));
-
-      // Reload attendees for this event (now safely returns an entry even if empty)
-      const map = await loadAttendeesForEvents([eventId]);
-      const buckets = map[eventId] ?? { going: [], interested: [], cant_go: [] };
-      setRsvpByEvent((prev) => ({ ...prev, [eventId]: buckets }));
-
-      // Update count badge on the tile from buckets (no undefined access)
-      const nextCount = buckets.going.length + buckets.interested.length + buckets.cant_go.length;
-      setEvents((prev) =>
-        prev.map((e) => (e.id === eventId ? { ...e, rsvp_count: nextCount } : e))
-      );
-    } catch (e: any) {
-      setMsg(e?.message ?? 'Could not RSVP.');
-    }
+// Replace your current setRsvp with this simple, safe version
+async function setRsvp(eventId: string, status: RSVPStatus) {
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) {
+    router.push('/signin');
+    return;
   }
+
+  // Optimistic selection
+  setMyRsvp((prev) => ({ ...prev, [eventId]: status }));
+  setMsg('');
+
+  try {
+    // Always do a delete + insert (works even without a unique constraint)
+    const del = await supabase
+      .from('event_rsvps')
+      .delete()
+      .eq('event_id', eventId)
+      .eq('profile_id', auth.user.id);
+
+    if (del.error) {
+      console.error('RSVP delete error:', del.error.message || del.error);
+      // not fatal — continue to try insert
+    }
+
+    const ins = await supabase
+      .from('event_rsvps')
+      .insert({ event_id: eventId, profile_id: auth.user.id, status });
+
+    if (ins.error) {
+      console.error('RSVP insert error:', ins.error.message || ins.error);
+      throw ins.error;
+    }
+
+    // Refresh just this event’s buckets + count, with a safe default
+    const map = await loadAttendeesForEvents([eventId]);
+    const buckets =
+      map?.[eventId] ?? { going: [], interested: [], cant_go: [] };
+
+    setRsvpByEvent((prev) => ({ ...prev, [eventId]: buckets }));
+
+    const nextCount =
+      buckets.going.length + buckets.interested.length + buckets.cant_go.length;
+
+    setEvents((prev) =>
+      prev.map((e) => (e.id === eventId ? { ...e, rsvp_count: nextCount } : e))
+    );
+  } catch (e: any) {
+    console.error('RSVP error:', e?.message || e);
+    setMsg(e?.message ?? 'Could not RSVP.');
+    // Roll back optimistic change
+    setMyRsvp((prev) => ({ ...prev, [eventId]: prev[eventId] ?? null }));
+  }
+}
 
   function RsvpList({ eventId }: { eventId: string }) {
     const bucket = rsvpByEvent[eventId] || { going: [], interested: [], cant_go: [] };
