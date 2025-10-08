@@ -8,6 +8,8 @@ import { supabase } from '@/lib/supabaseClient';
 import OfferCard, { type OfferRow } from '@/components/OfferCard';
 import UserFeed from '@/components/UserFeed';
 
+export const dynamic = 'force-dynamic';
+
 type ProfileRow = {
   id: string;
   display_name: string;
@@ -38,75 +40,6 @@ export default function PublicProfilePage() {
     </Suspense>
   );
 }
-
-/* ---------------- Mobile-only offers rail ---------------- */
-function MobileOffersRail({ offers }: { offers: OfferRow[] }) {
-  if (!offers || offers.length === 0) return null;
-
-  return (
-    <div className="sm:hidden">
-      <div className="mb-2 flex items-center justify-between px-1">
-        <h3 className="text-sm font-semibold">Offers</h3>
-        <a href="#offers" className="text-xs underline">See list</a>
-      </div>
-
-      {/* Horizontal rail */}
-      <div
-        className={[
-          // edge-to-edge scroll on mobile
-          '-mx-4 px-4',
-          'overflow-x-auto overscroll-x-contain',
-        ].join(' ')}
-      >
-        <ul className="flex snap-x snap-mandatory gap-3 pb-1">
-          {offers.map((o) => {
-            const thumb =
-              Array.isArray(o.images) && o.images.length > 0 ? o.images[0] : null;
-            return (
-              <li
-                key={o.id}
-                className="snap-start"
-                style={{ minWidth: '13.5rem' /* ~216px */ }}
-              >
-                <a
-                  href={`/offers/${o.id}`}
-                  className="block overflow-hidden rounded-xl border bg-white"
-                >
-                  <div className="relative h-32 w-full bg-gray-100">
-                    {thumb ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={thumb}
-                        alt={o.title}
-                        className="h-full w-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-xs text-gray-400">
-                        No image
-                      </div>
-                    )}
-                  </div>
-                  <div className="p-2">
-                    <div className="line-clamp-2 text-[13px] font-medium leading-snug">
-                      {o.title}
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-gray-600">
-                      {o.is_online
-                        ? 'Online'
-                        : [o.city, o.country].filter(Boolean).join(', ') || '—'}
-                    </div>
-                  </div>
-                </a>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
-    </div>
-  );
-}
-/* --------------------------------------------------------- */
 
 function ProfileContent() {
   const { id } = useParams<{ id: string }>();
@@ -184,6 +117,7 @@ function ProfileContent() {
 
   // choose highest tier per track and map to public PNGs
   const badgeIcons = useMemo(() => {
+    // pick highest tier for give/receive; include streak if present
     const best: Record<string, ExpandedBadgeRow | undefined> = {};
     for (const b of badges) {
       const tr = (b.track ?? '').toLowerCase();
@@ -197,20 +131,30 @@ function ProfileContent() {
         if (!prev || (b.tier ?? 0) > (prev.tier ?? 0)) best[tr] = b;
       }
     }
+
+    // map to icon src + title
     const out: { key: string; src: string; title: string }[] = [];
-    if (best.streak) out.push({ key: 'streak', src: '/badges/streak_wave.png', title: 'Streak' });
-    if (best.give && (best.give.tier ?? 0) > 0)
+    if (best.streak) {
+      out.push({
+        key: 'streak',
+        src: '/badges/streak_wave.png',
+        title: 'Streak',
+      });
+    }
+    if (best.give && (best.give.tier ?? 0) > 0) {
       out.push({
         key: `give-${best.give.tier}`,
         src: `/badges/give_rays_t${best.give.tier}.png`,
         title: `Giver • Tier ${best.give.tier}`,
       });
-    if (best.receive && (best.receive.tier ?? 0) > 0)
+    }
+    if (best.receive && (best.receive.tier ?? 0) > 0) {
       out.push({
         key: `receive-${best.receive.tier}`,
         src: `/badges/receive_bowl_t${best.receive.tier}.png`,
         title: `Receiver • Tier ${best.receive.tier}`,
       });
+    }
     return out;
   }, [badges]);
 
@@ -258,12 +202,13 @@ function ProfileContent() {
   }, [id]);
 
   // Start (or resume) a chat with this profile
-  const startChat = async () => {
+  async function startChat() {
     if (!viewerId || !profile) return;
-    if (viewerId === profile.id) return;
+    if (viewerId === profile.id) return; // don't message yourself
 
     setChatBusy(true);
     try {
+      // Existing request between viewer and this profile? (either direction)
       const { data: existing } = await supabase
         .from('requests')
         .select('id, offer_id, requester_profile_id, offers!inner(id, owner_id)')
@@ -274,10 +219,11 @@ function ProfileContent() {
         .limit(1);
 
       if (existing && existing.length > 0) {
-        useRouter().push(`/messages?thread=${profile.id}`);
+        router.push(`/messages?thread=${profile.id}`);
         return;
       }
 
+      // Otherwise, pick this user's most recent active offer to anchor a new request
       const { data: peerOffers, error: offersErr } = await supabase
         .from('offers')
         .select('id')
@@ -289,11 +235,13 @@ function ProfileContent() {
       if (offersErr) throw offersErr;
 
       const offerId = peerOffers?.[0]?.id as string | undefined;
+
       if (!offerId) {
-        useRouter().push(`/messages?thread=${profile.id}`);
+        router.push(`/messages?thread=${profile.id}`);
         return;
       }
 
+      // Create a minimal request so the chat is immediately sendable
       const { data: newReq, error: insertErr } = await supabase
         .from('requests')
         .insert([{ offer_id: offerId, requester_profile_id: viewerId }])
@@ -302,13 +250,13 @@ function ProfileContent() {
 
       if (insertErr) throw insertErr;
 
-      useRouter().push(`/messages?request=${newReq.id}`);
-    } catch {
-      useRouter().push(`/messages?thread=${profile.id}`);
+      router.push(`/messages?request=${newReq.id}`);
+    } catch (e) {
+      router.push(`/messages?thread=${profile.id}`);
     } finally {
       setChatBusy(false);
     }
-  };
+  }
 
   if (!profile) {
     return (
@@ -324,11 +272,13 @@ function ProfileContent() {
   }
 
   const isOwner = viewerId && viewerId === profile.id;
+  const badgesHref = `/profile/badges?id=${profile.id}`;
 
   return (
     <section className="mx-auto max-w-5xl space-y-4">
-      {/* Header card */}
+      {/* Header card (read-only) */}
       <div className="overflow-hidden rounded-xl border">
+        {/* Cover */}
         <div className="relative h-40 w-full md:h-56">
           {profile.cover_url ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -338,7 +288,9 @@ function ProfileContent() {
           )}
         </div>
 
+        {/* Header content */}
         <div className="relative px-4 pb-4 pt-12 md:px-6">
+          {/* Avatar */}
           <div className="absolute -top-10 left-4 h-20 w-20 overflow-hidden rounded-full border-4 border-white md:left-6 md:h-24 md:w-24">
             {profile.avatar_url ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -376,17 +328,77 @@ function ProfileContent() {
                 )}
               </div>
 
-              {/* Desktop badges */}
+              {/* Desktop badges — NOW CLICKABLE */}
               <div className="mt-3 hidden sm:block">
                 {badgesMsg && <span className="text-xs text-amber-700">{badgesMsg}</span>}
-                {/* badges render omitted here for brevity; they remain unchanged */}
+                {badgeIcons.length > 0 && (
+                  <div className="mt-1 flex items-center gap-5">
+                    {badgeIcons.map((b) => (
+                      <Link
+                        key={b.key}
+                        href={badgesHref}
+                        className="group focus:outline-none focus:ring-2 focus:ring-blue-400 rounded-full"
+                        title={`See all badges — ${b.title}`}
+                        aria-label={`See all badges — ${b.title}`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={b.src}
+                          alt={b.title}
+                          title={b.title}
+                          width={44}
+                          height={44}
+                          className="h-11 w-11 rounded-full"
+                        />
+                      </Link>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Mobile badges + Message button (unchanged from your last) */}
-              {/* ... keep your existing mobile badges + message button block here ... */}
+              {/* Mobile badges + Message button to the RIGHT — NOW CLICKABLE */}
+              <div className="mt-3 sm:hidden">
+                {badgesMsg && <span className="text-xs text-amber-700">{badgesMsg}</span>}
+                <div className="mt-1 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    {badgeIcons.map((b) => (
+                      <Link
+                        key={b.key}
+                        href={badgesHref}
+                        className="group focus:outline-none focus:ring-2 focus:ring-blue-400 rounded-full"
+                        title={`See all badges — ${b.title}`}
+                        aria-label={`See all badges — ${b.title}`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={b.src}
+                          alt={b.title}
+                          title={b.title}
+                          width={40}
+                          height={40}
+                          className="h-10 w-10 rounded-full"
+                        />
+                      </Link>
+                    ))}
+                  </div>
+
+                  {!isOwner && (
+                    <button
+                      type="button"
+                      onClick={startChat}
+                      disabled={!viewerId || chatBusy}
+                      className="ml-3 shrink-0 rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-60"
+                      title="Message"
+                      aria-label="Message this member"
+                    >
+                      {chatBusy ? 'Opening…' : 'Message'}
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
-            {/* Desktop actions */}
+            {/* Desktop actions (right side) */}
             <div className="hidden md:flex items-center gap-2 md:pr-1">
               {!isOwner && (
                 <button
@@ -405,7 +417,7 @@ function ProfileContent() {
         </div>
       </div>
 
-      {/* About/skills */}
+      {/* About/skills (read-only) */}
       {(profile.bio || (profile.skills?.length ?? 0) > 0) && (
         <div className="rounded-xl border p-4">
           {profile.bio && (
@@ -429,10 +441,10 @@ function ProfileContent() {
         </div>
       )}
 
-      {/* Two-column layout */}
+      {/* Two-column layout to match /profile */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
         {/* Offers (left) */}
-        <section id="offers" className="space-y-2 md:col-span-5">
+        <section className="space-y-2 md:col-span-5">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold">Active Offers</h2>
           </div>
@@ -443,18 +455,15 @@ function ProfileContent() {
             <p className="text-sm text-gray-600">No active offers yet.</p>
           )}
 
-          <div className="hidden grid-cols-1 gap-3 sm:grid">
+          <div className="grid grid-cols-1 gap-3">
             {offers.map((o) => (
               <OfferCard key={o.id} offer={o} />
             ))}
           </div>
         </section>
 
-        {/* Posts (right) */}
+        {/* Posts (right) – read-only feed */}
         <section className="space-y-2 md:col-span-7">
-          {/* MOBILE-ONLY: Offers carousel ABOVE composer/feed */}
-          <MobileOffersRail offers={offers} />
-
           <h2 className="text-base font-semibold">Posts</h2>
           <UserFeed profileId={profile.id} />
         </section>
