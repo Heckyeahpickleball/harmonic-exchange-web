@@ -53,7 +53,7 @@ function StatusBadge({ status }: { status: OfferRow['status'] }) {
 export default function OfferCard({
   offer,
   mine = false,
-  showAskCTA = false, // ← default off so browse grids won't show Ask
+  showAskCTA = false, // default off so Browse grid doesn't show Ask
   isAdmin = false,
   onDeleted,
   onApproved,
@@ -61,8 +61,6 @@ export default function OfferCard({
   const [deleting, setDeleting] = useState(false);
   const [approving, setApproving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
-  // Keep a local status so the card reflects changes immediately
   const [status, setStatus] = useState<OfferRow['status']>(offer.status);
 
   const thumb = useMemo(
@@ -86,7 +84,6 @@ export default function OfferCard({
   }
 
   async function handleApprove() {
-    // Try secured RPC first; fallback to direct update if RPC is missing.
     setErr(null);
     try {
       setApproving(true);
@@ -103,7 +100,6 @@ export default function OfferCard({
 
         if (!fnMissing) throw rpc.error;
 
-        // Fallback: direct update (requires correct RLS for admin/mod)
         const { error: upErr } = await supabase
           .from('offers')
           .update({ status: 'active' })
@@ -118,7 +114,6 @@ export default function OfferCard({
           throw upErr;
         }
 
-        // Best-effort admin action log (non-blocking)
         try {
           const { data: auth } = await supabase.auth.getUser();
           await supabase.from('admin_actions').insert({
@@ -131,8 +126,8 @@ export default function OfferCard({
         } catch {}
       }
 
-      setStatus('active');      // optimistic UI
-      onApproved?.(offer.id);   // let parent refresh if needed
+      setStatus('active');
+      onApproved?.(offer.id);
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to approve');
     } finally {
@@ -142,6 +137,70 @@ export default function OfferCard({
 
   const href = `/offers/${offer.id}`;
   const location = offer.is_online ? 'Online' : [offer.city, offer.country].filter(Boolean).join(', ');
+
+  // Build the lower action list (excludes "View", which moved to header)
+  const bottomActions: React.ReactElement[] = [];
+
+  if (showAskCTA && !mine) {
+    bottomActions.push(
+      <Link key="ask" href={href} className="hx-btn hx-btn--primary text-sm">
+        Ask to Receive
+      </Link>
+    );
+  }
+
+  if (offer.owner_id) {
+    bottomActions.push(
+      <Link
+        key="provider"
+        href={`/u/${offer.owner_id}`}
+        className="hx-btn hx-btn--outline-secondary text-sm"
+        title="View provider profile"
+      >
+        View Provider
+      </Link>
+    );
+  }
+
+  if (mine) {
+    bottomActions.push(
+      <Link
+        key="edit"
+        href={`/offers/${offer.id}/edit`}
+        className="hx-btn hx-btn--primary text-sm"
+        title="Edit this offer"
+      >
+        Edit
+      </Link>
+    );
+    bottomActions.push(
+      <button
+        key="delete"
+        type="button"
+        onClick={handleDelete}
+        disabled={deleting}
+        className="hx-btn hx-btn--secondary text-sm disabled:opacity-60"
+        title="Delete permanently"
+      >
+        {deleting ? 'Deleting…' : 'Delete'}
+      </button>
+    );
+  }
+
+  if (isAdmin && status === 'pending') {
+    bottomActions.push(
+      <button
+        key="approve"
+        type="button"
+        onClick={handleApprove}
+        disabled={approving}
+        className="hx-btn hx-btn--success text-sm disabled:opacity-60"
+        title="Approve this offer"
+      >
+        {approving ? 'Approving…' : 'Approve'}
+      </button>
+    );
+  }
 
   return (
     <article className="hx-card transition hover:shadow-md">
@@ -156,24 +215,23 @@ export default function OfferCard({
               sizes="(max-width: 768px) 100vw, 50vw"
             />
           ) : (
-            <div className="flex h-full items-center justify-center text-xs text-gray-400">
-              No image
-            </div>
+            <div className="flex h-full items-center justify-center text-xs text-gray-400">No image</div>
           )}
         </div>
       </Link>
 
       <div className="space-y-3 p-3">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <Link href={href} className="block text-base font-semibold hover:underline">
+        {/* Header row: title/description on left, View + status on right */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <Link href={href} className="block truncate text-base font-semibold hover:underline">
               {offer.title}
             </Link>
-            <div className="mt-0.5 text-xs text-gray-600">
+            <div className="mt-0.5 text-xs text-gray-600 truncate">
               {offer.offer_type} • {location || '—'}
             </div>
             {offer.owner_name && offer.owner_id && (
-              <div className="mt-0.5 text-xs text-gray-500">
+              <div className="mt-0.5 text-xs text-gray-500 truncate">
                 by{' '}
                 <Link href={`/u/${offer.owner_id}`} className="hx-link">
                   {offer.owner_name}
@@ -181,68 +239,17 @@ export default function OfferCard({
               </div>
             )}
           </div>
-          <StatusBadge status={status} />
+
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <StatusBadge status={status} />
+            <Link href={href} className="hx-btn hx-btn--outline-primary text-sm">
+              View
+            </Link>
+          </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex flex-wrap gap-2">
-          <Link href={href} className="hx-btn hx-btn--outline-primary text-sm">
-            View
-          </Link>
-
-          {/* Ask CTA only if explicitly allowed AND not mine */}
-          {showAskCTA && !mine && (
-            <Link href={href} className="hx-btn hx-btn--primary text-sm">
-              Ask to Receive
-            </Link>
-          )}
-
-          {/* View Provider */}
-          {offer.owner_id && (
-            <Link
-              href={`/u/${offer.owner_id}`}
-              className="hx-btn hx-btn--outline-secondary text-sm"
-              title="View provider profile"
-            >
-              View Provider
-            </Link>
-          )}
-
-          {/* Owner: Edit + Delete */}
-          {mine && (
-            <>
-              <Link
-                href={`/offers/${offer.id}/edit`}
-                className="hx-btn hx-btn--primary text-sm"
-                title="Edit this offer"
-              >
-                Edit
-              </Link>
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={deleting}
-                className="hx-btn hx-btn--secondary text-sm disabled:opacity-60"
-                title="Delete permanently"
-              >
-                {deleting ? 'Deleting…' : 'Delete'}
-              </button>
-            </>
-          )}
-
-          {/* Admin: Approve pending */}
-          {isAdmin && status === 'pending' && (
-            <button
-              type="button"
-              onClick={handleApprove}
-              disabled={approving}
-              className="hx-btn hx-btn--success text-sm disabled:opacity-60"
-              title="Approve this offer"
-            >
-              {approving ? 'Approving…' : 'Approve'}
-            </button>
-          )}
-        </div>
+        {/* Bottom actions (hidden when empty for a tighter card) */}
+        {bottomActions.length > 0 && <div className="flex flex-wrap gap-2">{bottomActions}</div>}
 
         {err && <p className="text-xs text-red-600">{err}</p>}
       </div>
