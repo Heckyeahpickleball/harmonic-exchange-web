@@ -364,11 +364,22 @@ function ChatPane({
               </div>
             </div>
 
+            {/* Desktop actions */}
             <div className="hidden md:flex items-center gap-2">
+              <a className="rounded border px-2 py-1 text-xs hover:bg-gray-50" href={`/u/${thread.peer_id}`}>
+                View profile
+              </a>
               <a className="rounded border px-2 py-1 text-xs hover:bg-gray-50" href={`/offers/${thread.offer_id}`}>
                 View offer
               </a>
             </div>
+          </div>
+
+          {/* Mobile action (profile) */}
+          <div className="flex justify-end gap-2 px-3 pb-2 md:hidden">
+            <a className="rounded border px-2 py-1 text-xs hover:bg-gray-50" href={`/u/${thread.peer_id}`}>
+              View profile
+            </a>
           </div>
 
           {shared.length > 0 && (
