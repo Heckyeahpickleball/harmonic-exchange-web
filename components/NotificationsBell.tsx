@@ -35,7 +35,7 @@ export default function NotificationsBell() {
   const [rows, setRows] = useState<Notif[]>([]);
   const unread = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
 
-  // Mobile-only tab (desktop always shows notifications)
+  // Mobile-only tab
   const [activeTab, setActiveTab] = useState<'notifications' | 'messages'>('notifications');
 
   // Refs for close behavior
@@ -161,7 +161,6 @@ export default function NotificationsBell() {
       case 'message_received': {
         const snip = body ? `: ${body.slice(0, 80)}` : '';
         const on = offerTitle ? ` on “${offerTitle}”` : '';
-        // ✅ Route messages to /messages
         return { text: `New message${on}${snip}`, href: reqId ? `/messages?thread=${reqId}` : '/messages' };
       }
 
@@ -273,7 +272,8 @@ export default function NotificationsBell() {
     const onDown = (e: MouseEvent | TouchEvent) => {
       const root = rootRef.current;
       if (!root) return;
-      if (!root.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node | null;
+      if (!target || !root.contains(target)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
 
@@ -300,11 +300,14 @@ export default function NotificationsBell() {
     }
   }, [open]);
 
-  // Desktop: close only when leaving the bell+panel region (and guard for non-Node targets)
+  // Safely handle mouse/pointer leave (guard against non-Node relatedTarget)
+  const isNode = (v: any): v is Node =>
+    !!v && typeof v === 'object' && typeof (v as any).nodeType === 'number';
+
   const handlePanelLeave = (evt: React.MouseEvent | React.PointerEvent) => {
-    const to = (evt as any).relatedTarget;
+    const next = (evt as any).relatedTarget ?? (evt as any).toElement ?? null;
     const root = rootRef.current;
-    if (root && to instanceof Node && root.contains(to)) {
+    if (root && isNode(next) && root.contains(next)) {
       cancelScheduledClose();
       return;
     }
@@ -350,14 +353,14 @@ export default function NotificationsBell() {
           onPointerLeave={handlePanelLeave}
           className={[
             'hx-card z-50 p-0',
-            // ✅ Desktop: absolute dropdown overlaps page
+            // Desktop: absolute dropdown overlaps page
             'sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:w-[360px] sm:max-w-[92vw] sm:mx-0 sm:inset-auto',
-            // ✅ Mobile: fixed sheet
+            // Mobile: fixed sheet
             'fixed inset-x-2 top-2 mx-auto w-[calc(100vw-1rem)] max-w-[560px]',
             'max-h-[85dvh] rounded-xl overflow-hidden',
           ].join(' ')}
         >
-          {/* Mobile header: Notifications / Messages */}
+          {/* MOBILE header: Notifications / Messages */}
           <div className="block sm:hidden p-2 border-b">
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -372,7 +375,7 @@ export default function NotificationsBell() {
                 onClick={() => {
                   setActiveTab('messages');
                   setOpen(false);
-                  router.push('/messages'); // ✅ mobile “Messages” goes to /messages
+                  router.push('/messages');
                 }}
                 className="hx-btn hx-btn--primary text-sm w-full"
               >
@@ -381,15 +384,35 @@ export default function NotificationsBell() {
             </div>
           </div>
 
-          {/* Desktop header */}
+          {/* DESKTOP header: Notifications + teal Messages + Mark all read */}
           <div className="hidden sm:flex items-center justify-between border-b px-3 py-2">
             <strong className="text-sm">Notifications</strong>
-            <button onClick={markAllRead} className="hx-btn hx-btn--secondary text-xs px-2 py-1" type="button">
-              Mark all read
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  router.push('/messages');
+                }}
+                className="hx-btn hx-btn--primary text-xs px-2 py-1"
+                title="Go to Messages"
+                aria-label="Go to Messages"
+              >
+                Messages
+              </button>
+              <button
+                onClick={markAllRead}
+                className="hx-btn hx-btn--secondary text-xs px-2 py-1"
+                type="button"
+                title="Mark all read"
+                aria-label="Mark all read"
+              >
+                Mark all read
+              </button>
+            </div>
           </div>
 
-          {/* Content */}
+          {/* CONTENT */}
           {activeTab === 'notifications' && (
             <ul className={listClass}>
               {rows.length === 0 && (
@@ -419,7 +442,7 @@ export default function NotificationsBell() {
                               aria-hidden
                             />
                           )}
-                          <div className="text-[11px] text=[var(--hx-muted)]">{ts}</div>
+                          <div className="text-[11px] text-[var(--hx-muted)]">{ts}</div>
                         </div>
                         <div className="mt-0.5 break-words">{text}</div>
                       </div>
