@@ -22,6 +22,8 @@ export type OfferRow = {
 type Props = {
   offer: OfferRow;
   mine?: boolean;
+  /** Hide the 'Ask to Receive' button (use on Browse Offers). */
+  hideAsk?: boolean;
   /** If the viewing user is an admin/moderator, pass true to expose approval actions */
   isAdmin?: boolean;
   /** Called after a successful delete */
@@ -50,6 +52,7 @@ function StatusBadge({ status }: { status: OfferRow['status'] }) {
 export default function OfferCard({
   offer,
   mine = false,
+  hideAsk = false,
   isAdmin = false,
   onDeleted,
   onApproved,
@@ -186,7 +189,8 @@ export default function OfferCard({
             View
           </Link>
 
-          {!mine && (
+          {/* Hide this on Browse (pass hideAsk) but keep it elsewhere */}
+          {!mine && !hideAsk && (
             <Link href={href} className="hx-btn hx-btn--primary text-sm">
               Ask to Receive
             </Link>
@@ -203,6 +207,28 @@ export default function OfferCard({
             </Link>
           )}
 
+          {/* Owner: Edit + Delete */}
+          {mine && (
+            <>
+              <Link
+                href={`/offers/${offer.id}/edit`}
+                className="hx-btn hx-btn--primary text-sm"
+                title="Edit offer"
+              >
+                Edit
+              </Link>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="hx-btn hx-btn--secondary text-sm disabled:opacity-60"
+                title="Delete permanently"
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </>
+          )}
+
           {/* Admin: Approve pending */}
           {isAdmin && status === 'pending' && (
             <button
@@ -213,19 +239,6 @@ export default function OfferCard({
               title="Approve this offer"
             >
               {approving ? 'Approving…' : 'Approve'}
-            </button>
-          )}
-
-          {/* Owner: Delete */}
-          {mine && (
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deleting}
-              className="hx-btn hx-btn--secondary text-sm disabled:opacity-60"
-              title="Delete permanently"
-            >
-              {deleting ? 'Deleting…' : 'Delete'}
             </button>
           )}
         </div>
