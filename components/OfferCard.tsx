@@ -21,9 +21,10 @@ export type OfferRow = {
 
 type Props = {
   offer: OfferRow;
+  /** True if the offer belongs to the viewing user (e.g., on Profile -> My offers) */
   mine?: boolean;
-  /** Hide the 'Ask to Receive' button (use on Browse Offers). */
-  hideAsk?: boolean;
+  /** Only show the Ask-to-Receive CTA when explicitly enabled. Default: false */
+  showAskCTA?: boolean;
   /** If the viewing user is an admin/moderator, pass true to expose approval actions */
   isAdmin?: boolean;
   /** Called after a successful delete */
@@ -52,7 +53,7 @@ function StatusBadge({ status }: { status: OfferRow['status'] }) {
 export default function OfferCard({
   offer,
   mine = false,
-  hideAsk = false,
+  showAskCTA = false, // ← default off so browse grids won't show Ask
   isAdmin = false,
   onDeleted,
   onApproved,
@@ -189,8 +190,8 @@ export default function OfferCard({
             View
           </Link>
 
-          {/* Hide this on Browse (pass hideAsk) but keep it elsewhere */}
-          {!mine && !hideAsk && (
+          {/* Ask CTA only if explicitly allowed AND not mine */}
+          {showAskCTA && !mine && (
             <Link href={href} className="hx-btn hx-btn--primary text-sm">
               Ask to Receive
             </Link>
@@ -213,7 +214,7 @@ export default function OfferCard({
               <Link
                 href={`/offers/${offer.id}/edit`}
                 className="hx-btn hx-btn--primary text-sm"
-                title="Edit offer"
+                title="Edit this offer"
               >
                 Edit
               </Link>
