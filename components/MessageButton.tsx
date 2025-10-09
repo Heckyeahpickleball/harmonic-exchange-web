@@ -29,7 +29,7 @@ export default function MessageButton({ toId, className = '', children }: Props)
       }
       if (me === toId) return;
 
-      // find existing
+      // find existing request in either direction
       const { data: existing } = await supabase
         .from('requests')
         .select('id, offers!inner(owner_id)')
@@ -41,12 +41,12 @@ export default function MessageButton({ toId, className = '', children }: Props)
 
       if (existing && existing.length > 0) {
         const req = existing[0] as any;
-        const tab = req.offers?.owner_id === me ? 'received' : 'sent';
-        router.push(`/inbox?tab=${tab}&thread=${req.id}`);
+        // ✅ Always route to /messages now
+        router.push(`/messages?thread=${req.id}`);
         return;
       }
 
-      // else create
+      // else create anchored to most-recent active offer, if any
       const { data: peerOffers } = await supabase
         .from('offers')
         .select('id')
@@ -57,7 +57,7 @@ export default function MessageButton({ toId, className = '', children }: Props)
 
       const offerId = peerOffers?.[0]?.id as string | undefined;
       if (!offerId) {
-        router.push('/inbox');
+        router.push('/messages');
         return;
       }
 
@@ -67,7 +67,7 @@ export default function MessageButton({ toId, className = '', children }: Props)
         .select('id')
         .single();
 
-      router.push(`/inbox?tab=sent&thread=${newReq?.id}`);
+      router.push(`/messages?thread=${newReq?.id}`);
     } finally {
       setBusy(false);
     }

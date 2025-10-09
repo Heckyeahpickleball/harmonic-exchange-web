@@ -1,7 +1,7 @@
 // components/NotificationsBell.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -33,26 +33,32 @@ export default function NotificationsBell() {
   const [open, setOpen] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [rows, setRows] = useState<Notif[]>([]);
+  const unread = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
+
+  // Mobile-only tab (desktop always shows notifications)
+  const [activeTab, setActiveTab] = useState<'notifications' | 'messages'>('notifications');
+
+  // Refs for close behavior
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const closeTimer = useRef<number | null>(null);
 
-  // counts
-  const unreadTotal = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
-  const unreadMessages = useMemo(
-    () => rows.filter((r) => r.type === 'message_received' && !r.read_at).length,
-    [rows]
-  );
-  const badgeNumber = unreadMessages > 0 ? unreadMessages : unreadTotal;
+  const scheduleClose = useCallback((delay = 0) => {
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => setOpen(false), delay);
+  }, []);
 
-  // De-dupe caches
+  const cancelScheduledClose = useCallback(() => {
+    if (closeTimer.current) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }, []);
+
+  // Caches + de-dupe
   const titleCache = useRef(new Map<string, string>());
   const requesterCache = useRef(new Map<string, string>());
   const sigSeen = useRef<Set<string>>(new Set());
-
-  function sig(n: Notif) {
-    return `${n.profile_id}|${n.type}|${n.data?.offer_id ?? ''}|${n.data?.request_id ?? ''}|${n.data?.track ?? ''}|${
-      n.data?.tier ?? ''
-    }`;
-  }
 
   async function enrichOfferTitles(notifs: Notif[]) {
     const missing = Array.from(
@@ -134,13 +140,19 @@ export default function NotificationsBell() {
         const track = n.data?.track as string | undefined;
         const tier = n.data?.tier as number | undefined;
         const niceTrack =
-          track === 'give' ? 'Giver'
-          : track === 'receive' ? 'Receiver'
-          : track === 'streak' ? 'Streak'
-          : track === 'completed_exchange' ? 'Completed Exchanges'
-          : track === 'requests_made' ? 'Requests Made'
-          : track === 'shared_offers' ? 'Offers Shared'
-          : track ?? 'Badge';
+          track === 'give'
+            ? 'Giver'
+            : track === 'receive'
+            ? 'Receiver'
+            : track === 'streak'
+            ? 'Streak'
+            : track === 'completed_exchange'
+            ? 'Completed Exchanges'
+            : track === 'requests_made'
+            ? 'Requests Made'
+            : track === 'shared_offers'
+            ? 'Offers Shared'
+            : track ?? 'Badge';
         const text = `🎉 New badge earned — ${niceTrack}${tier != null ? ` (Tier ${tier})` : ''}`;
         return { text, href: '/profile#badges' };
       }
@@ -149,9 +161,8 @@ export default function NotificationsBell() {
       case 'message_received': {
         const snip = body ? `: ${body.slice(0, 80)}` : '';
         const on = offerTitle ? ` on “${offerTitle}”` : '';
-        // IMPORTANT: go straight to /messages and pass the request id for preselect
-        const href = reqId ? `/messages?request=${encodeURIComponent(reqId)}` : '/messages';
-        return { text: `New message${on}${snip}`, href };
+        // ✅ Route messages to /messages
+        return { text: `New message${on}${snip}`, href: reqId ? `/messages?thread=${reqId}` : '/messages' };
       }
 
       case 'fulfillment_reminder': {
@@ -172,6 +183,7 @@ export default function NotificationsBell() {
     const ids = rows.filter((r) => !r.read_at).map((r) => r.id);
     if (!ids.length) return;
     const now = new Date().toISOString();
+
     setRows((prev) => prev.map((r) => (ids.includes(r.id) ? { ...r, read_at: now, _fresh: false } : r)));
     await supabase.from('notifications').update({ read_at: now }).in('id', ids);
   }
@@ -182,6 +194,12 @@ export default function NotificationsBell() {
     const now = new Date().toISOString();
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, read_at: now, _fresh: false } : r)));
     await supabase.from('notifications').update({ read_at: now }).eq('id', id);
+  }
+
+  function sig(n: Notif) {
+    return `${n.profile_id}|${n.type}|${n.data?.offer_id ?? ''}|${n.data?.request_id ?? ''}|${n.data?.track ?? ''}|${
+      n.data?.tier ?? ''
+    }`;
   }
 
   // Load + realtime
@@ -249,24 +267,20 @@ export default function NotificationsBell() {
     })();
   }, []);
 
-  // Click-outside + Escape to close
+  // Close behavior (click-outside + Esc)
   useEffect(() => {
     if (!open) return;
-
     const onDown = (e: MouseEvent | TouchEvent) => {
       const root = rootRef.current;
       if (!root) return;
-      const t = e.target as Node | null;
-      if (t && root.contains(t)) return;
-      setOpen(false);
+      if (!root.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
 
     document.addEventListener('mousedown', onDown);
     document.addEventListener('touchstart', onDown, { passive: true });
     document.addEventListener('keydown', onKey);
+
     return () => {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('touchstart', onDown);
@@ -274,26 +288,41 @@ export default function NotificationsBell() {
     };
   }, [open]);
 
-  // smooth, glitch-free navigation after closing the panel
-  function navigateSafely(href: string) {
-    setOpen(false);
-    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
+  // On mobile, lock body scroll while open
+  useEffect(() => {
+    const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 639.95px)').matches;
+    if (open && isMobile) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = prev;
+      };
     }
-    requestAnimationFrame(() => {
-      router.push(href);
-    });
-  }
+  }, [open]);
 
+  // Desktop: close only when leaving the bell+panel region (and guard for non-Node targets)
+  const handlePanelLeave = (evt: React.MouseEvent | React.PointerEvent) => {
+    const to = (evt as any).relatedTarget;
+    const root = rootRef.current;
+    if (root && to instanceof Node && root.contains(to)) {
+      cancelScheduledClose();
+      return;
+    }
+    scheduleClose(0);
+  };
+
+  // Scrollable list sizing
   const listClass =
     'overflow-auto sm:max-h-[55vh] sm:rounded-b-xl ' +
     'max-h-[calc(85dvh-110px)] pb-[env(safe-area-inset-bottom)]';
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative" onMouseEnter={cancelScheduledClose}>
+      {/* Trigger */}
       <button
         className="hx-btn hx-btn--outline-primary text-sm px-3 py-2 relative"
         onClick={() => {
+          setActiveTab('notifications');
           setOpen((v) => !v);
         }}
         title="Notifications"
@@ -303,40 +332,47 @@ export default function NotificationsBell() {
         type="button"
       >
         <span aria-hidden>🔔</span>
-        {badgeNumber > 0 && (
+        {unread > 0 && (
           <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-[var(--hx-brand)] px-1 text-[11px] font-bold text-white">
-            {badgeNumber > 99 ? '99+' : badgeNumber}
+            {unread > 99 ? '99+' : unread}
           </span>
         )}
       </button>
 
       {open && (
         <div
+          ref={panelRef}
           role="menu"
           aria-label="Notifications"
+          onMouseEnter={cancelScheduledClose}
+          onMouseLeave={handlePanelLeave}
+          onPointerEnter={cancelScheduledClose}
+          onPointerLeave={handlePanelLeave}
           className={[
             'hx-card z-50 p-0',
-            'sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:w-[360px] sm:max-w-[92vw]',
-            'fixed inset-x-2 top-2 mx-auto w-[calc(100vw-1rem)] max-w-[560px] sm:static',
+            // ✅ Desktop: absolute dropdown overlaps page
+            'sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:w-[360px] sm:max-w-[92vw] sm:mx-0 sm:inset-auto',
+            // ✅ Mobile: fixed sheet
+            'fixed inset-x-2 top-2 mx-auto w-[calc(100vw-1rem)] max-w-[560px]',
             'max-h-[85dvh] rounded-xl overflow-hidden',
           ].join(' ')}
         >
-          {/* MOBILE header: Notifications / Messages */}
+          {/* Mobile header: Notifications / Messages */}
           <div className="block sm:hidden p-2 border-b">
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => {}}
+                onClick={() => setActiveTab('notifications')}
                 className="hx-btn hx-btn--outline-primary text-sm w-full"
               >
                 Notifications
               </button>
               <button
                 type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  navigateSafely('/messages');
+                onClick={() => {
+                  setActiveTab('messages');
+                  setOpen(false);
+                  router.push('/messages'); // ✅ mobile “Messages” goes to /messages
                 }}
                 className="hx-btn hx-btn--primary text-sm w-full"
               >
@@ -345,7 +381,7 @@ export default function NotificationsBell() {
             </div>
           </div>
 
-          {/* DESKTOP header */}
+          {/* Desktop header */}
           <div className="hidden sm:flex items-center justify-between border-b px-3 py-2">
             <strong className="text-sm">Notifications</strong>
             <button onClick={markAllRead} className="hx-btn hx-btn--secondary text-xs px-2 py-1" type="button">
@@ -353,76 +389,62 @@ export default function NotificationsBell() {
             </button>
           </div>
 
-          {/* CONTENT (scrollable list) */}
-          <ul className={listClass}>
-            {rows.length === 0 && (
-              <li className="px-3 py-3 text-sm text-[var(--hx-muted)]">No notifications.</li>
-            )}
-            {rows.map((n) => {
-              const { text, href } = label(n);
-              const ts = new Date(n.created_at).toLocaleString();
-              const isUnread = !n.read_at;
-              return (
-                <li
-                  key={n.id}
-                  className={[
-                    'border-b px-3 py-2 text-sm transition-colors',
-                    isUnread ? 'bg-teal-50/50' : '',
-                  ].join(' ')}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        {isUnread && (
-                          <span
-                            className={[
-                              'mt-1 inline-block h-2 w-2 rounded-full bg-[var(--hx-brand)]',
-                              n._fresh ? 'animate-pulse' : '',
-                            ].join(' ')}
-                            aria-hidden
-                          />
-                        )}
-                        <div className="text-[11px] text-[var(--hx-muted)]">{ts}</div>
+          {/* Content */}
+          {activeTab === 'notifications' && (
+            <ul className={listClass}>
+              {rows.length === 0 && (
+                <li className="px-3 py-3 text-sm text-[var(--hx-muted)]">No notifications.</li>
+              )}
+              {rows.map((n) => {
+                const { text, href } = label(n);
+                const ts = new Date(n.created_at).toLocaleString();
+                const isUnread = !n.read_at;
+                return (
+                  <li
+                    key={n.id}
+                    className={[
+                      'border-b px-3 py-2 text-sm transition-colors',
+                      isUnread ? 'bg-teal-50/50' : '',
+                    ].join(' ')}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          {isUnread && (
+                            <span
+                              className={[
+                                'mt-1 inline-block h-2 w-2 rounded-full bg-[var(--hx-brand)]',
+                                n._fresh ? 'animate-pulse' : '',
+                              ].join(' ')}
+                              aria-hidden
+                            />
+                          )}
+                          <div className="text-[11px] text=[var(--hx-muted)]">{ts}</div>
+                        </div>
+                        <div className="mt-0.5 break-words">{text}</div>
                       </div>
-                      <div className="mt-0.5 break-words">{text}</div>
+
+                      {href && (
+                        <button
+                          type="button"
+                          className="hx-btn hx-btn--outline-primary text-xs px-2 py-1 shrink-0"
+                          onClick={async () => {
+                            await markOneRead(n.id);
+                            setOpen(false);
+                            router.push(href);
+                          }}
+                          aria-label="View"
+                          title="View"
+                        >
+                          View
+                        </button>
+                      )}
                     </div>
-
-                    {href && (
-                      <button
-                        type="button"
-                        className="hx-btn hx-btn--outline-primary text-xs px-2 py-1 shrink-0"
-                        onClick={async (e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          await markOneRead(n.id);
-                          navigateSafely(href);
-                        }}
-                        aria-label="View"
-                        title="View"
-                      >
-                        View
-                      </button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-
-          {/* DESKTOP: quick Messages button */}
-          <div className="hidden sm:block border-t p-2">
-            <button
-              type="button"
-              className="hx-btn hx-btn--primary w-full text-sm"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                navigateSafely('/messages');
-              }}
-            >
-              Messages
-            </button>
-          </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       )}
     </div>

@@ -174,7 +174,7 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
           </div>
         </div>
 
-        {/* Badges + actions on mobile */}
+        {/* Mobile: badges only (Message button now comes from page layout to avoid duplicates) */}
         <div className="mt-3 sm:hidden pl-24">
           {badges && badges.length > 0 ? (
             <BadgeCluster
@@ -187,11 +187,7 @@ export default function ProfileHeader({ profile, isOwner = false }: ProfileHeade
           )}
         </div>
 
-        {!isOwner && (
-          <div className="mt-3 sm:hidden pl-24">
-            <MessageButton toId={profile.id} className="w-full justify-center" />
-          </div>
-        )}
+        {/* Owner mobile actions remain here */}
         {isOwner && (
           <div className="mt-3 sm:hidden pl-24 flex gap-2">
             <Link
