@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import OfferCard, { type OfferRow } from '@/components/OfferCard';
 import UserFeed from '@/components/UserFeed';
+import MessageButton from '@/components/MessageButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +33,16 @@ type ExpandedBadgeRow = {
   tier: number | null;
   earned_at: string | null;
 };
+
+/** Hydration-safe YYYY-MM-DD formatter */
+function formatYMD(dateStr?: string | null) {
+  if (!dateStr) return null;
+  try {
+    return new Date(dateStr).toISOString().slice(0, 10);
+  } catch {
+    return null;
+  }
+}
 
 /* ---------------- Mobile-only offers rail ---------------- */
 function MobileOffersRail({ offers }: { offers: OfferRow[] }) {
@@ -98,7 +109,7 @@ function AboutSkillsSection({
         <span className="text-base font-medium">About</span>
       </div>
 
-      {/* Centered circular chevron toggle (overlaps bottom edge like your screenshots) */}
+      {/* Centered circular chevron toggle */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -130,9 +141,7 @@ function AboutSkillsSection({
       >
         {hasBio && (
           <div className="mb-3">
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">
-              {bio}
-            </p>
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">{bio}</p>
           </div>
         )}
 
@@ -173,13 +182,11 @@ function ProfileContent() {
 
   // viewer (authed user)
   const [viewerId, setViewerId] = useState<string | null>(null);
-  const [chatBusy, setChatBusy] = useState(false);
 
   // badges (public view)
   const [badges, setBadges] = useState<ExpandedBadgeRow[]>([]);
   const [badgesMsg, setBadgesMsg] = useState<string>('');
 
-  // load viewer
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -189,7 +196,6 @@ function ProfileContent() {
     return () => { cancelled = true; };
   }, []);
 
-  // load profile
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -292,59 +298,6 @@ function ProfileContent() {
     return () => { cancelled = true; };
   }, [id]);
 
-  // Start (or resume) a chat with this profile
-  async function startChat() {
-    if (!profile) return;
-
-    if (viewerId && viewerId === profile.id) return; // own profile
-
-    try {
-      setChatBusy(true);
-      // check existing request in either direction
-      const { data: existing } = await supabase
-        .from('requests')
-        .select('id, offer_id, requester_profile_id, offers!inner(id, owner_id)')
-        .or(
-          `and(offers.owner_id.eq.${profile.id},requester_profile_id.eq.${viewerId}),and(offers.owner_id.eq.${viewerId},requester_profile_id.eq.${profile.id})`
-        )
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (existing && existing.length > 0) {
-        router.push(`/messages?thread=${profile.id}`);
-        return;
-      }
-
-      // new request anchored to most recent active offer if available
-      const { data: peerOffers } = await supabase
-        .from('offers')
-        .select('id')
-        .eq('owner_id', profile.id)
-        .eq('status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      const offerId = peerOffers?.[0]?.id as string | undefined;
-
-      if (!offerId) {
-        router.push(`/messages?thread=${profile.id}`);
-        return;
-      }
-
-      const { data: newReq } = await supabase
-        .from('requests')
-        .insert([{ offer_id: offerId, requester_profile_id: viewerId }])
-        .select('id')
-        .single();
-
-      router.push(`/messages?request=${newReq?.id}`);
-    } catch {
-      router.push(`/messages?thread=${profile?.id}`);
-    } finally {
-      setChatBusy(false);
-    }
-  }
-
   if (!profile) {
     return (
       <section className="max-w-5xl">
@@ -359,9 +312,9 @@ function ProfileContent() {
   // Keep Message button visible unless definitively own profile
   const isOwner = viewerId ? viewerId === profile.id : false;
   const showMessageButton = !isOwner;
-  const messageDisabled = chatBusy || !viewerId;
 
   const badgesHref = `/profile/badges?id=${profile.id}`;
+  const memberSince = formatYMD(profile.created_at);
 
   return (
     <section className="mx-auto max-w-5xl space-y-4">
@@ -406,10 +359,10 @@ function ProfileContent() {
                 ) : (
                   <span>—</span>
                 )}
-                {profile.created_at && (
+                {memberSince && (
                   <>
                     <span className="mx-2">•</span>
-                    <span>Member since {new Date(profile.created_at).toLocaleDateString()}</span>
+                    <span>Member since {memberSince}</span>
                   </>
                 )}
               </div>
@@ -442,8 +395,8 @@ function ProfileContent() {
                 )}
               </div>
 
-              {/* Mobile badges + Message button (right) — clickable */}
-              <div className="mt-3 sm:hidden">
+              {/* Mobile badges + Message button */}
+              <div className="mt-3 block md:hidden">
                 {badgesMsg && <span className="text-xs text-amber-700">{badgesMsg}</span>}
                 <div className="mt-1 flex items-center justify-between">
                   <div className="flex items-center gap-4">
@@ -469,46 +422,26 @@ function ProfileContent() {
                   </div>
 
                   {showMessageButton && (
-                    <button
-                      type="button"
-                      onClick={startChat}
-                      disabled={messageDisabled}
-                      className="ml-3 shrink-0 rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-60"
-                      title="Message"
-                      aria-label="Message this member"
-                    >
-                      {chatBusy ? 'Opening…' : 'Message'}
-                    </button>
+                    <MessageButton toId={profile.id} className="ml-3 shrink-0" />
                   )}
                 </div>
               </div>
             </div>
 
-            {/* Desktop actions (right side) */}
+            {/* Desktop actions (right side) — hidden on mobile to avoid duplicate */}
             <div className="hidden md:flex items-center gap-2 md:pr-1">
-              {showMessageButton && (
-                <button
-                  type="button"
-                  onClick={startChat}
-                  disabled={messageDisabled}
-                  className="hx-btn hx-btn--primary text-sm disabled:opacity-60"
-                  title="Message"
-                  aria-label="Message this member"
-                >
-                  {chatBusy ? 'Opening…' : 'Message'}
-                </button>
-              )}
+              {showMessageButton && <MessageButton toId={profile.id} />}
             </div>
           </div>
         </div>
       </div>
 
-      {/* NEW: A single collapsible wrapping ALL of About + Skills (no “see more”) */}
+      {/* About + Skills */}
       <AboutSkillsSection bio={profile.bio} skills={profile.skills} />
 
       {/* Two-column layout */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-        {/* Offers (left column list on desktop) */}
+        {/* Offers (left) */}
         <section id="offers" className="space-y-2 md:col-span-5">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold">Active Offers</h2>
@@ -529,9 +462,7 @@ function ProfileContent() {
 
         {/* Posts (right) */}
         <section className="space-y-2 md:col-span-7">
-          {/* MOBILE-ONLY: Offers carousel ABOVE composer/feed */}
           <MobileOffersRail offers={offers} />
-
           <h2 className="hidden sm:block text-base font-semibold">Posts</h2>
           <UserFeed profileId={profile.id} />
         </section>

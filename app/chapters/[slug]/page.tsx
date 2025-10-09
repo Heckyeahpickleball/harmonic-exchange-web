@@ -23,9 +23,13 @@ type Group = {
   created_at: string;
 };
 
-type Member = { profile_id: string; role: 'anchor' | 'member'; display_name: string | null };
+type Member = {
+  profile_id: string;
+  role: 'anchor' | 'member';
+  display_name: string | null;
+  avatar_url: string | null;
+};
 
-// Extended with owner + cover for editing & display
 type EventRow = {
   id: string;
   title: string;
@@ -60,7 +64,6 @@ type FeedPost = {
   profiles?: { display_name: string | null } | null;
 };
 
-// RSVP types
 type RSVPStatus = 'going' | 'interested' | 'cant_go';
 type RSVPRow = { event_id: string; profile_id: string; status: RSVPStatus };
 type ProfileMini = { id: string; display_name: string | null; avatar_url: string | null };
@@ -91,6 +94,7 @@ export default function ChapterPage() {
 
   const [editingAbout, setEditingAbout] = useState(false);
   const [aboutDraft, setAboutDraft] = useState('');
+  const [aboutExpandedMobile, setAboutExpandedMobile] = useState(false); // NEW
 
   // ====== Events state ======
   const [showEventForm, setShowEventForm] = useState(false);
@@ -132,6 +136,16 @@ export default function ChapterPage() {
 
   const offerTrackRef = useRef<HTMLDivElement | null>(null);
 
+  // === NEW: Events carousel track + scroll helper
+  const eventsTrackRef = useRef<HTMLDivElement | null>(null);
+  function scrollEvents(dir: 1 | -1) {
+    const el = eventsTrackRef.current;
+    if (!el) return;
+    const firstCard = el.querySelector<HTMLElement>('[data-event-card]');
+    const cardWidth = (firstCard?.offsetWidth ?? 320) + 12; // include gap
+    el.scrollBy({ left: dir * cardWidth, behavior: 'smooth' });
+  }
+
   function toIsoLocal(dt: string) {
     const d = new Date(dt);
     return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString();
@@ -156,6 +170,12 @@ export default function ChapterPage() {
     if (!candidate) return null;
     return isStoragePath(candidate) ? publicUrlForPath(String(candidate)) : String(candidate);
   }
+  // Normalize profile.avatar_url → public URL
+  function toPublicAvatar(urlOrPath: string | null | undefined): string | null {
+    if (!urlOrPath) return null;
+    if (/^https?:\/\//i.test(urlOrPath)) return urlOrPath;
+    return supabase.storage.from('avatars').getPublicUrl(urlOrPath).data.publicUrl;
+  }
 
   const loadAttendeesForEvents = useCallback(async (eventIds: string[]) => {
     if (!eventIds.length) return {};
@@ -164,7 +184,6 @@ export default function ChapterPage() {
       .select('event_id,profile_id,status')
       .in('event_id', eventIds);
 
-    // ALWAYS seed requested ids with empty buckets
     const byEvent: Record<
       string,
       { going: ProfileMini[]; interested: ProfileMini[]; cant_go: ProfileMini[] }
@@ -183,10 +202,11 @@ export default function ChapterPage() {
 
     const pmap = new Map<string, ProfileMini>();
     for (const p of (profs || []) as any[]) {
+      const raw = p.avatar_url ?? null;
       pmap.set(p.id, {
         id: p.id,
         display_name: p.display_name ?? null,
-        avatar_url: p.avatar_url ?? null,
+        avatar_url: raw ? (isStoragePath(raw) ? publicUrlForPath(raw) : raw) : null,
       });
     }
 
@@ -230,20 +250,34 @@ export default function ChapterPage() {
           setAboutDraft((gRow as Group).about ?? '');
         }
 
-        // 2) Members
-        const { data: gm } = await supabase.from('group_members').select('profile_id,role').eq('group_id', gRow.id);
+        // 2) Members (with avatar_url)
+        const { data: gm } = await supabase
+          .from('group_members')
+          .select('profile_id,role')
+          .eq('group_id', gRow.id);
+
         const ids = (gm || []).map((r: any) => r.profile_id);
         const { data: profs } = ids.length
-          ? await supabase.from('profiles').select('id,display_name').in('id', ids)
+          ? await supabase.from('profiles').select('id,display_name,avatar_url').in('id', ids)
           : { data: [] as any[] };
-        const nameMap = new Map<string, string | null>();
-        for (const p of (profs || []) as any[]) nameMap.set(p.id, p.display_name ?? null);
-        const mList: Member[] = (gm || []).map((r: any) => ({
-          profile_id: r.profile_id,
-          role: r.role,
-          display_name: nameMap.get(r.profile_id) ?? null,
-        }));
+
+        const pMap = new Map<string, { display_name: string | null; avatar_url: string | null }>();
+        for (const p of (profs || []) as any[]) {
+          pMap.set(p.id, { display_name: p.display_name ?? null, avatar_url: toPublicAvatar(p.avatar_url) });
+        }
+
+        const mList: Member[] = (gm || []).map((r: any) => {
+          const meta = pMap.get(r.profile_id);
+          return {
+            profile_id: r.profile_id,
+            role: r.role,
+            display_name: meta?.display_name ?? null,
+            avatar_url: meta?.avatar_url ?? null,
+          };
+        });
+
         mList.sort((a, b) => (a.role === 'anchor' && b.role !== 'anchor' ? -1 : 1));
+
         if (!cancelled) {
           setMembers(mList);
           const mine = uid ? mList.find((m) => m.profile_id === uid) : undefined;
@@ -263,7 +297,6 @@ export default function ChapterPage() {
         let eList: EventRow[] = (eRows || []) as any[];
         if (eList.length) {
           const eids = eList.map((e) => e.id);
-          // counts + my-rsvp
           const [cRes, mRes] = await Promise.all([
             supabase.from('event_rsvps').select('event_id').in('event_id', eids),
             uid
@@ -289,7 +322,6 @@ export default function ChapterPage() {
           }));
           setMyRsvp(myMap);
 
-          // preload attendees per event for the first few
           const rsvpMap = await loadAttendeesForEvents(eids.slice(0, 5));
           if (!cancelled) setRsvpByEvent((prev) => ({ ...prev, ...rsvpMap }));
         }
@@ -324,10 +356,7 @@ export default function ChapterPage() {
         let oList: OfferPreview[] = (oRows || []) as any[];
         if (oList.length) {
           const ids2 = Array.from(new Set(oList.map((o) => o.owner_id)));
-          const { data: profs3 } = await supabase
-            .from('profiles')
-            .select('id,display_name')
-            .in('id', ids2);
+          const { data: profs3 } = await supabase.from('profiles').select('id,display_name').in('id', ids2);
           const map3 = new Map<string, string | null>();
           for (const p of (profs3 || []) as any[]) map3.set(p.id, p.display_name ?? null);
           oList = oList.map((o) => ({
@@ -355,7 +384,6 @@ export default function ChapterPage() {
             if (!error) localRows = data || [];
           }
 
-          // Try 'online', fallback to 'is_online'
           let onlineRows: any[] = [];
           {
             const baseSelect = 'id,title,images,owner_id,created_at,city,country,status';
@@ -382,7 +410,6 @@ export default function ChapterPage() {
 
           const allRows = [...localRows, ...onlineRows];
 
-          // De-dupe by id, newest first
           const byId = new Map<string, any>();
           for (const row of allRows) {
             const prev = byId.get(row.id);
@@ -392,7 +419,6 @@ export default function ChapterPage() {
             .sort((a: any, b: any) => +new Date(b.created_at) - +new Date(a.created_at))
             .slice(0, 24);
 
-          // Owner names
           const ownerIds = Array.from(new Set(merged.map((r: any) => r.owner_id)));
           const { data: owners } =
             ownerIds.length
@@ -447,7 +473,9 @@ export default function ChapterPage() {
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(ch); };
+    return () => {
+      supabase.removeChannel(ch);
+    };
   }, [group]);
 
   const anchors = useMemo(() => members.filter((m) => m.role === 'anchor'), [members]);
@@ -466,12 +494,17 @@ export default function ChapterPage() {
         .insert({ group_id: group.id, profile_id: auth.user.id, role: 'member' });
       if (error) throw error;
       setIsMember(true);
+
+      const rawAvatar = auth.user.user_metadata?.avatar_url ?? null;
+      const normalizedAvatar = rawAvatar ? (isStoragePath(rawAvatar) ? publicUrlForPath(rawAvatar) : rawAvatar) : null;
+
       setMembers((prev) => [
         ...prev,
         {
           profile_id: auth.user.id,
           role: 'member',
           display_name: auth.user.user_metadata?.display_name ?? null,
+          avatar_url: normalizedAvatar,
         },
       ]);
     } catch (e: any) {
@@ -633,10 +666,9 @@ export default function ChapterPage() {
         location: evOnline ? null : evLocation.trim() || null,
         is_online: evOnline,
         cover_url,
-        created_by: auth.user.id, // ok if column exists; ignored if not
+        created_by: auth.user.id,
       };
 
-      // Insert and return full row so we can add it immediately
       const { data: inserted, error } = await supabase
         .from('group_events')
         .insert(eventData)
@@ -644,7 +676,6 @@ export default function ChapterPage() {
         .single();
       if (error) throw error;
 
-      // Optimistic add (no reload)
       setEvents((prev) => {
         const next = [...prev, { ...inserted, rsvp_count: 0, i_rsvped: false }];
         return next.sort((a, b) => (a.starts_at < b.starts_at ? -1 : 1));
@@ -671,7 +702,6 @@ export default function ChapterPage() {
     try {
       await supabase.from('group_events').delete().eq('id', id).eq('group_id', group.id);
       setEvents((prev) => prev.filter((x) => x.id !== id));
-      // clean RSVP cache
       setRsvpByEvent((prev) => {
         const { [id]: _, ...rest } = prev;
         return rest;
@@ -731,77 +761,58 @@ export default function ChapterPage() {
       };
       await supabase.from('group_events').update(payload).eq('id', id).eq('group_id', group.id);
 
-      setEvents((prev) =>
-        prev.map((ev) => (ev.id === id ? { ...ev, ...payload } : ev)),
-      );
+      setEvents((prev) => prev.map((ev) => (ev.id === id ? { ...ev, ...payload } : ev)));
       cancelEditEvent();
     } catch (e: any) {
       setMsg(e?.message ?? 'Could not save event.');
     }
   }
 
-// Replace your current setRsvp with this simple, safe version
-async function setRsvp(eventId: string, status: RSVPStatus) {
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) {
-    router.push('/signin');
-    return;
-  }
-
-  // Optimistic selection
-  setMyRsvp((prev) => ({ ...prev, [eventId]: status }));
-  setMsg('');
-
-  try {
-    // Always do a delete + insert (works even without a unique constraint)
-    const del = await supabase
-      .from('event_rsvps')
-      .delete()
-      .eq('event_id', eventId)
-      .eq('profile_id', auth.user.id);
-
-    if (del.error) {
-      console.error('RSVP delete error:', del.error.message || del.error);
-      // not fatal — continue to try insert
+  async function setRsvp(eventId: string, status: RSVPStatus) {
+    const { data: auth } = await supabase.auth.getUser();
+    if (!auth.user) {
+      router.push('/signin');
+      return;
     }
 
-    const ins = await supabase
-      .from('event_rsvps')
-      .insert({ event_id: eventId, profile_id: auth.user.id, status });
+    setMyRsvp((prev) => ({ ...prev, [eventId]: status }));
+    setMsg('');
 
-    if (ins.error) {
-      console.error('RSVP insert error:', ins.error.message || ins.error);
-      throw ins.error;
+    try {
+      const del = await supabase.from('event_rsvps').delete().eq('event_id', eventId).eq('profile_id', auth.user.id);
+      if (del.error) console.error('RSVP delete error:', del.error.message || del.error);
+
+      const ins = await supabase
+        .from('event_rsvps')
+        .insert({ event_id: eventId, profile_id: auth.user.id, status });
+      if (ins.error) {
+        console.error('RSVP insert error:', ins.error.message || ins.error);
+        throw ins.error;
+      }
+
+      const map = await loadAttendeesForEvents([eventId]);
+      const buckets = map?.[eventId] ?? { going: [], interested: [], cant_go: [] };
+
+      setRsvpByEvent((prev) => ({ ...prev, [eventId]: buckets }));
+
+      const nextCount = buckets.going.length + buckets.interested.length + buckets.cant_go.length;
+      setEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, rsvp_count: nextCount } : e)));
+    } catch (e: any) {
+      console.error('RSVP error:', e?.message || e);
+      setMsg(e?.message ?? 'Could not RSVP.');
+      setMyRsvp((prev) => ({ ...prev, [eventId]: prev[eventId] ?? null }));
     }
-
-    // Refresh just this event’s buckets + count, with a safe default
-    const map = await loadAttendeesForEvents([eventId]);
-    const buckets =
-      map?.[eventId] ?? { going: [], interested: [], cant_go: [] };
-
-    setRsvpByEvent((prev) => ({ ...prev, [eventId]: buckets }));
-
-    const nextCount =
-      buckets.going.length + buckets.interested.length + buckets.cant_go.length;
-
-    setEvents((prev) =>
-      prev.map((e) => (e.id === eventId ? { ...e, rsvp_count: nextCount } : e))
-    );
-  } catch (e: any) {
-    console.error('RSVP error:', e?.message || e);
-    setMsg(e?.message ?? 'Could not RSVP.');
-    // Roll back optimistic change
-    setMyRsvp((prev) => ({ ...prev, [eventId]: prev[eventId] ?? null }));
   }
-}
 
   function RsvpList({ eventId }: { eventId: string }) {
     const bucket = rsvpByEvent[eventId] || { going: [], interested: [], cant_go: [] };
     const Section = ({ title, arr }: { title: string; arr: ProfileMini[] }) => (
       <div className="mt-3">
-        <div className="text-xs font-semibold text-gray-600">{title} ({arr.length})</div>
+        <div className="text-xs font-semibold text-gray-600">
+          {title} ({arr.length})
+        </div>
         {arr.length === 0 ? (
-          <div className="text-xs text-gray-500 mt-1">No one yet.</div>
+          <div className="mt-1 text-xs text-gray-500">No one yet.</div>
         ) : (
           <ul className="mt-1 flex flex-wrap gap-3">
             {arr.map((p) => (
@@ -829,10 +840,10 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
     );
   }
 
-  if (loading) return <div className="max-w-5xl p-4 text-sm text-gray-600">Loading chapter…</div>;
+  if (loading) return <div className="max-w-5xl p-3 sm:p-4 text-sm text-gray-600">Loading chapter…</div>;
   if (!group) {
     return (
-      <div className="max-w-5xl p-4">
+      <div className="max-w-5xl p-3 sm:p-4">
         <h1 className="text-xl font-semibold">Chapter not found</h1>
         <p className="mt-2 text-gray-600">The chapter you’re looking for doesn’t exist or isn’t public.</p>
         <Link href="/chapters" className="mt-4 inline-block hx-btn hx-btn--outline-primary">
@@ -843,13 +854,13 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4">
+    <div className="mx-auto max-w-5xl space-y-4 p-3 sm:space-y-6 sm:p-4">
       {/* Header */}
-      <section className="hx-card p-4 sm:p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <section className="hx-card p-3 sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">{group.name}</h1>
-            <div className="mt-1 text-sm text-gray-600">
+            <h1 className="text-[22px] sm:text-3xl font-bold leading-tight">{group.name}</h1>
+            <div className="mt-0.5 text-sm text-gray-600">
               {group.city || group.country ? (
                 <>
                   {group.city}
@@ -862,12 +873,15 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
             </div>
           </div>
 
-          {/* Buttons row: Members, Anchor, Join/Leave */}
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Buttons row: scrollable on mobile */}
+          <div
+            className="flex items-center gap-2 overflow-x-auto [-webkit-overflow-scrolling:touch] sm:flex-wrap"
+            style={{ scrollbarWidth: 'thin' }}
+          >
             <button
               type="button"
               onClick={() => setMembersOpen(true)}
-              className="hx-btn hx-btn--primary px-3 py-2"
+              className="hx-btn hx-btn--primary px-3 py-2 shrink-0"
               title="See all members"
             >
               Members
@@ -875,7 +889,7 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
 
             <Link
               href={`/u/${group.created_by}`}
-              className="hx-btn hx-btn--secondary px-3 py-2"
+              className="hx-btn hx-btn--secondary px-3 py-2 shrink-0"
               title="View the anchor's profile"
             >
               Anchor
@@ -884,13 +898,13 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
             {isMember ? (
               <button
                 onClick={leaveChapter}
-                className="hx-btn hx-btn--outline-primary text-xs px-2 py-1"
+                className="hx-btn hx-btn--outline-primary text-xs px-3 py-2 shrink-0"
                 title="Leave this chapter"
               >
                 Leave
               </button>
             ) : (
-              <button onClick={joinChapter} className="hx-btn hx-btn--primary px-3 py-2">
+              <button onClick={joinChapter} className="hx-btn hx-btn--primary px-3 py-2 shrink-0">
                 Join
               </button>
             )}
@@ -902,17 +916,32 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-700">About this chapter</h3>
             {isAnchor && !editingAbout && (
-              <button
-                onClick={() => setEditingAbout(true)}
-                className="hx-btn hx-btn--outline-primary text-xs px-2 py-1"
-              >
+              <button onClick={() => setEditingAbout(true)} className="hx-btn hx-btn--outline-primary text-xs px-2 py-1">
                 Edit About
               </button>
             )}
           </div>
           {!editingAbout ? (
             group.about ? (
-              <p className="max-w-prose whitespace-pre-wrap text-gray-800">{group.about}</p>
+              <>
+                <p
+                  className={[
+                    'max-w-prose whitespace-pre-wrap text-gray-800',
+                    aboutExpandedMobile ? '' : 'line-clamp-4 sm:line-clamp-none',
+                  ].join(' ')}
+                >
+                  {group.about}
+                </p>
+                <div className="mt-1 sm:hidden">
+                  <button
+                    type="button"
+                    className="text-xs underline"
+                    onClick={() => setAboutExpandedMobile((s) => !s)}
+                  >
+                    {aboutExpandedMobile ? 'Show less' : 'Read more'}
+                  </button>
+                </div>
+              </>
             ) : (
               <p className="text-sm text-gray-600">No description yet.</p>
             )
@@ -958,7 +987,7 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
       </section>
 
       {/* Events */}
-      <section className="hx-card p-4 sm:p-6">
+      <section className="hx-card p-3 sm:p-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Upcoming events</h2>
         </div>
@@ -1030,7 +1059,7 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
 
                 {/* Cover image – real button + hidden input */}
                 <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium">Cover image (optional)</label>
+                  <label className="block text sm font-medium">Cover image (optional)</label>
                   <input
                     ref={coverInputRef}
                     className="sr-only"
@@ -1053,7 +1082,11 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
                     </button>
                     {evCoverPreview && (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={evCoverPreview} alt="Cover preview" className="h-16 w-28 rounded object-cover ring-1 ring-gray-200" />
+                      <img
+                        src={evCoverPreview}
+                        alt="Cover preview"
+                        className="h-16 w-28 rounded object-cover ring-1 ring-gray-200"
+                      />
                     )}
                     {evCoverPreview && (
                       <button
@@ -1075,7 +1108,7 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
             )}
 
             {showEventForm && (
-              <div className="">
+              <div>
                 <button disabled={creatingEvent} onClick={createEvent} className="hx-btn hx-btn--primary">
                   {creatingEvent ? 'Creating…' : 'Create event'}
                 </button>
@@ -1084,277 +1117,313 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
           </div>
         )}
 
-        {/* List */}
+        {/* Carousel */}
         {events.length === 0 ? (
           <p className="text-sm text-gray-600">No upcoming events yet.</p>
         ) : (
-          <ul className="space-y-3">
-            {events.map((e) => {
-              const isOpen = openEventId === e.id;
-              const canManage = canManageEvent(e);
-              const mine = myRsvp[e.id] || null;
+          <div className="relative">
+            {/* Desktop L/R controls */}
+            <div className="pointer-events-none absolute inset-y-0 left-0 right-0 hidden sm:block">
+              <div className="flex h-full items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => scrollEvents(-1)}
+                  className="pointer-events-auto ml-[-4px] rounded-full border bg-white/90 px-2.5 py-2 text-sm shadow hover:bg-white"
+                  aria-label="Scroll left"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollEvents(1)}
+                  className="pointer-events-auto mr-[-4px] rounded-full border bg-white/90 px-2.5 py-2 text-sm shadow hover:bg-white"
+                  aria-label="Scroll right"
+                >
+                  ›
+                </button>
+              </div>
+            </div>
 
-              return (
-                <li key={e.id} className="rounded border">
-                  {/* Clickable header */}
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const nextId = openEventId === e.id ? null : e.id;
-                      setOpenEventId(nextId);
-                      if (nextId) await ensureAttendeesLoaded(nextId);
-                    }}
-                    className="w-full text-left p-0 focus:outline-none"
-                    aria-expanded={isOpen}
+            {/* Track */}
+            <div
+              ref={eventsTrackRef}
+              className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none]"
+              style={{ scrollSnapType: 'x mandatory' }}
+            >
+              {events.map((e) => {
+                const isOpen = openEventId === e.id;
+                const canManage = canManageEvent(e);
+                const mine = myRsvp[e.id] || null;
+
+                return (
+                  <div
+                    key={e.id}
+                    data-event-card
+                    className="snap-start rounded border min-w-[85%] sm:min-w-[420px] md:min-w-[520px] max-w-[92%] sm:max-w-[520px] bg-white"
                   >
-                    {/* Cover image preview + basic info */}
-                    {e.cover_url && (
-                      <div className="relative h-40 w-full overflow-hidden rounded-t">
-                        <Image
-                          src={e.cover_url}
-                          alt={e.title}
-                          fill
-                          className="object-cover"
-                          sizes="(max-width: 640px) 100vw, 720px"
-                        />
-                      </div>
-                    )}
-                    <div className="flex flex-col gap-2 p-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <div className="font-medium">{e.title}</div>
-                        <div className="text-sm text-gray-600">
-                          {new Date(e.starts_at).toLocaleString()}
-                          {e.ends_at ? <> – {new Date(e.ends_at).toLocaleString()}</> : null}
-                        </div>
-                        <div className="text-sm text-gray-600">
-                          {e.is_online ? 'Online' : e.location || 'Location TBA'}
-                        </div>
-                        {e.description && (
-                          <p className="mt-2 line-clamp-2 text-sm text-gray-800">
-                            {e.description}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 pr-2 sm:pr-3">
-                        <span className="text-xs text-gray-600">{e.rsvp_count ?? 0} RSVPs</span>
-                        <span
-                          className={[
-                            'ml-auto inline-block rotate-0 transition-transform',
-                            isOpen ? 'rotate-180' : 'rotate-0',
-                          ].join(' ')}
-                          aria-hidden
-                        >
-                          ▼
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-
-                  {/* Expanded details */}
-                  {isOpen && (
-                    <div className="border-t p-3">
-                      {/* Manage buttons (owner/anchor) */}
-                      {canManage && editEventId !== e.id && (
-                        <div className="mb-2 flex gap-2">
-                          <button
-                            className="hx-btn hx-btn--outline-primary text-xs px-2 py-1"
-                            onClick={() => beginEditEvent(e)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="hx-btn hx-btn--secondary text-xs px-2 py-1"
-                            onClick={() => deleteEvent(e.id)}
-                          >
-                            Delete
-                          </button>
+                    {/* Clickable header */}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const nextId = openEventId === e.id ? null : e.id;
+                        setOpenEventId(nextId);
+                        if (nextId) await ensureAttendeesLoaded(nextId);
+                      }}
+                      className="w-full text-left p-0 focus:outline-none"
+                      aria-expanded={isOpen}
+                    >
+                      {e.cover_url && (
+                        <div className="relative h-36 sm:h-40 w-full overflow-hidden rounded-t">
+                          <Image
+                            src={e.cover_url}
+                            alt={e.title}
+                            fill
+                            className="object-cover"
+                            sizes="(max-width: 640px) 100vw, 720px"
+                          />
                         </div>
                       )}
+                      <div className="flex flex-col gap-2 p-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="font-medium">{e.title}</div>
+                          <div className="text-sm text-gray-600">
+                            {new Date(e.starts_at).toLocaleString()}
+                            {e.ends_at ? <> – {new Date(e.ends_at).toLocaleString()}</> : null}
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            {e.is_online ? 'Online' : e.location || 'Location TBA'}
+                          </div>
+                          {e.description && (
+                            <p className="mt-2 line-clamp-3 sm:line-clamp-2 text-sm text-gray-800">{e.description}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 pr-2 sm:pr-3">
+                          <span className="text-xs text-gray-600">{e.rsvp_count ?? 0} RSVPs</span>
+                          <span
+                            className={['ml-auto inline-block transition-transform', isOpen ? 'rotate-180' : ''].join(
+                              ' '
+                            )}
+                            aria-hidden
+                          >
+                            ▼
+                          </span>
+                        </div>
+                      </div>
+                    </button>
 
-                      {/* Edit form */}
-                      {editEventId === e.id && editDraft && (
-                        <div className="mb-3 rounded border p-3">
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <div className="sm:col-span-2">
-                              <label className="block text-sm font-medium">Title</label>
-                              <input
-                                className="mt-1 w-full rounded border px-3 py-2"
-                                value={editDraft.title}
-                                onChange={(ev) =>
-                                  setEditDraft((d) => d && { ...d, title: ev.target.value } as any)
-                                }
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-sm font-medium">Starts</label>
-                              <input
-                                type="datetime-local"
-                                className="mt-1 w-full rounded border px-3 py-2"
-                                value={editDraft.starts_at}
-                                onChange={(ev) =>
-                                  setEditDraft((d) => d && { ...d, starts_at: ev.target.value } as any)
-                                }
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-sm font-medium">Ends (optional)</label>
-                              <input
-                                type="datetime-local"
-                                className="mt-1 w-full rounded border px-3 py-2"
-                                value={editDraft.ends_at}
-                                onChange={(ev) =>
-                                  setEditDraft((d) => d && { ...d, ends_at: ev.target.value } as any)
-                                }
-                              />
-                            </div>
-                            <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
-                              <label className="inline-flex items-center gap-2 text-sm">
+                    {/* Expanded panel */}
+                    {isOpen && (
+                      <div className="border-t p-3">
+                        {/* Manage buttons */}
+                        {canManage && editEventId !== e.id && (
+                          <div className="mb-2 flex flex-wrap gap-2">
+                            <button
+                              className="hx-btn hx-btn--outline-primary text-xs px-2 py-1"
+                              onClick={() => beginEditEvent(e)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="hx-btn hx-btn--secondary text-xs px-2 py-1"
+                              onClick={() => deleteEvent(e.id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Edit form */}
+                        {editEventId === e.id && editDraft ? (
+                          <div className="mb-3 rounded border p-3">
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <div className="sm:col-span-2">
+                                <label className="block text-sm font-medium">Title</label>
                                 <input
-                                  type="checkbox"
-                                  checked={editDraft.is_online}
-                                  onChange={(ev) =>
-                                    setEditDraft((d) => d && { ...d, is_online: ev.target.checked } as any)
-                                  }
+                                  className="mt-1 w-full rounded border px-3 py-2"
+                                  value={editDraft.title}
+                                  onChange={(ev) => setEditDraft((d) => d && ({ ...d, title: ev.target.value }))}
                                 />
-                                Online event
-                              </label>
-                              {!editDraft.is_online && (
-                                <>
-                                  <label className="text-sm">Location</label>
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium">Starts</label>
+                                <input
+                                  type="datetime-local"
+                                  className="mt-1 w-full rounded border px-3 py-2"
+                                  value={editDraft.starts_at}
+                                  onChange={(ev) => setEditDraft((d) => d && ({ ...d, starts_at: ev.target.value }))}
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium">Ends (optional)</label>
+                                <input
+                                  type="datetime-local"
+                                  className="mt-1 w-full rounded border px-3 py-2"
+                                  value={editDraft.ends_at}
+                                  onChange={(ev) => setEditDraft((d) => d && ({ ...d, ends_at: ev.target.value }))}
+                                />
+                              </div>
+                              <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
+                                <label className="inline-flex items-center gap-2 text-sm">
                                   <input
-                                    className="rounded border px-2 py-1 text-sm flex-1"
-                                    value={editDraft.location}
-                                    onChange={(ev) =>
-                                      setEditDraft((d) => d && { ...d, location: ev.target.value } as any)
-                                    }
+                                    type="checkbox"
+                                    checked={editDraft.is_online}
+                                    onChange={(ev) => setEditDraft((d) => d && ({ ...d, is_online: ev.target.checked }))}
                                   />
-                                </>
-                              )}
-                            </div>
-                            <div className="sm:col-span-2">
-                              <label className="block text-sm font-medium">Description</label>
-                              <textarea
-                                className="mt-1 w-full rounded border px-3 py-2 min-h-[100px]"
-                                value={editDraft.description}
-                                onChange={(ev) =>
-                                  setEditDraft((d) => d && { ...d, description: ev.target.value } as any)
-                                }
-                              />
-                            </div>
-
-                            {/* EDIT: Cover image – real button + hidden input */}
-                            <div className="sm:col-span-2">
-                              <label className="block text-sm font-medium">Cover image</label>
-                              <input
-                                ref={editCoverInputRef}
-                                className="sr-only"
-                                type="file"
-                                accept="image/*"
-                                onChange={(ev) => {
-                                  const f = ev.target.files && ev.target.files[0];
-                                  setEditDraft((d) => {
-                                    if (!d) return d;
-                                    if (d.cover_preview) URL.revokeObjectURL(d.cover_preview);
-                                    return {
-                                      ...d,
-                                      cover_file: f || null,
-                                      cover_preview: f ? URL.createObjectURL(f) : null
-                                    };
-                                  });
-                                }}
-                              />
-                              <div className="mt-1 flex items-center gap-3">
-                                <button
-                                  type="button"
-                                  className="hx-btn hx-btn--secondary"
-                                  onClick={() => editCoverInputRef.current?.click()}
-                                >
-                                  Upload image
-                                </button>
-
-                                {(editDraft.cover_preview || editDraft.cover_url) && (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={editDraft.cover_preview || (editDraft.cover_url || '')}
-                                    alt="Cover preview"
-                                    className="h-16 w-28 rounded object-cover ring-1 ring-gray-200"
-                                  />
-                                )}
-
-                                {editDraft.cover_preview && (
-                                  <button
-                                    type="button"
-                                    className="text-xs underline"
-                                    onClick={() => {
-                                      setEditDraft((d) => {
-                                        if (!d) return d;
-                                        if (d.cover_preview) URL.revokeObjectURL(d.cover_preview);
-                                        return { ...d, cover_file: null, cover_preview: null };
-                                      });
-                                      if (editCoverInputRef.current) editCoverInputRef.current.value = '';
-                                    }}
-                                  >
-                                    Remove
-                                  </button>
+                                  Online event
+                                </label>
+                                {!editDraft.is_online && (
+                                  <>
+                                    <label className="text-sm">Location</label>
+                                    <input
+                                      className="rounded border px-2 py-1 text-sm flex-1"
+                                      value={editDraft.location}
+                                      onChange={(ev) => setEditDraft((d) => d && ({ ...d, location: ev.target.value }))}
+                                    />
+                                  </>
                                 )}
                               </div>
+                              <div className="sm:col-span-2">
+                                <label className="block text-sm font-medium">Description</label>
+                                <textarea
+                                  className="mt-1 w-full rounded border px-3 py-2 min-h-[100px]"
+                                  value={editDraft.description}
+                                  onChange={(ev) => setEditDraft((d) => d && ({ ...d, description: ev.target.value }))}
+                                />
+                              </div>
+
+                              {/* EDIT: Cover image */}
+                              <div className="sm:col-span-2">
+                                <label className="block text-sm font-medium">Cover image</label>
+                                <input
+                                  ref={editCoverInputRef}
+                                  className="sr-only"
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(ev) => {
+                                    const f = ev.target.files && ev.target.files[0];
+                                    setEditDraft((d) => {
+                                      if (!d) return d;
+                                      if (d.cover_preview) URL.revokeObjectURL(d.cover_preview);
+                                      return {
+                                        ...d,
+                                        cover_file: f || null,
+                                        cover_preview: f ? URL.createObjectURL(f) : null,
+                                      };
+                                    });
+                                  }}
+                                />
+                                <div className="mt-1 flex items-center gap-3">
+                                  <button
+                                    type="button"
+                                    className="hx-btn hx-btn--secondary"
+                                    onClick={() => editCoverInputRef.current?.click()}
+                                  >
+                                    Upload image
+                                  </button>
+
+                                  {(editDraft.cover_preview || editDraft.cover_url) && (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={editDraft.cover_preview || (editDraft.cover_url || '')}
+                                      alt="Cover preview"
+                                      className="h-16 w-28 rounded object-cover ring-1 ring-gray-200"
+                                    />
+                                  )}
+
+                                  {editDraft.cover_preview && (
+                                    <button
+                                      type="button"
+                                      className="text-xs underline"
+                                      onClick={() => {
+                                        setEditDraft((d) => {
+                                          if (!d) return d;
+                                          if (d.cover_preview) URL.revokeObjectURL(d.cover_preview);
+                                          return { ...d, cover_file: null, cover_preview: null };
+                                        });
+                                        if (editCoverInputRef.current) editCoverInputRef.current.value = '';
+                                      }}
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="mt-3 flex gap-2">
+                              <button className="hx-btn hx-btn--primary" onClick={() => saveEditEvent(e.id)}>
+                                Save
+                              </button>
+                              <button className="hx-btn hx-btn--secondary" onClick={cancelEditEvent}>
+                                Cancel
+                              </button>
                             </div>
                           </div>
-                          <div className="mt-3 flex gap-2">
-                            <button className="hx-btn hx-btn--primary" onClick={() => saveEditEvent(e.id)}>
-                              Save
-                            </button>
-                            <button className="hx-btn hx-btn--secondary" onClick={cancelEditEvent}>
-                              Cancel
-                            </button>
-                          </div>
+                        ) : null}
+
+                        {/* RSVP buttons */}
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            className={['hx-btn text-sm', mine === 'going' ? 'hx-btn--primary' : 'hx-btn--outline-primary'].join(
+                              ' '
+                            )}
+                            onClick={() => setRsvp(e.id, 'going')}
+                          >
+                            Going
+                          </button>
+                          <button
+                            className={[
+                              'hx-btn text-sm',
+                              mine === 'interested' ? 'hx-btn--primary' : 'hx-btn--outline-primary',
+                            ].join(' ')}
+                            onClick={() => setRsvp(e.id, 'interested')}
+                          >
+                            Interested
+                          </button>
+                          <button
+                            className={[
+                              'hx-btn text-sm',
+                              mine === 'cant_go' ? 'hx-btn--primary' : 'hx-btn--outline-primary',
+                            ].join(' ')}
+                            onClick={() => setRsvp(e.id, 'cant_go')}
+                          >
+                            Can't go
+                          </button>
                         </div>
-                      )}
 
-                      {/* RSVP buttons */}
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          className={[
-                            'hx-btn text-sm',
-                            mine === 'going' ? 'hx-btn--primary' : 'hx-btn--outline-primary',
-                          ].join(' ')}
-                          onClick={() => setRsvp(e.id, 'going')}
-                        >
-                          Going
-                        </button>
-                        <button
-                          className={[
-                            'hx-btn text-sm',
-                            mine === 'interested' ? 'hx-btn--primary' : 'hx-btn--outline-primary',
-                          ].join(' ')}
-                          onClick={() => setRsvp(e.id, 'interested')}
-                        >
-                          Interested
-                        </button>
-                        <button
-                          className={[
-                            'hx-btn text-sm',
-                            mine === 'cant_go' ? 'hx-btn--primary' : 'hx-btn--outline-primary',
-                          ].join(' ')}
-                          onClick={() => setRsvp(e.id, 'cant_go')}
-                        >
-                          Can't go
-                        </button>
+                        {/* Attendees */}
+                        <RsvpList eventId={e.id} />
                       </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
 
-                      {/* Attendees */}
-                      <RsvpList eventId={e.id} />
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+            {/* Mobile controls */}
+            <div className="mt-2 flex items-center justify-center gap-3 sm:hidden">
+              <button
+                type="button"
+                onClick={() => scrollEvents(-1)}
+                className="rounded-full border bg-white px-3 py-1 text-sm shadow"
+                aria-label="Scroll left"
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollEvents(1)}
+                className="rounded-full border bg-white px-3 py-1 text-sm shadow"
+                aria-label="Scroll right"
+              >
+                ›
+              </button>
+            </div>
+          </div>
         )}
       </section>
 
       {/* Posts */}
-      <section className="hx-card p-4 sm:p-6">
+      <section className="hx-card p-3 sm:p-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Recent posts</h2>
           {!isMember && <span className="text-xs text-gray-600">Join to post</span>}
@@ -1379,12 +1448,14 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
                   </button>
                 )}
               </div>
+
+              {/* Hidden input */}
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
                 multiple
-                className="mt-1"
+                className="sr-only"
                 onChange={(e) => {
                   const files = Array.from(e.target.files || []).slice(0, 6);
                   setPostFiles(files);
@@ -1392,12 +1463,37 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
                   if (fileInputRef.current) fileInputRef.current.value = '';
                 }}
               />
+
+              {/* Button row */}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="hx-btn hx-btn--secondary text-xs px-2.5 py-1.5 sm:text-sm sm:px-3 sm:py-2"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Add images
+                </button>
+
+                <button
+                  onClick={createPost}
+                  disabled={posting}
+                  className="hx-btn hx-btn--primary text-xs px-2.5 py-1.5 sm:text-sm sm:px-3 sm:py-2 disabled:opacity-50"
+                >
+                  {posting ? 'Posting…' : 'Post'}
+                </button>
+
+                {postFiles.length > 0 && (
+                  <span className="ml-2 text-xs text-gray-600">{postFiles.length} selected</span>
+                )}
+              </div>
+
+              {/* Previews */}
               {previewUrls.length > 0 && (
-                <div className="mt-2 grid grid-cols-6 gap-2">
+                <div className="mt-2 grid grid-cols-3 sm:grid-cols-6 gap-2">
                   {previewUrls.map((url, i) => (
                     <div key={i} className="relative rounded border">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={url} alt="" className="h-16 w-full rounded object-cover" />
+                      <img src={url} alt="" className="h-20 w-full rounded object-cover sm:h-16" />
                       <button
                         type="button"
                         onClick={() => removeImageAt(i)}
@@ -1411,12 +1507,6 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
                   ))}
                 </div>
               )}
-            </div>
-
-            <div className="mt-3">
-              <button onClick={createPost} disabled={posting} className="hx-btn hx-btn--primary">
-                {posting ? 'Posting…' : 'Post'}
-              </button>
             </div>
           </div>
         )}
@@ -1439,43 +1529,56 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
 
       {msg && <p className="text-sm text-amber-700">{msg}</p>}
 
-      {/* Members dialog */}
+      {/* Members dialog — full-screen sheet on mobile, card on desktop */}
       {membersOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
-          <div className="w-full max-w-xl rounded-xl bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <h3 className="text-base font-semibold">Members</h3>
-              <button onClick={() => setMembersOpen(false)} className="rounded border px-2 py-1 text-sm hover:bg-gray-50" type="button">
-                Close
-              </button>
-            </div>
-            <div className="max-h-[70vh] overflow-y-auto p-3">
-              {members.length === 0 ? (
-                <p className="text-sm text-gray-600">No members yet.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {members.map((m) => (
-                    <li key={m.profile_id} className="flex items-center justify-between rounded border p-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <div className="truncate font-medium">
-                            {m.display_name || 'Unnamed'}
+        <div className="fixed inset-0 z-50 bg-black/40">
+          <div className="fixed inset-0 sm:static sm:mx-auto sm:my-0 grid place-items-end sm:place-items-center">
+            <div className="h-full w-full sm:h-auto sm:w-full sm:max-w-xl rounded-none sm:rounded-xl bg-white shadow-xl">
+              <div className="sticky top-0 z-10 flex items-center justify-between border-b px-4 py-3 bg-white">
+                <h3 className="text-base font-semibold">Members</h3>
+                <button
+                  onClick={() => setMembersOpen(false)}
+                  className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
+                  type="button"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="max-h=[80vh] sm:max-h-[70vh] overflow-y-auto p-3">
+                {members.length === 0 ? (
+                  <p className="text-sm text-gray-600">No members yet.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {members.map((m) => (
+                      <li key={m.profile_id} className="flex items-center justify-between rounded border p-3">
+                        <div className="flex min-w-0 items-center gap-3">
+                          {m.avatar_url ? (
+                            <Image src={m.avatar_url} alt="" width={36} height={36} className="rounded-full object-cover" />
+                          ) : (
+                            <div className="h-9 w-9 rounded-full bg-gray-200" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <div className="truncate font-medium">{m.display_name || 'Unnamed'}</div>
+                              <span className="rounded-full border px-2 py-0.5 text-[11px] capitalize text-gray-700">
+                                {m.role}
+                              </span>
+                            </div>
                           </div>
-                          <span className="rounded-full border px-2 py-0.5 text-[11px] capitalize text-gray-700">
-                            {m.role}
-                          </span>
                         </div>
-                      </div>
-                      <Link
-                        href={`/u/${m.profile_id}`}
-                        className="hx-btn hx-btn--outline-primary text-xs px-2 py-1 whitespace-nowrap"
-                      >
-                        View profile
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
+
+                        <Link
+                          href={`/u/${m.profile_id}`}
+                          className="hx-btn hx-btn--outline-primary text-xs px-3 py-1.5 whitespace-nowrap"
+                        >
+                          View profile
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           </div>
         </div>
