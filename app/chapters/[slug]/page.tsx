@@ -23,7 +23,13 @@ type Group = {
   created_at: string;
 };
 
-type Member = { profile_id: string; role: 'anchor' | 'member'; display_name: string | null };
+// ⬇️ include avatar_url so we can render profile images
+type Member = {
+  profile_id: string;
+  role: 'anchor' | 'member';
+  display_name: string | null;
+  avatar_url: string | null;
+};
 
 // Extended with owner + cover for editing & display
 type EventRow = {
@@ -156,6 +162,16 @@ export default function ChapterPage() {
     if (!candidate) return null;
     return isStoragePath(candidate) ? publicUrlForPath(String(candidate)) : String(candidate);
   }
+// Turn whatever is in profiles.avatar_url into a public, loadable URL.
+// - If it's already a full https URL: return as-is.
+// - If it's a storage path: make a public URL from the `avatars` bucket.
+// - If it's empty: return null.
+function toPublicAvatar(urlOrPath: string | null | undefined): string | null {
+  if (!urlOrPath) return null;
+  if (/^https?:\/\//i.test(urlOrPath)) return urlOrPath; // already full URL
+  // Treat as a storage object path under the "avatars" bucket
+  return supabase.storage.from('avatars').getPublicUrl(urlOrPath).data.publicUrl;
+}
 
   const loadAttendeesForEvents = useCallback(async (eventIds: string[]) => {
     if (!eventIds.length) return {};
@@ -183,15 +199,18 @@ export default function ChapterPage() {
 
     const pmap = new Map<string, ProfileMini>();
     for (const p of (profs || []) as any[]) {
+      const raw = p.avatar_url ?? null;
       pmap.set(p.id, {
         id: p.id,
         display_name: p.display_name ?? null,
-        avatar_url: p.avatar_url ?? null,
+        avatar_url: raw ? (isStoragePath(raw) ? publicUrlForPath(raw) : raw) : null,
       });
     }
 
     for (const r of (rsvpRows as RSVPRow[])) {
-      const mini = pmap.get(r.profile_id) || { id: r.profile_id, display_name: null, avatar_url: null };
+      const mini =
+        pmap.get(r.profile_id) ||
+        { id: r.profile_id, display_name: null, avatar_url: null };
       byEvent[r.event_id][r.status].push(mini);
     }
     return byEvent;
@@ -230,26 +249,48 @@ export default function ChapterPage() {
           setAboutDraft((gRow as Group).about ?? '');
         }
 
-        // 2) Members
-        const { data: gm } = await supabase.from('group_members').select('profile_id,role').eq('group_id', gRow.id);
-        const ids = (gm || []).map((r: any) => r.profile_id);
-        const { data: profs } = ids.length
-          ? await supabase.from('profiles').select('id,display_name').in('id', ids)
-          : { data: [] as any[] };
-        const nameMap = new Map<string, string | null>();
-        for (const p of (profs || []) as any[]) nameMap.set(p.id, p.display_name ?? null);
-        const mList: Member[] = (gm || []).map((r: any) => ({
-          profile_id: r.profile_id,
-          role: r.role,
-          display_name: nameMap.get(r.profile_id) ?? null,
-        }));
-        mList.sort((a, b) => (a.role === 'anchor' && b.role !== 'anchor' ? -1 : 1));
-        if (!cancelled) {
-          setMembers(mList);
-          const mine = uid ? mList.find((m) => m.profile_id === uid) : undefined;
-          setIsMember(!!mine);
-          setIsAnchor(mine?.role === 'anchor' || uid === gRow.created_by);
-        }
+// 2) Members (now with avatar_url)
+const { data: gm } = await supabase
+  .from('group_members')
+  .select('profile_id,role')
+  .eq('group_id', gRow.id);
+
+const ids = (gm || []).map((r: any) => r.profile_id);
+const { data: profs } = ids.length
+  ? await supabase
+      .from('profiles')
+      .select('id,display_name,avatar_url')
+      .in('id', ids)
+  : { data: [] as any[] };
+
+// Build a quick map from profile id → {display_name, avatar_url(public)}
+const pMap = new Map<string, { display_name: string | null; avatar_url: string | null }>();
+for (const p of (profs || []) as any[]) {
+  pMap.set(p.id, {
+    display_name: p.display_name ?? null,
+    avatar_url: toPublicAvatar(p.avatar_url), // ⬅️ normalize here
+  });
+}
+
+const mList: Member[] = (gm || []).map((r: any) => {
+  const meta = pMap.get(r.profile_id);
+  return {
+    profile_id: r.profile_id,
+    role: r.role,
+    display_name: meta?.display_name ?? null,
+    avatar_url: meta?.avatar_url ?? null,
+  };
+});
+
+// anchors first
+mList.sort((a, b) => (a.role === 'anchor' && b.role !== 'anchor' ? -1 : 1));
+
+if (!cancelled) {
+  setMembers(mList);
+  const mine = uid ? mList.find((m) => m.profile_id === uid) : undefined;
+  setIsMember(!!mine);
+  setIsAnchor(mine?.role === 'anchor' || uid === gRow.created_by);
+}
 
         // 3) Events
         const { data: eRows } = await supabase
@@ -466,12 +507,18 @@ export default function ChapterPage() {
         .insert({ group_id: group.id, profile_id: auth.user.id, role: 'member' });
       if (error) throw error;
       setIsMember(true);
+
+      // Normalize optimistic avatar from user metadata if it's a storage path
+      const rawAvatar = auth.user.user_metadata?.avatar_url ?? null;
+      const normalizedAvatar = rawAvatar ? (isStoragePath(rawAvatar) ? publicUrlForPath(rawAvatar) : rawAvatar) : null;
+
       setMembers((prev) => [
         ...prev,
         {
           profile_id: auth.user.id,
           role: 'member',
           display_name: auth.user.user_metadata?.display_name ?? null,
+          avatar_url: normalizedAvatar,
         },
       ]);
     } catch (e: any) {
@@ -633,10 +680,9 @@ export default function ChapterPage() {
         location: evOnline ? null : evLocation.trim() || null,
         is_online: evOnline,
         cover_url,
-        created_by: auth.user.id, // ok if column exists; ignored if not
+        created_by: auth.user.id,
       };
 
-      // Insert and return full row so we can add it immediately
       const { data: inserted, error } = await supabase
         .from('group_events')
         .insert(eventData)
@@ -644,7 +690,6 @@ export default function ChapterPage() {
         .single();
       if (error) throw error;
 
-      // Optimistic add (no reload)
       setEvents((prev) => {
         const next = [...prev, { ...inserted, rsvp_count: 0, i_rsvped: false }];
         return next.sort((a, b) => (a.starts_at < b.starts_at ? -1 : 1));
@@ -671,7 +716,6 @@ export default function ChapterPage() {
     try {
       await supabase.from('group_events').delete().eq('id', id).eq('group_id', group.id);
       setEvents((prev) => prev.filter((x) => x.id !== id));
-      // clean RSVP cache
       setRsvpByEvent((prev) => {
         const { [id]: _, ...rest } = prev;
         return rest;
@@ -740,60 +784,54 @@ export default function ChapterPage() {
     }
   }
 
-// Replace your current setRsvp with this simple, safe version
-async function setRsvp(eventId: string, status: RSVPStatus) {
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) {
-    router.push('/signin');
-    return;
-  }
-
-  // Optimistic selection
-  setMyRsvp((prev) => ({ ...prev, [eventId]: status }));
-  setMsg('');
-
-  try {
-    // Always do a delete + insert (works even without a unique constraint)
-    const del = await supabase
-      .from('event_rsvps')
-      .delete()
-      .eq('event_id', eventId)
-      .eq('profile_id', auth.user.id);
-
-    if (del.error) {
-      console.error('RSVP delete error:', del.error.message || del.error);
-      // not fatal — continue to try insert
+  // Replace your current setRsvp with this simple, safe version
+  async function setRsvp(eventId: string, status: RSVPStatus) {
+    const { data: auth } = await supabase.auth.getUser();
+    if (!auth.user) {
+      router.push('/signin');
+      return;
     }
 
-    const ins = await supabase
-      .from('event_rsvps')
-      .insert({ event_id: eventId, profile_id: auth.user.id, status });
+    setMyRsvp((prev) => ({ ...prev, [eventId]: status }));
+    setMsg('');
 
-    if (ins.error) {
-      console.error('RSVP insert error:', ins.error.message || ins.error);
-      throw ins.error;
+    try {
+      const del = await supabase
+        .from('event_rsvps')
+        .delete()
+        .eq('event_id', eventId)
+        .eq('profile_id', auth.user.id);
+
+      if (del.error) {
+        console.error('RSVP delete error:', del.error.message || del.error);
+      }
+
+      const ins = await supabase
+        .from('event_rsvps')
+        .insert({ event_id: eventId, profile_id: auth.user.id, status });
+
+      if (ins.error) {
+        console.error('RSVP insert error:', ins.error.message || ins.error);
+        throw ins.error;
+      }
+
+      const map = await loadAttendeesForEvents([eventId]);
+      const buckets = map?.[eventId] ?? { going: [], interested: [], cant_go: [] };
+
+      setRsvpByEvent((prev) => ({ ...prev, [eventId]: buckets }));
+
+      const nextCount =
+        buckets.going.length + buckets.interested.length + buckets.cant_go.length;
+
+      setEvents((prev) =>
+        prev.map((e) => (e.id === eventId ? { ...e, rsvp_count: nextCount } : e))
+      );
+    } catch (e: any) {
+      console.error('RSVP error:', e?.message || e);
+      setMsg(e?.message ?? 'Could not RSVP.');
+      setMyRsvp((prev) => ({ ...prev, [eventId]: prev[eventId] ?? null }));
     }
-
-    // Refresh just this event’s buckets + count, with a safe default
-    const map = await loadAttendeesForEvents([eventId]);
-    const buckets =
-      map?.[eventId] ?? { going: [], interested: [], cant_go: [] };
-
-    setRsvpByEvent((prev) => ({ ...prev, [eventId]: buckets }));
-
-    const nextCount =
-      buckets.going.length + buckets.interested.length + buckets.cant_go.length;
-
-    setEvents((prev) =>
-      prev.map((e) => (e.id === eventId ? { ...e, rsvp_count: nextCount } : e))
-    );
-  } catch (e: any) {
-    console.error('RSVP error:', e?.message || e);
-    setMsg(e?.message ?? 'Could not RSVP.');
-    // Roll back optimistic change
-    setMyRsvp((prev) => ({ ...prev, [eventId]: prev[eventId] ?? null }));
   }
-}
 
   function RsvpList({ eventId }: { eventId: string }) {
     const bucket = rsvpByEvent[eventId] || { going: [], interested: [], cant_go: [] };
@@ -1030,7 +1068,7 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
 
                 {/* Cover image – real button + hidden input */}
                 <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium">Cover image (optional)</label>
+                  <label className="block text sm font-medium">Cover image (optional)</label>
                   <input
                     ref={coverInputRef}
                     className="sr-only"
@@ -1379,12 +1417,14 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
                   </button>
                 )}
               </div>
+
+              {/* Hidden input */}
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
                 multiple
-                className="mt-1"
+                className="sr-only"
                 onChange={(e) => {
                   const files = Array.from(e.target.files || []).slice(0, 6);
                   setPostFiles(files);
@@ -1392,6 +1432,31 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
                   if (fileInputRef.current) fileInputRef.current.value = '';
                 }}
               />
+
+              {/* BUTTON ROW: Add images (left) + Post (right of it) */}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="hx-btn hx-btn--secondary text-xs px-2.5 py-1.5 sm:text-sm sm:px-3 sm:py-2"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Add images
+                </button>
+
+                <button
+                  onClick={createPost}
+                  disabled={posting}
+                  className="hx-btn hx-btn--primary text-xs px-2.5 py-1.5 sm:text-sm sm:px-3 sm:py-2 disabled:opacity-50"
+                >
+                  {posting ? 'Posting…' : 'Post'}
+                </button>
+
+                {postFiles.length > 0 && (
+                  <span className="ml-2 text-xs text-gray-600">{postFiles.length} selected</span>
+                )}
+              </div>
+
+              {/* Previews */}
               {previewUrls.length > 0 && (
                 <div className="mt-2 grid grid-cols-6 gap-2">
                   {previewUrls.map((url, i) => (
@@ -1411,12 +1476,6 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
                   ))}
                 </div>
               )}
-            </div>
-
-            <div className="mt-3">
-              <button onClick={createPost} disabled={posting} className="hx-btn hx-btn--primary">
-                {posting ? 'Posting…' : 'Post'}
-              </button>
             </div>
           </div>
         )}
@@ -1456,16 +1515,32 @@ async function setRsvp(eventId: string, status: RSVPStatus) {
                 <ul className="space-y-2">
                   {members.map((m) => (
                     <li key={m.profile_id} className="flex items-center justify-between rounded border p-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <div className="truncate font-medium">
-                            {m.display_name || 'Unnamed'}
+                      {/* Left: avatar + name + role */}
+                      <div className="flex min-w-0 items-center gap-3">
+                        {m.avatar_url ? (
+                          <Image
+                            src={m.avatar_url}
+                            alt=""
+                            width={28}
+                            height={28}
+                            className="rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="h-7 w-7 rounded-full bg-gray-200" />
+                        )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <div className="truncate font-medium">
+                              {m.display_name || 'Unnamed'}
+                            </div>
+                            <span className="rounded-full border px-2 py-0.5 text-[11px] capitalize text-gray-700">
+                              {m.role}
+                            </span>
                           </div>
-                          <span className="rounded-full border px-2 py-0.5 text-[11px] capitalize text-gray-700">
-                            {m.role}
-                          </span>
                         </div>
                       </div>
+
+                      {/* Right: CTA */}
                       <Link
                         href={`/u/${m.profile_id}`}
                         className="hx-btn hx-btn--outline-primary text-xs px-2 py-1 whitespace-nowrap"
