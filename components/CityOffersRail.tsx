@@ -1,3 +1,4 @@
+// components/CityOffersRail.tsx
 'use client';
 
 import Link from 'next/link';
@@ -80,6 +81,7 @@ export default function CityOffersRail({
                     "
                   >
                     {img ? (
+                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={img}
                         alt=""
@@ -100,7 +102,7 @@ export default function CityOffersRail({
                     </div>
                     <div className="mt-2">
                       <span className="hx-btn hx-btn--primary inline-block text-[11px] px-2 py-1">
-                        Ask to Receive
+                        View
                       </span>
                     </div>
                   </div>
