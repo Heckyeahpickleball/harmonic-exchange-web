@@ -1,6 +1,7 @@
+// /app/(global)/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import CityOffersRail, { CityOffer } from '@/components/CityOffersRail';
@@ -15,7 +16,12 @@ type FeedPost = {
   images?: string[] | null;
   profiles?: { display_name: string | null } | null;
   group_id?: string | null;
+  // Optional fields if your schema has them — we won’t select them, just use if present
+  like_count?: number | null;
+  comments_count?: number | null;
 };
+
+type SortMode = 'recent' | 'popular';
 
 export default function GlobalExchangePage() {
   const [meId, setMeId] = useState<string | null>(null);
@@ -24,6 +30,11 @@ export default function GlobalExchangePage() {
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
+
+  // Filter/Sort UI for posts
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [sortMode, setSortMode] = useState<SortMode>('recent');
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -92,7 +103,7 @@ export default function GlobalExchangePage() {
           .select('id,profile_id,body,created_at,images,group_id,profiles(display_name)')
           .is('group_id', null) // <- global only
           .order('created_at', { ascending: false })
-          .limit(50);
+          .limit(200);
 
         function normalizeProfile<T extends { profiles?: any }>(row: T) {
           const p = (row as any).profiles;
@@ -113,7 +124,6 @@ export default function GlobalExchangePage() {
 
         if (!cancelled) setPosts(pList);
       } catch (e: any) {
-        console.error(e);
         if (!cancelled) setMsg(e?.message ?? 'Failed to load Global Exchange.');
       } finally {
         if (!cancelled) setLoading(false);
@@ -124,6 +134,46 @@ export default function GlobalExchangePage() {
       cancelled = true;
     };
   }, []);
+
+  // --- Popularity heuristic (works even if like_count/comments_count aren't in schema) ---
+  function popularityScore(p: FeedPost): number {
+    const likes = p.like_count ?? 0;
+    const comments = p.comments_count ?? 0;
+    const imgs = p.images?.length ?? 0;
+    const words = (p.body || '').trim().split(/\s+/).filter(Boolean).length;
+    return likes * 5 + comments * 3 + imgs * 2 + words / 40;
+  }
+
+  // --- Search scoring for posts ---
+  function searchScore(p: FeedPost, query: string): number {
+    if (!query.trim()) return 0;
+    const q = query.toLowerCase();
+    const hay = (p.body || '').toLowerCase();
+    if (!hay) return 0;
+
+    const occurrences = hay.split(q).length - 1;
+    let wordStart = 0;
+    const words = hay.split(/\b/);
+    for (const w of words) {
+      if (w.startsWith(q)) wordStart++;
+    }
+    return occurrences * 2 + wordStart;
+  }
+
+  // Apply sort + search boosting
+  const derivedPosts = useMemo(() => {
+    const bySort =
+      sortMode === 'recent'
+        ? [...posts].sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+        : [...posts].sort((a, b) => popularityScore(b) - popularityScore(a));
+
+    if (!search.trim()) return bySort;
+
+    const scored = bySort.map((p) => ({ p, s: searchScore(p, search) }));
+    const hits = scored.filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.p);
+    const rest = scored.filter((x) => x.s === 0).map((x) => x.p);
+    return [...hits, ...rest];
+  }, [posts, sortMode, search]);
 
   return (
     <div className="mx-auto max-w-6xl p-4 space-y-8">
@@ -169,12 +219,77 @@ export default function GlobalExchangePage() {
 
       {/* Global posts feed (only group_id = NULL) */}
       <section className="hx-card p-4 sm:p-6">
-        <h2 className="mb-3 text-lg font-semibold">Latest posts</h2>
-        {posts.length === 0 ? (
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Latest posts</h2>
+        </div>
+
+        {/* Thin line button & dropdown (Filter + Sort + Search) */}
+        <div className="relative mb-3">
+          <button
+            type="button"
+            className="w-full text-left text-xs text-gray-600 hover:text-gray-800 border-b pb-1"
+            onClick={() => setMenuOpen((s) => !s)}
+            aria-expanded={menuOpen}
+          >
+            Filter & Sort
+          </button>
+
+          {menuOpen && (
+            <div className="absolute z-10 mt-1 w-full rounded border bg-white p-2 shadow">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Sort */}
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-xs text-gray-600">Sort:</span>
+                  <button
+                    type="button"
+                    className={`rounded border px-2 py-1 text-xs ${
+                      sortMode === 'recent' ? 'bg-gray-800 text-white' : 'bg-white'
+                    }`}
+                    onClick={() => setSortMode('recent')}
+                  >
+                    Most Recent
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded border px-2 py-1 text-xs ${
+                      sortMode === 'popular' ? 'bg-gray-800 text-white' : 'bg-white'
+                    }`}
+                    onClick={() => setSortMode('popular')}
+                  >
+                    Most Popular
+                  </button>
+                </div>
+
+                {/* Search */}
+                <div className="flex-1 min-w-[160px]">
+                  <input
+                    className="w-full rounded border px-2 py-1 text-sm"
+                    placeholder="Search posts…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  className="ml-auto rounded border px-2 py-1 text-xs"
+                  onClick={() => {
+                    setSearch('');
+                    setSortMode('recent');
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {derivedPosts.length === 0 ? (
           <p className="text-sm text-gray-600">{loading ? 'Loading posts…' : 'No posts yet.'}</p>
         ) : (
           <div className="space-y-3">
-            {posts.map((p) => (
+            {derivedPosts.map((p) => (
               <PostItem
                 key={p.id}
                 post={{ ...p, body: p.body ?? '', images: p.images ?? [] }}

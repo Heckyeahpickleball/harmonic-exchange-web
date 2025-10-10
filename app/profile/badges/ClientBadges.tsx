@@ -40,6 +40,32 @@ function howToFor(track: 'give' | 'receive' | 'streak', tier: number): string {
   return `${action} ${count} ${noun}`;
 }
 
+function tierTitle(track: 'give' | 'receive' | 'streak', tier: number): string {
+  const t = Math.max(1, Math.min(6, tier));
+  if (track === 'streak') return 'Harmonic Streak';
+
+  if (track === 'give') {
+    switch (t) {
+      case 1: return 'New Giver';
+      case 2: return 'Kindling Giver';
+      case 3: return 'Flow Giver';
+      case 4: return 'Resonant Giver';
+      case 5: return 'Harmonic Giver';
+      default: return 'Luminary Giver';
+    }
+  }
+
+  // receive
+  switch (t) {
+    case 1: return 'New Receiver';
+    case 2: return 'Open Receiver';
+    case 3: return 'Flow Receiver';
+    case 4: return 'Resonant Receiver';
+    case 5: return 'Harmonic Receiver';
+    default: return 'Luminary Receiver';
+  }
+}
+
 const CATALOG: CatalogItem[] = [
   ...Array.from({ length: 6 }, (_, i) => {
     const t = i + 1;
@@ -47,7 +73,7 @@ const CATALOG: CatalogItem[] = [
       badge_code: `give_t${t}`,
       track: 'give' as const,
       tier: t,
-      title: t === 1 ? 'First Gift' : `Give • Tier ${t}`,
+      title: tierTitle('give', t),
       defaultIcon: `/badges/give_rays_t${t}.png`,
       howTo: howToFor('give', t),
     };
@@ -58,7 +84,7 @@ const CATALOG: CatalogItem[] = [
       badge_code: `recv_t${t}`,
       track: 'receive' as const,
       tier: t,
-      title: t === 1 ? 'First Receiving' : `Receive • Tier ${t}`,
+      title: tierTitle('receive', t),
       defaultIcon: `/badges/receive_bowl_t${t}.png`,
       howTo: howToFor('receive', t),
     };
@@ -67,7 +93,7 @@ const CATALOG: CatalogItem[] = [
     badge_code: 'streak_7',
     track: 'streak',
     tier: 1,
-    title: '7-day Flow Streak',
+    title: tierTitle('streak', 1),
     defaultIcon: '/badges/streak_wave.png',
     howTo: howToFor('streak', 1),
   },
@@ -177,6 +203,7 @@ export default function ClientBadges() {
           const earned = findEarned(c);
           const src = earned ? iconFor(earned) : c.defaultIcon;
           const when = earned?.earned_at ? new Date(earned.earned_at).toLocaleDateString() : null;
+          const title = c.title; // already uses the new naming
 
           return (
             <div
@@ -185,15 +212,17 @@ export default function ClientBadges() {
                 earned ? 'bg-white' : 'bg-gray-50'
               }`}
             >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={src}
-                alt={c.title}
+                alt={title}
+                title={earned ? `${title} • Earned ${when}` : title}
                 className={`h-16 w-16 object-contain ${earned ? '' : 'opacity-60'}`}
                 onError={(e) => {
                   (e.currentTarget as HTMLImageElement).src = c.defaultIcon;
                 }}
               />
-              <div className="mt-2 text-sm font-medium">{c.title}</div>
+              <div className="mt-2 text-sm font-medium">{title}</div>
               {earned ? (
                 <div className="text-xs text-gray-600">Earned {when}</div>
               ) : (

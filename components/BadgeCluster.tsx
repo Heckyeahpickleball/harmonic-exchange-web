@@ -30,7 +30,7 @@ const ORDER: Array<'streak' | 'give' | 'receive'> = ['streak', 'give', 'receive'
 // Build a filename based on track + tier that matches /public/badges
 function guessIconPath(b: ClusterBadge): string | undefined {
   const track = (b.track || '').toLowerCase();
-  const tier = Math.max(1, Math.min(6, Number(b.tier) || 1)); // clamp 1..6
+  const tier = clampTier(b.tier);
   if (track === 'give') return `/badges/give_rays_t${tier}.png`;
   if (track === 'receive') return `/badges/receive_bowl_t${tier}.png`;
   if (track === 'streak') return '/badges/streak_wave.png';
@@ -39,6 +39,45 @@ function guessIconPath(b: ClusterBadge): string | undefined {
 
 // Final safety net
 const ULTIMATE_FALLBACK = '/badges/streak_wave.png';
+
+// Clamp tiers to 1..6
+function clampTier(n: number | null | undefined): number {
+  const t = Number(n || 1);
+  return Math.max(1, Math.min(6, isFinite(t) ? t : 1));
+}
+
+// New naming across tiers
+function tierTitle(trackRaw: string | null | undefined, tierRaw: number | null | undefined): string {
+  const track = (trackRaw || '').toLowerCase();
+  const tier = clampTier(tierRaw);
+
+  if (track === 'streak') return 'Harmonic Streak';
+
+  if (track === 'give') {
+    switch (tier) {
+      case 1: return 'New Giver';
+      case 2: return 'Kindling Giver';
+      case 3: return 'Flow Giver';
+      case 4: return 'Resonant Giver';
+      case 5: return 'Harmonic Giver';
+      default: return 'Luminary Giver';
+    }
+  }
+
+  if (track === 'receive') {
+    switch (tier) {
+      case 1: return 'New Receiver';
+      case 2: return 'Open Receiver';
+      case 3: return 'Flow Receiver';
+      case 4: return 'Resonant Receiver';
+      case 5: return 'Harmonic Receiver';
+      default: return 'Luminary Receiver';
+    }
+  }
+
+  // fallback for unknown/legacy rows
+  return 'Harmonic Badge';
+}
 
 export default function BadgeCluster({
   badges,
@@ -69,10 +108,11 @@ export default function BadgeCluster({
   return (
     <div className={['flex flex-nowrap items-start gap-6 overflow-x-auto md:overflow-visible', className].join(' ')}>
       {display.map((b) => {
+        // Prefer resolver if provided; otherwise use our new canonical naming.
+        const computedTitle = tierTitle(b.track, b.tier);
         const label =
-          b.label ??
           resolveLabel?.(b) ??
-          (b.track ? `${cap(String(b.track))}${b.tier ? ` • Tier ${b.tier}` : ''}` : b.badge_code ?? 'Badge');
+          computedTitle;
 
         // Prefer “known good” sources first to avoid broken images:
         // image_url -> legacy icon -> resolver -> by track/tier -> by code -> ultimate fallback
