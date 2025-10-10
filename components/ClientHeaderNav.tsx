@@ -2,6 +2,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
@@ -215,8 +216,29 @@ export default function ClientHeaderNav() {
           )}
         </div>
 
-        {/* RIGHT: bell + auth */}
+        {/* RIGHT: Facebook icon (no border/bg, large) + bell + auth */}
         <div className="flex items-center gap-2">
+          {/* Facebook icon link — scaled to match button height */}
+          <Link
+            href="https://www.facebook.com/groups/harmonicexchangeglobal"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center h-9 w-9 md:h-10 md:w-10"
+            title="Join our Facebook group"
+            aria-label="Join our Facebook group"
+          >
+            <span className="relative block h-8 w-8 md:h-9 md:w-9">
+              <Image
+                src="/icons/facebook.png"
+                alt="Facebook"
+                fill
+                className="object-contain"
+                sizes="(max-width: 768px) 36px, 40px"
+                priority={false}
+              />
+            </span>
+          </Link>
+
           <NotificationsBell />
           {!uid ? (
             <Link href="/sign-in" className="hx-btn hx-btn--outline-primary text-sm px-3 py-2">
@@ -250,8 +272,27 @@ export default function ClientHeaderNav() {
             )}
           </div>
 
-          {/* Right slot: bell + sign in/out */}
+          {/* Right slot: Facebook icon (no border/bg, large) + bell + sign in/out */}
           <div className="flex items-center gap-2">
+            <Link
+              href="https://www.facebook.com/groups/harmonicexchangeglobal"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center h-9 w-9"
+              title="Join our Facebook group"
+              aria-label="Join our Facebook group"
+            >
+              <span className="relative block h-8 w-8">
+                <Image
+                  src="/icons/facebook.png"
+                  alt="Facebook"
+                  fill
+                  className="object-contain"
+                  sizes="36px"
+                />
+              </span>
+            </Link>
+
             <NotificationsBell />
             {!uid ? (
               <Link
