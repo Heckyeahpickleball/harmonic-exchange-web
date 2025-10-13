@@ -1,5 +1,4 @@
-// app/page.tsx
-
+// app/page.tsx  (UPDATED FOOTER LINKS)
 'use client';
 
 import Link from 'next/link';
@@ -10,7 +9,6 @@ import { supabase } from '@/lib/supabaseClient';
 type HXUser = { id: string; email?: string | null } | null;
 
 /* ---------------- REVIEWS CAROUSEL ---------------- */
-/** Matches columns in public.reviews_public */
 type ReviewRow = {
   id: string;
   created_at: string;
@@ -23,7 +21,6 @@ type ReviewRow = {
 };
 
 async function fetchRows(): Promise<ReviewRow[]> {
-  // Read from the public view (with avatars)
   const { data, error } = await supabase
     .from('reviews_public')
     .select(
@@ -87,7 +84,7 @@ function ReviewsCarousel() {
     const endX = e.changedTouches[0].clientX;
     touchStartX.current = null;
     const dx = (startX ?? endX) - endX;
-    const threshold = 40; // px
+    const threshold = 40;
     if (Math.abs(dx) > threshold && rows.length > 1) {
       setI((p) => (dx > 0 ? (p + 1) % rows.length : (p === 0 ? rows.length - 1 : p - 1)));
     }
@@ -144,7 +141,6 @@ function ReviewsCarousel() {
                 {rows[i].message ?? '—'}
               </p>
 
-              {/* name + avatar (prefer receiver) */}
               <div className="mt-4 flex items-center gap-3">
                 {(() => {
                   const name =
@@ -205,45 +201,29 @@ export default function HomePage() {
 
   return (
     <main className="min-h-[80vh]">
-      {/* HERO — image only */}
       <section className="hx-hero" aria-label="Harmonic Exchange cover image">
-        <h1 className="sr-only">
-          Harmonic Exchange — The Flow Economy Experiment
-        </h1>
+        <h1 className="sr-only">Harmonic Exchange — The Flow Economy Experiment</h1>
       </section>
 
-      {/* CTA STRIP (keeps Past Exchanges button) */}
       <section className="hx-cta-strip">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-3 px-4 py-6">
-          <Link href="/browse" className="hx-btn hx-btn--primary">
-            Explore Offerings
-          </Link>
+          <Link href="/browse" className="hx-btn hx-btn--primary">Explore Offerings</Link>
           {loading ? (
             <span className="hx-btn hx-btn--outline-primary">Checking…</span>
           ) : user ? (
             <>
-              <Link href="/offers/new" className="hx-btn hx-btn--outline-primary">
-                New Offer
-              </Link>
-              <Link href="/profile" className="hx-btn hx-btn--outline-primary">
-                Create Space
-              </Link>
+              <Link href="/offers/new" className="hx-btn hx-btn--outline-primary">New Offer</Link>
+              <Link href="/profile" className="hx-btn hx-btn--outline-primary">Create Space</Link>
             </>
           ) : (
-            <Link href="/sign-in" className="hx-btn hx-btn--outline-primary">
-              Join the Community
-            </Link>
+            <Link href="/sign-in" className="hx-btn hx-btn--outline-primary">Join the Community</Link>
           )}
-          <Link href="#about" className="hx-btn hx-btn--secondary">
-            About
-          </Link>
-          <Link href="#guidelines" className="hx-btn hx-btn--secondary">
-            Community Guidelines
-          </Link>
+          <Link href="#about" className="hx-btn hx-btn--secondary">About</Link>
+          <Link href="#guidelines" className="hx-btn hx-btn--secondary">Community Guidelines</Link>
         </div>
       </section>
 
-      {/* Welcome (centered) */}
+      {/* Welcome */}
       <section>
         <div className="mx-auto max-w-4xl px-4">
           <div className="hx-card p-6 text-center">
@@ -262,13 +242,10 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Reviews carousel */}
       <ReviewsCarousel />
-
-      {/* Wave ABOVE the Why section (white background) */}
       <WaveDivider />
 
-      {/* “About the Movement” */}
+      {/* About */}
       <section id="about" className="bg-white">
         <div className="mx-auto max-w-6xl px-4 pt-8 pb-10 sm:pt-10 sm:pb-12">
           <h3 className="text-center text-2xl font-bold">About the Movement</h3>
@@ -281,7 +258,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* “Why” as a 2-column block on cream */}
+      {/* Why */}
       <section style={{ background: 'var(--hx-cream)' }}>
         <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-8 px-4 py-10 sm:grid-cols-2 sm:py-12">
           <div>
@@ -296,9 +273,7 @@ export default function HomePage() {
           </div>
 
           <div>
-            <h3 className="hx-heading-title text-2xl font-bold">
-              Why Harmonic Exchange is different
-            </h3>
+            <h3 className="hx-heading-title text-2xl font-bold">Why Harmonic Exchange is different</h3>
             <div className="hx-heading-accent" />
             <p className="mt-4 mx-auto max-w-prose text-center font-semibold text-[var(--hx-muted)]">
               This isn’t bartering or transactional. It’s a flow economy where
@@ -324,7 +299,6 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Wave BEFORE “How it works” */}
       <WaveDivider />
 
       {/* How it works */}
@@ -351,22 +325,16 @@ export default function HomePage() {
           </div>
 
           <div className="mt-8 flex justify-center gap-3">
-            <Link href="/offers/new" className="hx-btn hx-btn--primary">
-              Share My Value
-            </Link>
-            <Link href="/browse" className="hx-btn hx-btn--outline-primary">
-              See Offerings
-            </Link>
+            <Link href="/offers/new" className="hx-btn hx-btn--primary">Share My Value</Link>
+            <Link href="/browse" className="hx-btn hx-btn--outline-primary">See Offerings</Link>
           </div>
         </div>
       </section>
 
-      {/* Community Guidelines — brand gradient */}
+      {/* Community Guidelines teaser */}
       <section id="guidelines" className="hx-section hx-section--brand">
         <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
-          <h3 className="text-center text-2xl font-bold text-white">
-            Community Guidelines
-          </h3>
+          <h3 className="text-center text-2xl font-bold text-white">Community Guidelines</h3>
           <ul className="mx-auto mt-6 max-w-3xl list-disc space-y-2 pl-6 text-white/90">
             <li>Honor consent, boundaries, and safety—always.</li>
             <li>Use clear, kind communication.</li>
@@ -379,22 +347,26 @@ export default function HomePage() {
             chapters welcome you to participate, share updates, and help evolve
             the practice.
           </p>
+          <div className="mt-6 text-center">
+            <Link href="/community-guidelines" className="hx-btn hx-btn--secondary">
+              Read the full guidelines
+            </Link>
+          </div>
         </div>
       </section>
 
+      {/* Footer with extra links */}
       <footer className="border-t">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-6 text-sm text-[var(--hx-muted)]">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-6 text-sm text-[var(--hx-muted)]">
           <span>© {new Date().getFullYear()} Harmonic Exchange</span>
-          <div className="flex gap-4">
-            <Link href="/browse" className="hx-link">
-              Offerings
-            </Link>
-            <Link href="/offers/new" className="hx-link">
-              Share My Value
-            </Link>
-            <Link href="/profile" className="hx-link">
-              Create Space
-            </Link>
+          <div className="flex flex-wrap items-center gap-4">
+            <Link href="/browse" className="hx-link">Offerings</Link>
+            <Link href="/offers/new" className="hx-link">Share My Value</Link>
+            <Link href="/profile" className="hx-link">Create Space</Link>
+            <span className="opacity-40">•</span>
+            <Link href="/community-guidelines" className="hx-link">Community Guidelines</Link>
+            <Link href="/terms" className="hx-link">Terms</Link>
+            <Link href="/privacy" className="hx-link">Privacy</Link>
           </div>
         </div>
       </footer>
@@ -402,16 +374,11 @@ export default function HomePage() {
   );
 }
 
-/* ——— helpers ——— */
+/* helpers */
 function WaveDivider() {
   return (
     <div className="hx-wave-wrap" aria-hidden="true">
-      <svg
-        className="hx-wave"
-        viewBox="0 0 1200 140"
-        preserveAspectRatio="xMidYMid meet"
-        role="img"
-      >
+      <svg className="hx-wave" viewBox="0 0 1200 140" preserveAspectRatio="xMidYMid meet" role="img">
         <defs>
           <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="0%">
             <stop offset="0%" stopColor="var(--hx-brand)" />
@@ -421,8 +388,7 @@ function WaveDivider() {
         </defs>
         <path
           d="M0,80 C200,30 360,130 600,80 C840,30 1000,130 1200,80 L1200,140 L0,140 Z"
-          fill="url(#g)"
-          opacity="0.85"
+          fill="url(#g)" opacity="0.85"
         />
       </svg>
     </div>

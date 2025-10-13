@@ -1,197 +1,107 @@
 // /app/auth/page.tsx
-'use client';
-
-import { useEffect, useState } from 'react';
+import type { Metadata } from 'next';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabaseClient';
-import { useAuth } from '@/components/AuthProvider';
+import AuthPanel from '@/components/AuthPanel';
 
-type Mode = 'signin' | 'signup' | 'link';
+export const metadata: Metadata = {
+  title: 'Sign in — Harmonic Exchange',
+  description:
+    'Access Harmonic Exchange to trade skills, services, and creativity in a trust-based marketplace.',
+};
 
 export default function AuthPage() {
-  const { user } = useAuth();
-  const [mode, setMode] = useState<Mode>('signin');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [status, setStatus] = useState('');
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
-
-  useEffect(() => {
-    if (user) setStatus('You are signed in.');
-  }, [user]);
-
-  async function onSignIn(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setStatus('Signing in…');
-    try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      setStatus('Signed in!');
-      window.location.href = '/profile';
-    } catch (err: any) {
-      setStatus(err?.message || 'Sign-in failed.');
-    }
-  }
-
-  async function onSignUp(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setStatus('Creating account…');
-    try {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { emailRedirectTo: `${origin}/auth/callback` },
-      });
-      if (error) throw error;
-      setStatus('Check your email to confirm your account.');
-    } catch (err: any) {
-      setStatus(err?.message || 'Sign-up failed.');
-    }
-  }
-
-  async function onMagicLink(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setStatus('Sending magic link…');
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: `${origin}/auth/callback` },
-      });
-      if (error) throw error;
-      setStatus('Check your email for the magic link.');
-    } catch (err: any) {
-      setStatus(err?.message || 'Failed to send magic link.');
-    }
-  }
-
-  async function onReset() {
-    if (!email) {
-      setStatus('Enter your email first.');
-      return;
-    }
-    setStatus('Sending reset link…');
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${origin}/auth/callback?type=recovery`,
-      });
-      if (error) throw error;
-      setStatus('Check your email for a password reset link.');
-    } catch (err: any) {
-      setStatus(err?.message || 'Failed to send reset link.');
-    }
-  }
-
   return (
-    <section className="max-w-md space-y-6">
-      <h1 className="text-2xl font-bold">Welcome</h1>
+    <div className="relative">
+      {/* Soft brand background + subtle glow */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-b from-emerald-50 via-white to-white"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-48 bg-[radial-gradient(40rem_20rem_at_top,rgba(15,118,110,0.18),transparent)]"
+      />
 
-      <div className="flex gap-3 text-sm">
-        <button
-          className={`underline ${mode === 'signin' ? 'font-semibold' : ''}`}
-          onClick={() => setMode('signin')}
-          type="button"
-        >
-          Sign in
-        </button>
-        <button
-          className={`underline ${mode === 'signup' ? 'font-semibold' : ''}`}
-          onClick={() => setMode('signup')}
-          type="button"
-        >
-          Create account
-        </button>
-        <button
-          className={`underline ${mode === 'link' ? 'font-semibold' : ''}`}
-          onClick={() => setMode('link')}
-          type="button"
-        >
-          Magic link
-        </button>
-      </div>
-
-      {mode === 'signin' && (
-        <form onSubmit={onSignIn} className="space-y-3">
-          <input
-            type="email"
-            required
-            placeholder="you@example.com"
-            className="w-full rounded border p-2"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <input
-            type="password"
-            required
-            placeholder="Your password"
-            className="w-full rounded border p-2"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <div className="flex items-center justify-between">
-            <button className="hx-btn hx-btn--primary">Sign in</button>
-            <button type="button" onClick={onReset} className="text-xs underline">
-              Forgot password?
-            </button>
+      <section className="mx-auto grid max-w-6xl gap-10 px-4 py-10 md:grid-cols-2 md:items-center lg:gap-16">
+        {/* Left: headline / brand copy */}
+        <div className="order-2 md:order-1">
+          <div className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs text-teal-800 bg-white/80">
+            <span className="inline-block h-2 w-2 rounded-full bg-teal-600" />
+            Gift-based collaboration
           </div>
-        </form>
-      )}
 
-      {mode === 'signup' && (
-        <form onSubmit={onSignUp} className="space-y-3">
-          <input
-            type="email"
-            required
-            placeholder="you@example.com"
-            className="w-full rounded border p-2"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <input
-            type="password"
-            required
-            placeholder="Create a password"
-            className="w-full rounded border p-2"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <button className="hx-btn hx-btn--primary">Create account</button>
-          <p className="text-xs text-gray-600">You may need to confirm your email before you can sign in.</p>
-        </form>
-      )}
+          <h1 className="mt-4 text-3xl font-extrabold tracking-tight text-gray-900 sm:text-4xl">
+            Welcome to <span className="text-teal-700">Harmonic Exchange</span>
+          </h1>
 
-      {mode === 'link' && (
-        <form onSubmit={onMagicLink} className="space-y-3">
-          <input
-            type="email"
-            required
-            placeholder="you@example.com"
-            className="w-full rounded border p-2"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <button className="hx-btn hx-btn--primary">Send magic link</button>
-        </form>
-      )}
+          <p className="mt-3 max-w-prose text-[15px] leading-7 text-gray-700">
+            Sign in to exchange skills, services, and creativity through generosity. Build trust, grow
+            reputation, and make great things together.
+          </p>
 
-      {status && <p className="text-sm">{status}</p>}
+          <ul className="mt-6 space-y-2 text-sm text-gray-700">
+            <li className="flex items-center gap-2">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-teal-600" />
+              People first — no ads, no fees.
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-teal-600" />
+              Organize via local & global chapters.
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-teal-600" />
+              Offers, requests, and gratitude to show impact.
+            </li>
+          </ul>
 
-      <div className="text-xs text-gray-500">
-        Sessions persist across visits. Problems?{' '}
-        <button
-          className="underline"
-          onClick={async () => {
-            await supabase.auth.signOut();
-            window.location.href = '/auth';
-          }}
-        >
-          sign out &amp; try again
-        </button>
-        .
-      </div>
+          <div className="mt-8 flex flex-wrap items-center gap-4 text-sm text-gray-600">
+            <Link href="/about" className="hover:text-gray-900 underline-offset-2 hover:underline">
+              Learn more
+            </Link>
+            <span aria-hidden className="hidden sm:inline">·</span>
+            <Link
+              href="/community-guidelines"
+              className="hover:text-gray-900 underline-offset-2 hover:underline"
+            >
+              Community guidelines
+            </Link>
+          </div>
+        </div>
 
-      <div>
-        <Link href="/">← Back home</Link>
-      </div>
-    </section>
+        {/* Right: the themed auth card */}
+        <div className="order-1 md:order-2">
+          <div className="mx-auto w-full max-w-md rounded-2xl border bg-white/90 p-5 shadow-sm backdrop-blur hx-card">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">Sign in</h2>
+                <p className="text-sm text-gray-600">Use email & password or a magic link.</p>
+              </div>
+              <div className="hidden md:block rounded-full border px-3 py-1 text-xs text-teal-800 bg-white/80">
+                Safe & private
+              </div>
+            </div>
+
+            {/* Your client-side logic lives here */}
+            <AuthPanel />
+
+            <p className="mt-4 text-center text-xs text-gray-500">
+              By continuing, you agree to our{' '}
+              <Link href="/terms" className="text-teal-700 hover:underline">
+                Terms
+              </Link>{' '}
+              and{' '}
+              <Link href="/privacy" className="text-teal-700 hover:underline">
+                Privacy Policy
+              </Link>
+              .
+            </p>
+          </div>
+
+          <div className="mx-auto mt-6 w-full max-w-md text-center text-xs text-gray-500">
+            Protected by Supabase Auth · Passwordless supported
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }

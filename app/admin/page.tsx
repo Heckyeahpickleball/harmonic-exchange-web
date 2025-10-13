@@ -265,72 +265,71 @@ function AdminContent() {
           setGroups((data || []) as GroupRow[]);
         }
 
-if (tab === 'audit') {
-  if (!isAdmin) { setTab('users'); return; }
+        if (tab === 'audit') {
+          if (!isAdmin) { setTab('users'); return; }
 
-  const { data: rows } = await supabase
-    .from('admin_actions')
-    .select('id,admin_profile_id,action,target_type,target_id,reason,created_at')
-    .order('created_at', { ascending: false })
-    .limit(200);
+          const { data: rows } = await supabase
+            .from('admin_actions')
+            .select('id,admin_profile_id,action,target_type,target_id,reason,created_at')
+            .order('created_at', { ascending: false })
+            .limit(200);
 
-  const acts = (rows || []) as AdminAction[];
-  const adminIds = Array.from(new Set(acts.map((a) => a.admin_profile_id)));
+          const acts = (rows || []) as AdminAction[];
+          const adminIds = Array.from(new Set(acts.map((a) => a.admin_profile_id)));
 
-  // map admin id -> name
-  const adminMap = new Map<string, string>();
-  if (adminIds.length) {
-    const { data: admins } = await supabase
-      .from('profiles')
-      .select('id,display_name')
-      .in('id', adminIds);
-    for (const a of ((admins || []) as Profile[])) adminMap.set(a.id, a.display_name);
-  }
+          // map admin id -> name
+          const adminMap = new Map<string, string>();
+          if (adminIds.length) {
+            const { data: admins } = await supabase
+              .from('profiles')
+              .select('id,display_name')
+              .in('id', adminIds);
+            for (const a of ((admins || []) as Profile[])) adminMap.set(a.id, a.display_name);
+          }
 
-  // collect target ids by type
-  const profileTargets = acts.filter((a) => a.target_type === 'profile').map((a) => a.target_id);
-  const offerTargets   = acts.filter((a) => a.target_type === 'offer').map((a) => a.target_id);
-  const groupTargets   = acts.filter((a) => a.target_type === 'group').map((a) => a.target_id);
+          // collect target ids by type
+          const profileTargets = acts.filter((a) => a.target_type === 'profile').map((a) => a.target_id);
+          const offerTargets   = acts.filter((a) => a.target_type === 'offer').map((a) => a.target_id);
+          const groupTargets   = acts.filter((a) => a.target_type === 'group').map((a) => a.target_id);
 
-  // fetch label sources
-  const [profileRows, offerRows, groupRows] = await Promise.all([
-    profileTargets.length
-      ? supabase.from('profiles').select('id,display_name').in('id', profileTargets)
-      : Promise.resolve({ data: [] as any[] }),
-    offerTargets.length
-      ? supabase.from('offers').select('id,title').in('id', offerTargets)
-      : Promise.resolve({ data: [] as any[] }),
-    groupTargets.length
-      ? supabase.from('groups').select('id,name,city,country,slug').in('id', groupTargets)
-      : Promise.resolve({ data: [] as any[] }),
-  ]);
+          // fetch label sources
+          const [profileRows, offerRows, groupRows] = await Promise.all([
+            profileTargets.length
+              ? supabase.from('profiles').select('id,display_name').in('id', profileTargets)
+              : Promise.resolve({ data: [] as any[] }),
+            offerTargets.length
+              ? supabase.from('offers').select('id,title').in('id', offerTargets)
+              : Promise.resolve({ data: [] as any[] }),
+            groupTargets.length
+              ? supabase.from('groups').select('id,name,city,country,slug').in('id', groupTargets)
+              : Promise.resolve({ data: [] as any[] }),
+          ]);
 
-  const profMap  = new Map<string, string>();
-  const offerMap = new Map<string, string>();
-  const groupMap = new Map<string, string>();
+          const profMap  = new Map<string, string>();
+          const offerMap = new Map<string, string>();
+          const groupMap = new Map<string, string>();
 
-  for (const p of ((profileRows as any).data || []) as any[]) profMap.set(p.id, p.display_name);
-  for (const o of ((offerRows   as any).data || []) as any[]) offerMap.set(o.id, o.title);
+          for (const p of ((profileRows as any).data || []) as any[]) profMap.set(p.id, p.display_name);
+          for (const o of ((offerRows   as any).data || []) as any[]) offerMap.set(o.id, o.title);
 
-  // ✅ Prefer human label for chapters, never slug
-  for (const g of ((groupRows   as any).data || []) as any[]) {
-    // Try "City, Country" if present, otherwise fall back to Name, then id
-    const cityCountry = (g.city && g.country) ? `${g.city}, ${g.country}` : null;
-    const label = cityCountry || g.name || g.id;
-    groupMap.set(g.id, label);
-  }
+          // Prefer human label for chapters
+          for (const g of ((groupRows   as any).data || []) as any[]) {
+            const cityCountry = (g.city && g.country) ? `${g.city}, ${g.country}` : null;
+            const label = cityCountry || g.name || g.id;
+            groupMap.set(g.id, label);
+          }
 
-  setAudit(
-    acts.map((a) => ({
-      ...a,
-      admin_name: adminMap.get(a.admin_profile_id) || a.admin_profile_id,
-      target_label:
-        a.target_type === 'profile' ? (profMap.get(a.target_id) || a.target_id) :
-        a.target_type === 'offer'   ? (offerMap.get(a.target_id) || a.target_id) :
-        a.target_type === 'group'   ? (groupMap.get(a.target_id) || a.target_id) : a.target_id
-    }))
-  );
-}
+          setAudit(
+            acts.map((a) => ({
+              ...a,
+              admin_name: adminMap.get(a.admin_profile_id) || a.admin_profile_id,
+              target_label:
+                a.target_type === 'profile' ? (profMap.get(a.target_id) || a.target_id) :
+                a.target_type === 'offer'   ? (offerMap.get(a.target_id) || a.target_id) :
+                a.target_type === 'group'   ? (groupMap.get(a.target_id) || a.target_id) : a.target_id
+            }))
+          );
+        }
 
       } catch (e: any) {
         showError(e, 'Failed to load admin data.');
@@ -1346,14 +1345,8 @@ if (tab === 'audit') {
           {/* Desktop table */}
           <div className="hidden md:block overflow-auto rounded border">
             <table className="min-w-full text-sm table-fixed">
-              <colgroup>
-  <col className="w-[30%]" />  {/* Chapter — SMALLER */}
-  <col className="w-[18%]" />  {/* Slug   */}
-  <col className="w-[12%]" />  {/* Status */}
-  <col className="w-[14%]" />  {/* Created*/}
-  <col className="w-[40%]" />  {/* Actions — wider */}
-</colgroup>
-
+              {/* IMPORTANT: no whitespace or comments inside colgroup */}
+              <colgroup><col className="w-[30%]" /><col className="w-[18%]" /><col className="w-[12%]" /><col className="w-[14%]" /><col className="w-[40%]" /></colgroup>
               <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
                   <th className="px-3 py-2 text-left">Chapter</th>
