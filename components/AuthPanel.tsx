@@ -3,10 +3,10 @@
 
 import { useState } from 'react';
 import {
-  signInWithEmail,
-  signUpWithEmail,
   sendMagicLink,
   signInWithProvider,
+  signInWithEmail,
+  signUpWithEmail,
 } from '@/lib/auth';
 
 export default function AuthPanel() {
@@ -25,20 +25,17 @@ export default function AuthPanel() {
 
     try {
       if (mode === 'magic') {
-        const { error } = await sendMagicLink(email);
-        if (error) throw error;
+        await sendMagicLink(email); // throws on failure
         setMsg('Check your email for a sign-in link.');
       } else if (mode === 'signup') {
-        const { error } = await signUpWithEmail(email, pw);
-        if (error) throw error;
+        await signUpWithEmail(email, pw); // throws on failure
         setMsg('Account created. Check your email to confirm and then sign in.');
       } else {
-        const { error } = await signInWithEmail(email, pw);
-        if (error) throw error;
+        await signInWithEmail(email, pw); // throws on failure
         setMsg('Welcome back!');
       }
     } catch (e: any) {
-      setErr(e?.message ?? 'Something went wrong.');
+      setErr(e?.message || 'Something went wrong.');
     } finally {
       setLoading(false);
     }
@@ -48,8 +45,8 @@ export default function AuthPanel() {
     setErr(null);
     setMsg(null);
     try {
-      await signInWithProvider(p);
-      // Browser will redirect; no further action needed here.
+      const url = await signInWithProvider(p);
+      if (url && typeof window !== 'undefined') window.location.assign(url);
     } catch (e: any) {
       setErr(e?.message ?? 'OAuth sign-in failed.');
     }
@@ -61,18 +58,21 @@ export default function AuthPanel() {
         <button
           className={`rounded-full border px-3 py-1 text-sm ${mode === 'signin' ? 'bg-gray-900 text-white' : ''}`}
           onClick={() => setMode('signin')}
+          type="button"
         >
           Sign in
         </button>
         <button
           className={`rounded-full border px-3 py-1 text-sm ${mode === 'signup' ? 'bg-gray-900 text-white' : ''}`}
           onClick={() => setMode('signup')}
+          type="button"
         >
           Create account
         </button>
         <button
           className={`rounded-full border px-3 py-1 text-sm ${mode === 'magic' ? 'bg-gray-900 text-white' : ''}`}
           onClick={() => setMode('magic')}
+          type="button"
         >
           Magic link
         </button>
@@ -105,10 +105,7 @@ export default function AuthPanel() {
             />
             {mode === 'signin' && (
               <div className="mt-2">
-                <a
-                  href="/reset-password"
-                  className="text-sm text-blue-700 hover:underline"
-                >
+                <a href="/reset-password" className="text-sm text-blue-700 hover:underline">
                   Forgot your password?
                 </a>
               </div>
@@ -121,7 +118,13 @@ export default function AuthPanel() {
           disabled={loading}
           className="w-full rounded bg-emerald-700 px-3 py-2 text-white hover:bg-emerald-800 disabled:opacity-50"
         >
-          {loading ? 'Please wait…' : mode === 'signup' ? 'Create account' : mode === 'magic' ? 'Send magic link' : 'Sign in'}
+          {loading
+            ? 'Please wait…'
+            : mode === 'signup'
+            ? 'Create account'
+            : mode === 'magic'
+            ? 'Send magic link'
+            : 'Sign in'}
         </button>
       </form>
 
