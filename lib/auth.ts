@@ -19,9 +19,8 @@ const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, '') ||
   (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
 
-/** ------- PASSWORDLESS (magic link) -------
- * Matches AuthPanel usage: returns { error: null } on success,
- * throws on failure.
+/** ---------- PASSWORDLESS (magic link) ----------
+ * Matches AuthPanel usage: returns { error: null } on success.
  */
 export async function sendMagicLink(email: string): Promise<{ error: null }> {
   if (!email) throw new Error('Email is required');
@@ -33,7 +32,7 @@ export async function sendMagicLink(email: string): Promise<{ error: null }> {
   return { error: null };
 }
 
-/** ------- OAUTH ------- */
+/** ---------- OAUTH ---------- */
 export async function signInWithProvider(provider: OAuthProvider) {
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,
@@ -46,26 +45,30 @@ export async function signInWithProvider(provider: OAuthProvider) {
   return data?.url || null; // client can window.location.assign(this)
 }
 
-/** ------- EMAIL + PASSWORD (used by AuthPanel) ------- */
+/** ---------- EMAIL + PASSWORD ---------- */
 export async function signInWithEmail(email: string, password: string) {
   if (!email || !password) throw new Error('Email and password are required');
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
-  return data.user ?? null;
+  return data.user ?? null; // keep existing behavior (may be used elsewhere)
 }
 
-export async function signUpWithEmail(email: string, password: string) {
+/** Matches AuthPanel usage: returns { error: null } on success. */
+export async function signUpWithEmail(
+  email: string,
+  password: string
+): Promise<{ error: null }> {
   if (!email || !password) throw new Error('Email and password are required');
-  const { data, error } = await supabase.auth.signUp({
+  const { error } = await supabase.auth.signUp({
     email,
     password,
     options: { emailRedirectTo: `${SITE_URL}/auth/callback` },
   });
   if (error) throw error;
-  return data.user ?? null;
+  return { error: null };
 }
 
-/** ------- SESSION HELPERS ------- */
+/** ---------- SESSION HELPERS ---------- */
 export async function getUser() {
   const { data, error } = await supabase.auth.getUser();
   if (error) throw error;
