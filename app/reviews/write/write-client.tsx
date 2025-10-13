@@ -1,4 +1,3 @@
-// /app/reviews/write/write-client.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
