@@ -18,13 +18,17 @@ type ReviewRow = {
   offer_title?: string | null;
   owner_name?: string | null;
   receiver_name?: string | null;
+  owner_avatar_url?: string | null;
+  receiver_avatar_url?: string | null;
 };
 
 async function fetchRows(): Promise<ReviewRow[]> {
-  // Read from the public view you confirmed returns rows
+  // Read from the public view (with avatars)
   const { data, error } = await supabase
     .from('reviews_public')
-    .select('id,created_at,message,offer_title,owner_name,receiver_name')
+    .select(
+      'id,created_at,message,offer_title,owner_name,receiver_name,owner_avatar_url,receiver_avatar_url'
+    )
     .order('created_at', { ascending: false })
     .limit(25);
 
@@ -37,7 +41,9 @@ function ReviewsCarousel() {
   const [i, setI] = useState(0);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+
   const timerRef = useRef<number | null>(null);
+  const touchStartX = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,24 +59,41 @@ function ReviewsCarousel() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
-  // Auto-advance (no dots/buttons)
-  useEffect(() => {
+  const startTimer = () => {
     if (!rows.length) return;
     if (timerRef.current) window.clearInterval(timerRef.current);
     timerRef.current = window.setInterval(() => {
       setI((p) => (p + 1) % rows.length);
     }, 5000);
-    return () => {
-      if (timerRef.current) window.clearInterval(timerRef.current);
-    };
+  };
+
+  useEffect(() => {
+    startTimer();
+    return () => { if (timerRef.current) window.clearInterval(timerRef.current); };
   }, [rows.length]);
 
-  // Header + container
+  const onMouseEnter = () => { if (timerRef.current) window.clearInterval(timerRef.current); };
+  const onMouseLeave = () => startTimer();
+
+  const onTouchStart: React.TouchEventHandler<HTMLDivElement> = (e) => {
+    touchStartX.current = e.touches[0].clientX;
+    if (timerRef.current) window.clearInterval(timerRef.current);
+  };
+  const onTouchEnd: React.TouchEventHandler<HTMLDivElement> = (e) => {
+    const startX = touchStartX.current;
+    const endX = e.changedTouches[0].clientX;
+    touchStartX.current = null;
+    const dx = (startX ?? endX) - endX;
+    const threshold = 40; // px
+    if (Math.abs(dx) > threshold && rows.length > 1) {
+      setI((p) => (dx > 0 ? (p + 1) % rows.length : (p === 0 ? rows.length - 1 : p - 1)));
+    }
+    startTimer();
+  };
+
   const Header = () => (
     <div className="mb-3 flex items-center justify-between">
       <h3 className="text-2xl font-bold tracking-tight text-[var(--hx-ink)]">
@@ -99,12 +122,17 @@ function ReviewsCarousel() {
         ) : rows.length === 0 ? (
           <div className="hx-card p-6">
             <p className="text-[var(--hx-muted)]">
-              No public gratitude yet. Be the first to share after your next
-              exchange!
+              No public gratitude yet. Be the first to share after your next exchange!
             </p>
           </div>
         ) : (
-          <div className="hx-card overflow-hidden transition-shadow hover:shadow-md">
+          <div
+            className="hx-card overflow-hidden transition-shadow hover:shadow-md"
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+            onTouchStart={onTouchStart}
+            onTouchEnd={onTouchEnd}
+          >
             <div className="p-5 sm:p-6">
               <div className="text-sm text-[var(--hx-muted)]">
                 {new Date(rows[i].created_at).toLocaleString()}
@@ -115,12 +143,35 @@ function ReviewsCarousel() {
               <p className="mt-2 text-[var(--hx-ink)]">
                 {rows[i].message ?? '—'}
               </p>
-              <div className="mt-3 text-sm text-[var(--hx-muted)]">
-                {rows[i].receiver_name
-                  ? `From ${rows[i].receiver_name}`
-                  : rows[i].owner_name
-                  ? `Shared by ${rows[i].owner_name}`
-                  : 'From a community member'}
+
+              {/* name + avatar (prefer receiver) */}
+              <div className="mt-4 flex items-center gap-3">
+                {(() => {
+                  const name =
+                    rows[i].receiver_name ??
+                    rows[i].owner_name ??
+                    'Community member';
+                  const avatar =
+                    rows[i].receiver_avatar_url ??
+                    rows[i].owner_avatar_url ??
+                    null;
+
+                  return (
+                    <>
+                      {avatar ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={avatar}
+                          alt={name ?? 'Member avatar'}
+                          className="h-8 w-8 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="h-8 w-8 rounded-full bg-gray-200" />
+                      )}
+                      <div className="text-sm text-[var(--hx-muted)]">From {name}</div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -201,9 +252,9 @@ export default function HomePage() {
             </h2>
             <p className="mx-auto mt-2 max-w-2xl text-[var(--hx-muted)]">
               Harmonic Exchange is a post-currency, gift-first way of sharing
-              value. People offer <strong> time</strong>, <strong> products</strong>,{' '}
-              <strong> services</strong>, <strong> education</strong>,{' '}
-              <strong> coaching</strong>, <strong> presence</strong>, and{' '}
+              value. People offer <strong> time</strong>, <strong> products</strong>,
+              <strong> services</strong>, <strong> education</strong>,
+              <strong> coaching</strong>, <strong> presence</strong>, and
               <strong> creativity</strong>. Everything is given freely and
               received with dignity.
             </p>
@@ -211,7 +262,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Reviews carousel (no dots/arrows; only the “Past Exchanges” link in header) */}
+      {/* Reviews carousel */}
       <ReviewsCarousel />
 
       {/* Wave ABOVE the Why section (white background) */}
