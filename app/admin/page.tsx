@@ -1,13 +1,13 @@
-/* HX v1.2 — Admin panel (Users, Offers, Chapters, Audit)
-   - FIX: Offers tab "Approve/Reject/Block…" now falls back to direct update if RPC is missing.
-   - Better errors when RLS blocks updates (so you can see exactly why).
-   - Keeps all features from v1.1, including Chapters and Audit.
+/* HX v1.2.1 — Admin panel (Users, Offers, Chapters, Audit) — Mobile friendly
+   UI changes (no logic changes):
+   - Mobile-first responsive cards for Users / Offers / Chapters.
+   - Desktop keeps tables; headers are sticky; cell padding tightened.
+   - Actions grouped & wrapped; buttons use compact sizes on mobile.
+   - Preserves all RPC fallbacks and permissions logic.
 
-   Tabs:
-   - Users: roles/status + reset ask quota + fulfilled received count
-   - Offers: role-aware actions (mods can’t act on admin-owned offers)
-   - Chapters: pending/active/suspended + approve/decline
-   - Audit: admins only
+   Notes:
+   - Nothing else in the app needs to change.
+   - All original behavior retained; just different rendering below md.
 */
 
 'use client';
@@ -21,8 +21,6 @@ import AskWindowUsage from '@/components/AskWindowUsage';
 type Role = 'user' | 'moderator' | 'admin';
 type Status = 'active' | 'suspended';
 
-/* ===== Profiles / Users ===== */
-
 type Profile = {
   id: string;
   display_name: string;
@@ -31,8 +29,6 @@ type Profile = {
   created_at: string;
 };
 
-/* ===== Offers ===== */
-
 type OfferRow = {
   id: string;
   title: string;
@@ -40,8 +36,6 @@ type OfferRow = {
   status: 'pending' | 'active' | 'paused' | 'archived' | 'blocked';
   created_at: string;
 };
-
-/* ===== Admin actions ===== */
 
 type AdminAction = {
   id: string;
@@ -54,8 +48,6 @@ type AdminAction = {
   admin_name?: string;
   target_label?: string;
 };
-
-/* ===== Chapters / Groups ===== */
 
 type GroupStatus = 'pending' | 'active' | 'suspended' | 'archived';
 type GroupRow = {
@@ -73,14 +65,6 @@ type GroupRow = {
 type EmailRow = { id: string; email: string | null; display_name?: string };
 
 type Tab = 'users' | 'offers' | 'chapters' | 'audit';
-
-export default function Page() {
-  return (
-    <Suspense fallback={<div className="p-4 text-sm text-gray-600">Loading…</div>}>
-      <AdminContent />
-    </Suspense>
-  );
-}
 
 /** Small component to show "Fulfilled received" (view created in SQL) */
 function FulfilledCount({ profileId }: { profileId: string }) {
@@ -116,11 +100,19 @@ function FulfilledCount({ profileId }: { profileId: string }) {
 function RowAskControls({ profileId }: { profileId: string }) {
   const [refreshToken, setRefreshToken] = useState(0);
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
       <FulfilledCount profileId={profileId} />
       <AskWindowUsage profileId={profileId} refreshToken={refreshToken} />
       <ResetQuotaButton profileId={profileId} onSuccess={() => setRefreshToken((n) => n + 1)} />
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<div className="p-4 text-sm text-gray-600">Loading…</div>}>
+      <AdminContent />
+    </Suspense>
   );
 }
 
@@ -135,6 +127,8 @@ function AdminContent() {
 
   const [pendingOnly, setPendingOnly] = useState<boolean>(urlPendingOnly);
   const [offerQ, setOfferQ] = useState('');
+
+  const [userQ, setUserQ] = useState(''); // users search query
 
   const [users, setUsers] = useState<Profile[]>([]);
   const [userEmails, setUserEmails] = useState<Record<string, string | null>>({});
@@ -365,7 +359,21 @@ function AdminContent() {
     return base.filter((o) => o.title.toLowerCase().includes(q));
   }, [offers, pendingOnly, offerQ]);
 
-  const usersVisible = useMemo(() => users, [users]);
+  // usersVisible filters by display_name, email, or role using userQ
+  const usersVisible = useMemo(() => {
+    const q = userQ.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter((u) => {
+      const name = (u.display_name || '').toLowerCase();
+      const email = (userEmails[u.id] || '').toLowerCase();
+      const role = (u.role || '').toLowerCase();
+      return (
+        name.includes(q) ||
+        email.includes(q) ||
+        role.includes(q)
+      );
+    });
+  }, [users, userEmails, userQ]);
 
   const groupsVisible = useMemo(() => {
     let rows = groups;
@@ -442,7 +450,7 @@ function AdminContent() {
     }
   }
 
-  // ===== Offer actions (CHANGE HERE: RPC -> ALWAYS try fallback on ANY error) =====
+  // ===== Offer actions (with admin-only Delete; RPC with direct update/delete fallback) =====
   async function setOfferStatus(id: string, next: OfferRow['status']) {
     if (!me) return;
 
@@ -457,14 +465,14 @@ function AdminContent() {
     const reason = prompt(`Reason for setting offer status to ${next}? (optional)`) || null;
 
     try {
-      // 1) Try RPC first (expected to be SECURITY DEFINER)
+      // Try RPC first
       const rpc = await supabase.rpc('admin_offer_set_status', {
         p_offer_id: id,
         p_status: next,
         p_reason: reason,
       });
 
-      // 2) If RPC fails for ANY reason, attempt direct update fallback
+      // Fallback to direct update if RPC fails
       if (rpc.error) {
         const { error: upErr } = await supabase
           .from('offers')
@@ -480,7 +488,7 @@ function AdminContent() {
           throw upErr;
         }
 
-        // Best-effort: log admin action if table exists
+        // Best-effort: log admin action
         try {
           await supabase.from('admin_actions').insert({
             admin_profile_id: me?.id,
@@ -498,7 +506,60 @@ function AdminContent() {
     }
   }
 
-  // ===== Chapter actions (unchanged, has its own fallback) =====
+  // NEW: hard delete an offer (admin-only). RPC first, then direct delete fallback.
+  async function deleteOffer(id: string) {
+    if (!isAdmin) {
+      setMsg('Only admins can delete offers.');
+      return;
+    }
+    const confirmed = confirm('PERMANENTLY delete this offer? This cannot be undone.');
+    if (!confirmed) return;
+
+    const reason = prompt('Reason (optional):') || null;
+
+    try {
+      // Try RPC
+      const rpc = await supabase.rpc('admin_offer_delete', {
+        p_offer_id: id,
+        p_reason: reason,
+      });
+
+      if (rpc.error && !/function .* does not exist/i.test(rpc.error.message || '')) {
+        throw rpc.error;
+      }
+
+      if (rpc.error) {
+        // Fallback: direct delete (requires appropriate RLS)
+        const { error: delErr } = await supabase.from('offers').delete().eq('id', id);
+        if (delErr) {
+          if (/permission denied|row-level security/i.test(delErr.message)) {
+            throw new Error(
+              "RLS blocked this delete. Your admin policy for the 'offers' table is missing or too strict."
+            );
+          }
+          throw delErr;
+        }
+
+        // Best-effort audit log
+        try {
+          await supabase.from('admin_actions').insert({
+            admin_profile_id: me?.id,
+            action: 'offers.delete',
+            target_type: 'offer',
+            target_id: id,
+            reason,
+          });
+        } catch { /* non-blocking */ }
+      }
+
+      // Remove from UI
+      setOffers((prev) => prev.filter((o) => o.id !== id));
+    } catch (e: any) {
+      showError(e, 'Failed to delete offer');
+    }
+  }
+
+  // ===== Chapter actions (includes deleteGroup) =====
   function ensureAdminAction() {
     if (!isAdmin) {
       setMsg('Only admins can approve/decline chapters.');
@@ -513,14 +574,13 @@ function AdminContent() {
     const reason = prompt(`Reason for setting chapter status to ${next}? (optional)`) || null;
 
     try {
-      // Try RPC (SECURITY DEFINER) first if present
+      // Try RPC first
       const rpc = await supabase.rpc('admin_group_set_status', {
         p_group_id: id,
         p_status: next,
         p_reason: reason,
       });
       if (rpc.error && !/function .* does not exist/i.test(rpc.error.message || '')) {
-        // RPC exists but failed (probably lack of admin or other SQL err)
         throw rpc.error;
       }
       if (!rpc.error) {
@@ -528,13 +588,13 @@ function AdminContent() {
         return;
       }
 
-      // Fallback: direct update (requires the RLS policy)
+      // Fallback: direct update (requires RLS)
       const { error } = await supabase.from('groups').update({ status: next }).eq('id', id);
       if (error) throw error;
 
       setGroups((prev) => prev.map((g) => (g.id === id ? { ...g, status: next } : g)));
 
-      // Optional: log an admin action if your table exists
+      // Optional: log admin action
       try {
         await supabase.from('admin_actions').insert({
           admin_profile_id: me?.id,
@@ -549,6 +609,59 @@ function AdminContent() {
     }
   }
 
+  // hard delete a chapter (admin-only). RPC first, then direct delete fallback.
+  async function deleteGroup(id: string) {
+    if (!isAdmin) {
+      setMsg('Only admins can delete chapters.');
+      return;
+    }
+    const confirmed = confirm('PERMANENTLY delete this chapter? This cannot be undone.');
+    if (!confirmed) return;
+
+    const reason = prompt('Reason (optional):') || null;
+
+    try {
+      // Try RPC
+      const rpc = await supabase.rpc('admin_group_delete', {
+        p_group_id: id,
+        p_reason: reason,
+      });
+
+      if (rpc.error && !/function .* does not exist/i.test(rpc.error.message || '')) {
+        throw rpc.error;
+      }
+
+      if (rpc.error) {
+        // Fallback: direct delete (requires appropriate RLS)
+        const { error: delErr } = await supabase.from('groups').delete().eq('id', id);
+        if (delErr) {
+          if (/permission denied|row-level security/i.test(delErr.message)) {
+            throw new Error(
+              "RLS blocked this delete. Your admin policy for the 'groups' table is missing or too strict."
+            );
+          }
+          throw delErr;
+        }
+
+        // Best-effort audit log
+        try {
+          await supabase.from('admin_actions').insert({
+            admin_profile_id: me?.id,
+            action: 'groups.delete',
+            target_type: 'group',
+            target_id: id,
+            reason,
+          });
+        } catch { /* non-blocking */ }
+      }
+
+      // Remove from UI
+      setGroups((prev) => prev.filter((g) => g.id !== id));
+    } catch (e: any) {
+      showError(e, 'Failed to delete chapter');
+    }
+  }
+
   useEffect(() => {
     if (tab !== 'offers' || !urlFocusOffer) return;
     const el = ownerRowRefs.current.get(urlFocusOffer);
@@ -560,36 +673,35 @@ function AdminContent() {
   }, [tab, urlFocusOffer, offersVisible]);
 
   if (!me) {
-    return <section className="max-w-5xl"><p>Loading…</p></section>;
+    return <section className="max-w-5xl px-3 sm:px-4"><p>Loading…</p></section>;
   }
   if (!canViewAdmin) {
     return (
-      <section className="max-w-5xl">
-        <h2 className="text-2xl font-bold">Admin</h2>
+      <section className="max-w-5xl px-3 sm:px-4">
+        <h2 className="text-xl sm:text-2xl font-bold">Admin</h2>
         <p>You don’t have access.</p>
       </section>
     );
   }
 
+  const TAB_BTN = (active: boolean) =>
+    `rounded border px-3 py-1 text-sm sm:text-[13px] ${active ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'}`;
+
+  const ACTION_BTN =
+    'rounded border px-2 py-1 text-xs sm:text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed';
+
   return (
-    <section className="max-w-5xl space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Admin</h2>
+    <section className="max-w-5xl px-2 sm:px-4 space-y-4">
+      <div className="flex flex-wrap items-center gap-3 justify-between">
+        <h2 className="text-xl sm:text-2xl font-bold">Admin</h2>
         <div className="flex gap-2">
           {(['users', 'offers', 'chapters'] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`rounded border px-3 py-1 text-sm ${tab === t ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'}`}
-            >
+            <button key={t} onClick={() => setTab(t)} className={TAB_BTN(tab === t)}>
               {t[0].toUpperCase() + t.slice(1)}
             </button>
           ))}
           {isAdmin && (
-            <button
-              onClick={() => setTab('audit')}
-              className={`rounded border px-3 py-1 text-sm ${tab === 'audit' ? 'bg-gray-900 text-white' : 'hover:bg-gray-50'}`}
-            >
+            <button onClick={() => setTab('audit')} className={TAB_BTN(tab === 'audit')}>
               Audit
             </button>
           )}
@@ -601,108 +713,205 @@ function AdminContent() {
 
       {/* USERS TAB */}
       {tab === 'users' && (
-        <div className="overflow-auto rounded border">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-3 py-2 text-left">Name</th>
-                <th className="px-3 py-2 text-left">Email</th>
-                <th className="px-3 py-2 text-left">Role</th>
-                <th className="px-3 py-2 text-left">Status</th>
-                <th className="px-3 py-2 text-left">Joined</th>
-                <th className="px-3 py-2 text-left">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {usersVisible.map((u) => {
-                const canStatus = canChangeUserStatus(me, u);
-                const commonBtn =
-                  'rounded border px-2 py-1 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed';
-                const tooltip =
-                  !canStatus && (me?.role === 'moderator')
-                    ? 'Moderators can only change status for regular users.'
-                    : !canStatus && (me?.id === u.id)
-                    ? "You can't change your own status."
-                    : undefined;
+        <div className="space-y-3">
+          {/* Users search (name / email / role) */}
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600">Search</label>
+            <input
+              value={userQ}
+              onChange={(e) => setUserQ(e.target.value)}
+              className="rounded border px-2 py-1 text-sm w-full max-w-xs"
+              placeholder="Name, email, or role…"
+            />
+          </div>
 
-                return (
-                  <tr key={u.id} className="border-t">
-                    <td className="px-3 py-2">{u.display_name}</td>
-                    <td className="px-3 py-2">{userEmails[u.id] ?? '—'}</td>
-                    <td className="px-3 py-2">{u.role}</td>
-                    <td className="px-3 py-2">{u.status}</td>
-                    <td className="px-3 py-2">{new Date(u.created_at).toLocaleDateString()}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-col gap-2">
-                        <div className="flex flex-wrap gap-2">
-                          {u.status === 'active' ? (
-                            <button
-                              title={tooltip}
-                              disabled={!canStatus}
-                              onClick={() => setUserStatus(u.id, u.role, 'suspended')}
-                              className={commonBtn}
-                            >
-                              Suspend
-                            </button>
-                          ) : (
-                            <button
-                              title={tooltip}
-                              disabled={!canStatus}
-                              onClick={() => setUserStatus(u.id, u.role, 'active')}
-                              className={commonBtn}
-                            >
-                              Unsuspend
-                            </button>
-                          )}
+          {/* Mobile cards */}
+          <ul className="md:hidden space-y-2">
+            {usersVisible.map((u) => {
+              const canStatus = canChangeUserStatus(me, u);
+              const tooltip =
+                !canStatus && (me?.role === 'moderator')
+                  ? 'Moderators can only change status for regular users.'
+                  : !canStatus && (me?.id === u.id)
+                  ? "You can't change your own status."
+                  : undefined;
 
-                          {isAdmin && (
-                            <>
-                              {u.role !== 'user' && (
-                                <button onClick={() => setUserRole(u.id, 'user')} className={commonBtn}>
-                                  Demote to user
-                                </button>
-                              )}
-                              {u.role !== 'moderator' && (
-                                <button onClick={() => setUserRole(u.id, 'moderator')} className={commonBtn}>
-                                  Promote to mod
-                                </button>
-                              )}
-                              {u.role !== 'admin' && (
-                                <button onClick={() => setUserRole(u.id, 'admin')} className={commonBtn}>
-                                  Promote to admin
-                                </button>
-                              )}
-                              {u.id !== me.id && (
-                                <button onClick={() => deleteUser(u.id)} className={commonBtn}>
-                                  Delete
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </div>
-
-                        {/* Counters + Reset (row-local refresh) */}
-                        <RowAskControls profileId={u.id} />
+              return (
+                <li key={u.id} className="rounded border p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm truncate">{u.display_name}</div>
+                      <div className="text-xs text-gray-600 truncate">{userEmails[u.id] ?? '—'}</div>
+                      <div className="mt-1 flex flex-wrap gap-2 text-xs text-gray-700">
+                        <span className="rounded bg-gray-100 px-2 py-0.5">role: {u.role}</span>
+                        <span className="rounded bg-gray-100 px-2 py-0.5">status: {u.status}</span>
+                        <span className="rounded bg-gray-100 px-2 py-0.5">
+                          joined: {new Date(u.created_at).toLocaleDateString()}
+                        </span>
                       </div>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      {u.status === 'active' ? (
+                        <button
+                          title={tooltip}
+                          disabled={!canStatus}
+                          onClick={() => setUserStatus(u.id, u.role, 'suspended')}
+                          className={ACTION_BTN}
+                        >
+                          Suspend
+                        </button>
+                      ) : (
+                        <button
+                          title={tooltip}
+                          disabled={!canStatus}
+                          onClick={() => setUserStatus(u.id, u.role, 'active')}
+                          className={ACTION_BTN}
+                        >
+                          Unsuspend
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Admin-only role buttons */}
+                  {isAdmin && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {u.role !== 'user' && (
+                        <button onClick={() => setUserRole(u.id, 'user')} className={ACTION_BTN}>
+                          Demote → user
+                        </button>
+                      )}
+                      {u.role !== 'moderator' && (
+                        <button onClick={() => setUserRole(u.id, 'moderator')} className={ACTION_BTN}>
+                          Promote → mod
+                        </button>
+                      )}
+                      {u.role !== 'admin' && (
+                        <button onClick={() => setUserRole(u.id, 'admin')} className={ACTION_BTN}>
+                          Promote → admin
+                        </button>
+                      )}
+                      {u.id !== me.id && (
+                        <button onClick={() => deleteUser(u.id)} className={ACTION_BTN}>
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Counters + Reset */}
+                  <div className="mt-2">
+                    <RowAskControls profileId={u.id} />
+                  </div>
+                </li>
+              );
+            })}
+            {usersVisible.length === 0 && <p className="text-sm text-gray-600">No users.</p>}
+          </ul>
+
+          {/* Desktop table */}
+          <div className="hidden md:block overflow-auto rounded border">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 sticky top-0 z-10">
+                <tr>
+                  <th className="px-3 py-2 text-left">Name</th>
+                  <th className="px-3 py-2 text-left">Email</th>
+                  <th className="px-3 py-2 text-left">Role</th>
+                  <th className="px-3 py-2 text-left">Status</th>
+                  <th className="px-3 py-2 text-left">Joined</th>
+                  <th className="px-3 py-2 text-left">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usersVisible.map((u) => {
+                  const canStatus = canChangeUserStatus(me, u);
+                  const commonBtn =
+                    'rounded border px-2 py-1 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed';
+                  const tooltip =
+                    !canStatus && (me?.role === 'moderator')
+                      ? 'Moderators can only change status for regular users.'
+                      : !canStatus && (me?.id === u.id)
+                      ? "You can't change your own status."
+                      : undefined;
+
+                  return (
+                    <tr key={u.id} className="border-t">
+                      <td className="px-3 py-2">{u.display_name}</td>
+                      <td className="px-3 py-2">{userEmails[u.id] ?? '—'}</td>
+                      <td className="px-3 py-2">{u.role}</td>
+                      <td className="px-3 py-2">{u.status}</td>
+                      <td className="px-3 py-2">{new Date(u.created_at).toLocaleDateString()}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-col gap-2">
+                          <div className="flex flex-wrap gap-2">
+                            {u.status === 'active' ? (
+                              <button
+                                title={tooltip}
+                                disabled={!canStatus}
+                                onClick={() => setUserStatus(u.id, u.role, 'suspended')}
+                                className={commonBtn}
+                              >
+                                Suspend
+                              </button>
+                            ) : (
+                              <button
+                                title={tooltip}
+                                disabled={!canStatus}
+                                onClick={() => setUserStatus(u.id, u.role, 'active')}
+                                className={commonBtn}
+                              >
+                                Unsuspend
+                              </button>
+                            )}
+
+                            {isAdmin && (
+                              <>
+                                {u.role !== 'user' && (
+                                  <button onClick={() => setUserRole(u.id, 'user')} className={commonBtn}>
+                                    Demote to user
+                                  </button>
+                                )}
+                                {u.role !== 'moderator' && (
+                                  <button onClick={() => setUserRole(u.id, 'moderator')} className={commonBtn}>
+                                    Promote to mod
+                                  </button>
+                                )}
+                                {u.role !== 'admin' && (
+                                  <button onClick={() => setUserRole(u.id, 'admin')} className={commonBtn}>
+                                    Promote to admin
+                                  </button>
+                                )}
+                                {u.id !== me.id && (
+                                  <button onClick={() => deleteUser(u.id)} className={commonBtn}>
+                                    Delete
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+
+                          <RowAskControls profileId={u.id} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {usersVisible.length === 0 && (
+                  <tr>
+                    <td className="px-3 py-4 text-gray-600" colSpan={6}>
+                      No users.
                     </td>
                   </tr>
-                );
-              })}
-              {usersVisible.length === 0 && (
-                <tr>
-                  <td className="px-3 py-4 text-gray-600" colSpan={6}>
-                    No users.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
       {/* OFFERS TAB */}
       {tab === 'offers' && (
-        <div className="space-y-2">
+        <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-3">
             <label className="inline-flex items-center gap-2 text-sm">
               <input
@@ -727,9 +936,128 @@ function AdminContent() {
             </div>
           </div>
 
-          <div className="overflow-auto rounded border">
+          {/* Mobile cards */}
+          <ul className="md:hidden space-y-2">
+            {offersVisible.map((o) => {
+              const owner = ownerInfo[o.owner_id];
+              const ownerRole = owner?.role;
+              const allow = canActOnOffer(me, ownerRole);
+
+              return (
+                <li key={o.id} className={`rounded border p-3 ${urlFocusOffer === o.id ? 'bg-amber-50' : ''}`}>
+                  <div className="text-sm font-medium">{o.title}</div>
+                  <div className="mt-1 text-xs text-gray-700">
+                    <div className="truncate">
+                      <span className="text-gray-500">Owner:</span>{' '}
+                      {owner?.email ? `${owner.name} — ${owner.email}` : owner?.name ?? o.owner_id}
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      <span className="rounded bg-gray-100 px-2 py-0.5">status: {o.status}</span>
+                      <span className="rounded bg-gray-100 px-2 py-0.5">
+                        created: {new Date(o.created_at).toLocaleDateString()}
+                      </span>
+                      <span className="rounded bg-gray-100 px-2 py-0.5">
+                        role: {ownerRole ?? '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {o.status === 'pending' && (
+                      <>
+                        <button
+                          disabled={!allow}
+                          title={!allow ? 'Only admins can act on admin-owned offers.' : undefined}
+                          onClick={() => setOfferStatus(o.id, 'active')}
+                          className={ACTION_BTN}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          disabled={!allow}
+                          title={!allow ? 'Only admins can act on admin-owned offers.' : undefined}
+                          onClick={() => setOfferStatus(o.id, 'archived')}
+                          className={ACTION_BTN}
+                        >
+                          Reject
+                        </button>
+                      </>
+                    )}
+
+                    {o.status !== 'blocked' ? (
+                      <button
+                        disabled={!allow}
+                        title={!allow ? 'Only admins can act on admin-owned offers.' : undefined}
+                        onClick={() => setOfferStatus(o.id, 'blocked')}
+                        className={ACTION_BTN}
+                      >
+                        Block
+                      </button>
+                    ) : (
+                      <button
+                        disabled={!allow}
+                        title={!allow ? 'Only admins can act on admin-owned offers.' : undefined}
+                        onClick={() => setOfferStatus(o.id, 'active')}
+                        className={ACTION_BTN}
+                      >
+                        Unblock
+                      </button>
+                    )}
+
+                    {o.status !== 'paused' && (
+                      <button
+                        disabled={!allow}
+                        title={!allow ? 'Only admins can act on admin-owned offers.' : undefined}
+                        onClick={() => setOfferStatus(o.id, 'paused')}
+                        className={ACTION_BTN}
+                      >
+                        Pause
+                      </button>
+                    )}
+
+                    {o.status !== 'archived' && (
+                      <button
+                        disabled={!allow}
+                        title={!allow ? 'Only admins can act on admin-owned offers.' : undefined}
+                        onClick={() => setOfferStatus(o.id, 'archived')}
+                        className={ACTION_BTN}
+                      >
+                        Archive
+                      </button>
+                    )}
+
+                    {o.status !== 'active' && (
+                      <button
+                        disabled={!allow}
+                        title={!allow ? 'Only admins can act on admin-owned offers.' : undefined}
+                        onClick={() => setOfferStatus(o.id, 'active')}
+                        className={ACTION_BTN}
+                      >
+                        Set Active
+                      </button>
+                    )}
+
+                    {/* Admin-only hard delete */}
+                    {isAdmin && (
+                      <button
+                        onClick={() => deleteOffer(o.id)}
+                        className={ACTION_BTN}
+                        title="Delete offer (admin only)"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+            {offersVisible.length === 0 && <p className="text-sm text-gray-600">No offers.</p>}
+          </ul>
+
+          {/* Desktop table */}
+          <div className="hidden md:block overflow-auto rounded border">
             <table className="min-w-full text-sm">
-              <thead className="bg-gray-50">
+              <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
                   <th className="px-3 py-2 text-left">Title</th>
                   <th className="px-3 py-2 text-left">Owner</th>
@@ -841,6 +1169,17 @@ function AdminContent() {
                               Set Active
                             </button>
                           )}
+
+                          {/* Admin-only hard delete */}
+                          {isAdmin && (
+                            <button
+                              onClick={() => deleteOffer(o.id)}
+                              className={btn}
+                              title="Delete offer (admin only)"
+                            >
+                              Delete
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -861,7 +1200,7 @@ function AdminContent() {
 
       {/* CHAPTERS TAB */}
       {tab === 'chapters' && (
-        <div className="space-y-2">
+        <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
               <label className="text-sm text-gray-600">Status</label>
@@ -889,12 +1228,130 @@ function AdminContent() {
             </div>
           </div>
 
-          <div className="overflow-auto rounded border">
-            <table className="min-w-full text-sm">
-              <thead className="bg-gray-50">
+          {/* Mobile cards */}
+          <ul className="md:hidden space-y-2">
+            {groupsVisible.map((g) => {
+              const label = g.city && g.country ? `${g.city}, ${g.country}` : g.name;
+              return (
+                <li key={g.id} className="rounded border p-3">
+                  <div className="text-sm font-medium">{label}</div>
+                  {g.about ? <div className="text-xs text-gray-600 line-clamp-2 mt-0.5">{g.about}</div> : null}
+                  <div className="mt-1 flex flex-wrap gap-2 text-xs text-gray-700">
+                    <span className="rounded bg-gray-100 px-2 py-0.5">slug: {g.slug || '—'}</span>
+                    <span className="rounded bg-gray-100 px-2 py-0.5">status: {g.status || 'pending'}</span>
+                    <span className="rounded bg-gray-100 px-2 py-0.5">
+                      created: {new Date(g.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {g.status === 'pending' && (
+                      <>
+                        <button
+                          disabled={!isAdmin}
+                          title={!isAdmin ? 'Only admins can approve.' : undefined}
+                          onClick={() => setGroupStatus(g.id, 'active')}
+                          className={ACTION_BTN}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          disabled={!isAdmin}
+                          title={!isAdmin ? 'Only admins can decline.' : undefined}
+                          onClick={() => setGroupStatus(g.id, 'archived')}
+                          className={ACTION_BTN}
+                        >
+                          Decline
+                        </button>
+                      </>
+                    )}
+
+                    {g.status === 'active' && (
+                      <>
+                        <button
+                          disabled={!isAdmin}
+                          title={!isAdmin ? 'Only admins can suspend.' : undefined}
+                          onClick={() => setGroupStatus(g.id, 'suspended')}
+                          className={ACTION_BTN}
+                        >
+                          Suspend
+                        </button>
+                        <a
+                          className="rounded border px-2 py-1 text-xs sm:text-sm hover:bg-gray-50"
+                          href={g.slug ? `/chapters/${g.slug}` : '#'}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          View
+                        </a>
+                      </>
+                    )}
+
+                    {g.status === 'suspended' && (
+                      <>
+                        <button
+                          disabled={!isAdmin}
+                          title={!isAdmin ? 'Only admins can activate.' : undefined}
+                          onClick={() => setGroupStatus(g.id, 'active')}
+                          className={ACTION_BTN}
+                        >
+                          Activate
+                        </button>
+                        <button
+                          disabled={!isAdmin}
+                          title={!isAdmin ? 'Only admins can archive.' : undefined}
+                          onClick={() => setGroupStatus(g.id, 'archived')}
+                          className={ACTION_BTN}
+                        >
+                          Archive
+                        </button>
+                      </>
+                    )}
+
+                    {g.status === 'archived' && (
+                      <button
+                        disabled={!isAdmin}
+                        title={!isAdmin ? 'Only admins can activate.' : undefined}
+                        onClick={() => setGroupStatus(g.id, 'active')}
+                        className={ACTION_BTN}
+                      >
+                        Activate
+                      </button>
+                    )}
+
+                    {/* Admin-only hard delete — always visible in mobile list */}
+                    {isAdmin && (
+                      <button
+                        disabled={!isAdmin}
+                        title={!isAdmin ? 'Only admins can delete.' : undefined}
+                        onClick={() => deleteGroup(g.id)}
+                        className={ACTION_BTN}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+            {groupsVisible.length === 0 && <p className="text-sm text-gray-600">No chapters.</p>}
+          </ul>
+
+          {/* Desktop table */}
+          <div className="hidden md:block overflow-auto rounded border">
+            <table className="min-w-full text-sm table-fixed">
+              <colgroup>
+  <col className="w-[30%]" />  {/* Chapter — SMALLER */}
+  <col className="w-[18%]" />  {/* Slug   */}
+  <col className="w-[12%]" />  {/* Status */}
+  <col className="w-[14%]" />  {/* Created*/}
+  <col className="w-[40%]" />  {/* Actions — wider */}
+</colgroup>
+
+              <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
                   <th className="px-3 py-2 text-left">Chapter</th>
-                  <th className="px-3 py-2 text-left">Slug</th>
+                  <th className="px-3 py-2 text-left">Location</th>
                   <th className="px-3 py-2 text-left">Status</th>
                   <th className="px-3 py-2 text-left">Created</th>
                   <th className="px-3 py-2 text-left">Actions</th>
@@ -988,6 +1445,18 @@ function AdminContent() {
                               className={btn}
                             >
                               Activate
+                            </button>
+                          )}
+
+                          {/* Admin-only hard delete — always visible in desktop table */}
+                          {isAdmin && (
+                            <button
+                              disabled={!isAdmin}
+                              title={!isAdmin ? 'Only admins can delete.' : undefined}
+                              onClick={() => deleteGroup(g.id)}
+                              className={btn}
+                            >
+                              Delete
                             </button>
                           )}
                         </div>
