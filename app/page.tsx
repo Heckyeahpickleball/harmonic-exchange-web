@@ -4,214 +4,129 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 type HXUser = { id: string; email?: string | null } | null;
 
 /* ---------------- REVIEWS CAROUSEL ---------------- */
-type GratitudeRowDB = {
+/** Matches columns in public.reviews_public */
+type ReviewRow = {
   id: string;
-  request_id: string | null;
-  offer_id: string | null;
-  owner_profile_id: string | null;
-  receiver_profile_id: string | null;
-  message: string | null;
   created_at: string;
-};
-
-type EnrichedRow = GratitudeRowDB & {
+  message: string | null;
   offer_title?: string | null;
   owner_name?: string | null;
   receiver_name?: string | null;
 };
 
+async function fetchRows(): Promise<ReviewRow[]> {
+  // Read from the public view you confirmed returns rows
+  const { data, error } = await supabase
+    .from('reviews_public')
+    .select('id,created_at,message,offer_title,owner_name,receiver_name')
+    .order('created_at', { ascending: false })
+    .limit(25);
+
+  if (error) throw error;
+  return (data ?? []) as ReviewRow[];
+}
+
 function ReviewsCarousel() {
-  const [rows, setRows] = useState<EnrichedRow[]>([]);
+  const [rows, setRows] = useState<ReviewRow[]>([]);
   const [i, setI] = useState(0);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const timerRef = useRef<number | null>(null);
 
-  // 1) Load base rows from your existing view (matches your schema)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       setErr(null);
-
-      const { data, error } = await supabase
-        .from('review_gratitudes')
-        .select('id,request_id,offer_id,owner_profile_id,receiver_profile_id,message,created_at')
-        .order('created_at', { ascending: false })
-        .limit(25);
-
-      if (cancelled) return;
-
-      if (error) {
-        setErr(error.message ?? 'Failed to load reviews');
-        setRows([]);
-        setLoading(false);
-        return;
-      }
-
-      const base = (data ?? []) as GratitudeRowDB[];
-
-      // 2) Optional enrichment: fetch offer titles + profile display_names
-      //    These calls are best-effort. If RLS blocks them, we still render.
       try {
-        const offersToFetch = Array.from(
-          new Set(base.map(r => r.offer_id).filter(Boolean))
-        ) as string[];
-        const profilesToFetch = Array.from(
-          new Set(
-            base
-              .flatMap(r => [r.owner_profile_id, r.receiver_profile_id])
-              .filter(Boolean)
-          )
-        ) as string[];
-
-        const [offersRes, profilesRes] = await Promise.all([
-          offersToFetch.length
-            ? supabase.from('offers').select('id,title').in('id', offersToFetch)
-            : Promise.resolve({ data: [] as { id: string; title: string | null }[] }),
-          profilesToFetch.length
-            ? supabase.from('profiles').select('id,display_name').in('id', profilesToFetch)
-            : Promise.resolve({ data: [] as { id: string; display_name: string | null }[] })
-        ]);
-
-        const offerTitleById = new Map<string, string | null>();
-        (offersRes.data ?? []).forEach(o => offerTitleById.set(o.id, o.title ?? null));
-
-        const nameByProfileId = new Map<string, string | null>();
-        (profilesRes.data ?? []).forEach(p => nameByProfileId.set(p.id, p.display_name ?? null));
-
-        const enriched: EnrichedRow[] = base.map(r => ({
-          ...r,
-          offer_title: r.offer_id ? offerTitleById.get(r.offer_id) ?? null : null,
-          owner_name: r.owner_profile_id ? nameByProfileId.get(r.owner_profile_id) ?? null : null,
-          receiver_name: r.receiver_profile_id ? nameByProfileId.get(r.receiver_profile_id) ?? null : null
-        }));
-
-        setRows(enriched);
-      } catch (_e) {
-        // If enrichment fails due to RLS, just show base rows
-        setRows(base);
+        const list = await fetchRows();
+        if (!cancelled) setRows(list);
+      } catch (e: any) {
+        if (!cancelled) setErr(e?.message || 'Failed to load reviews');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Auto-advance
+  // Auto-advance (no dots/buttons)
   useEffect(() => {
     if (!rows.length) return;
     if (timerRef.current) window.clearInterval(timerRef.current);
     timerRef.current = window.setInterval(() => {
-      setI(p => (p + 1) % rows.length);
-    }, 4000);
+      setI((p) => (p + 1) % rows.length);
+    }, 5000);
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
     };
   }, [rows.length]);
 
-  // Shell so we always render a visible block
-  const Shell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-    <section aria-label="Community Gratitude" className="bg-white">
-      <div className="mx-auto max-w-6xl px-4 py-8 sm:py-10">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-2xl font-bold tracking-tight text-[var(--hx-ink)]">
-            Gratitude from Past Exchanges
-          </h3>
-          <Link href="/reviews" className="hx-btn hx-btn--primary">Past Exchanges</Link>
-        </div>
-        {children}
-      </div>
-    </section>
+  // Header + container
+  const Header = () => (
+    <div className="mb-3 flex items-center justify-between">
+      <h3 className="text-2xl font-bold tracking-tight text-[var(--hx-ink)]">
+        Gratitude from Past Exchanges
+      </h3>
+      <Link href="/reviews" className="hx-btn hx-btn--primary">
+        Past Exchanges
+      </Link>
+    </div>
   );
 
-  if (loading) {
-    return (
-      <Shell>
-        <div className="hx-card p-6">
-          <div className="h-4 w-40 animate-pulse rounded bg-gray-200" />
-          <div className="mt-3 h-4 w-3/4 animate-pulse rounded bg-gray-200" />
-          <div className="mt-2 h-4 w-2/3 animate-pulse rounded bg-gray-200" />
-        </div>
-      </Shell>
-    );
-  }
-
-  if (err) {
-    return (
-      <Shell>
-        <div className="hx-card p-6">
-          <p className="text-[var(--hx-muted)]">
-            Couldn’t load reviews. (RLS or missing view) — but the homepage is fine.
-          </p>
-        </div>
-      </Shell>
-    );
-  }
-
-  if (rows.length === 0) {
-    return (
-      <Shell>
-        <div className="hx-card p-6">
-          <p className="text-[var(--hx-muted)]">
-            No public gratitude yet. Be the first to share after your next exchange!
-          </p>
-          <div className="mt-4 flex gap-2">
-          </div>
-        </div>
-      </Shell>
-    );
-  }
-
-  const active = rows[i];
-
   return (
-    <Shell>
-      <div className="hx-card overflow-hidden transition-shadow hover:shadow-md">
-        <div className="p-5 sm:p-6">
-          <div className="text-sm text-[var(--hx-muted)]">
-            {new Date(active.created_at).toLocaleString()}
+    <section aria-label="Community Gratitude" className="bg-white">
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:py-10">
+        <Header />
+        {loading ? (
+          <div className="hx-card p-6">
+            <div className="h-4 w-40 animate-pulse rounded bg-gray-200" />
+            <div className="mt-3 h-4 w-3/4 animate-pulse rounded bg-gray-200" />
+            <div className="mt-2 h-4 w-2/3 animate-pulse rounded bg-gray-200" />
           </div>
-          <div className="mt-1 font-semibold text-[var(--hx-ink)]">
-            {active.offer_title ?? 'An exchange'}
+        ) : err ? (
+          <div className="hx-card p-6">
+            <p className="text-[var(--hx-muted)]">Couldn’t load reviews.</p>
           </div>
-          <p className="mt-2 text-[var(--hx-ink)]">
-            {active.message ?? '—'}
-          </p>
-          <div className="mt-3 text-sm text-[var(--hx-muted)]">
-            {active.receiver_name
-              ? `From ${active.receiver_name}`
-              : active.owner_name
-              ? `Shared by ${active.owner_name}`
-              : 'From a community member'}
+        ) : rows.length === 0 ? (
+          <div className="hx-card p-6">
+            <p className="text-[var(--hx-muted)]">
+              No public gratitude yet. Be the first to share after your next
+              exchange!
+            </p>
           </div>
-        </div>
-
-        {/* dots */}
-        <div className="flex items-center justify-center gap-1.5 pb-4">
-          {rows.map((_, idx) => (
-            <button
-              key={idx}
-              aria-label={`Go to slide ${idx + 1}`}
-              onClick={() => setI(idx)}
-              className={[
-                'h-1.5 w-5 rounded-full transition-opacity',
-                idx === i ? 'bg-[var(--hx-brand)] opacity-100' : 'bg-gray-300 opacity-60',
-              ].join(' ')}
-            />
-          ))}
-        </div>
+        ) : (
+          <div className="hx-card overflow-hidden transition-shadow hover:shadow-md">
+            <div className="p-5 sm:p-6">
+              <div className="text-sm text-[var(--hx-muted)]">
+                {new Date(rows[i].created_at).toLocaleString()}
+              </div>
+              <div className="mt-1 font-semibold text-[var(--hx-ink)]">
+                {rows[i].offer_title ?? 'An exchange'}
+              </div>
+              <p className="mt-2 text-[var(--hx-ink)]">
+                {rows[i].message ?? '—'}
+              </p>
+              <div className="mt-3 text-sm text-[var(--hx-muted)]">
+                {rows[i].receiver_name
+                  ? `From ${rows[i].receiver_name}`
+                  : rows[i].owner_name
+                  ? `Shared by ${rows[i].owner_name}`
+                  : 'From a community member'}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-    </Shell>
+    </section>
   );
 }
 /* --------------------------------------------------- */
@@ -241,26 +156,39 @@ export default function HomePage() {
     <main className="min-h-[80vh]">
       {/* HERO — image only */}
       <section className="hx-hero" aria-label="Harmonic Exchange cover image">
-        <h1 className="sr-only">Harmonic Exchange — The Flow Economy Experiment</h1>
+        <h1 className="sr-only">
+          Harmonic Exchange — The Flow Economy Experiment
+        </h1>
       </section>
 
-      {/* CTA STRIP */}
+      {/* CTA STRIP (keeps Past Exchanges button) */}
       <section className="hx-cta-strip">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-3 px-4 py-6">
-          <Link href="/browse" className="hx-btn hx-btn--primary">Explore Offerings</Link>
+          <Link href="/browse" className="hx-btn hx-btn--primary">
+            Explore Offerings
+          </Link>
           {loading ? (
             <span className="hx-btn hx-btn--outline-primary">Checking…</span>
           ) : user ? (
             <>
-              <Link href="/offers/new" className="hx-btn hx-btn--outline-primary">New Offer</Link>
-              <Link href="/profile" className="hx-btn hx-btn--outline-primary">Create Space</Link>
+              <Link href="/offers/new" className="hx-btn hx-btn--outline-primary">
+                New Offer
+              </Link>
+              <Link href="/profile" className="hx-btn hx-btn--outline-primary">
+                Create Space
+              </Link>
             </>
           ) : (
-            <Link href="/sign-in" className="hx-btn hx-btn--outline-primary">Join the Community</Link>
+            <Link href="/sign-in" className="hx-btn hx-btn--outline-primary">
+              Join the Community
+            </Link>
           )}
-          {/* Removed duplicate Past Exchanges CTA here */}
-          <Link href="#about" className="hx-btn hx-btn--secondary">About</Link>
-          <Link href="#guidelines" className="hx-btn hx-btn--secondary">Community Guidelines</Link>
+          <Link href="#about" className="hx-btn hx-btn--secondary">
+            About
+          </Link>
+          <Link href="#guidelines" className="hx-btn hx-btn--secondary">
+            Community Guidelines
+          </Link>
         </div>
       </section>
 
@@ -272,15 +200,18 @@ export default function HomePage() {
               Welcome to Harmonic Exchange: the Flow Economy Experiment
             </h2>
             <p className="mx-auto mt-2 max-w-2xl text-[var(--hx-muted)]">
-              Harmonic Exchange is a post-currency, gift-first way of sharing value. People offer
-              <strong> time</strong>, <strong> products</strong>, <strong> services</strong>, <strong> education</strong>, <strong> coaching</strong>, <strong> presence</strong>,
-              and <strong> creativity</strong>. Everything is given freely and received with dignity.
+              Harmonic Exchange is a post-currency, gift-first way of sharing
+              value. People offer <strong> time</strong>, <strong> products</strong>,{' '}
+              <strong> services</strong>, <strong> education</strong>,{' '}
+              <strong> coaching</strong>, <strong> presence</strong>, and{' '}
+              <strong> creativity</strong>. Everything is given freely and
+              received with dignity.
             </p>
           </div>
         </div>
       </section>
 
-      {/* Reviews carousel */}
+      {/* Reviews carousel (no dots/arrows; only the “Past Exchanges” link in header) */}
       <ReviewsCarousel />
 
       {/* Wave ABOVE the Why section (white background) */}
@@ -291,8 +222,10 @@ export default function HomePage() {
         <div className="mx-auto max-w-6xl px-4 pt-8 pb-10 sm:pt-10 sm:pb-12">
           <h3 className="text-center text-2xl font-bold">About the Movement</h3>
           <p className="mx-auto mt-3 max-w-3xl text-center text-[var(--hx-muted)]">
-            Harmonic Exchange explores a world where human value flows freely—guided by resonance, trust, and mutual care.
-            We’re prototyping a community-led, post-currency practice where people connect, offer, and receive without obligation or tallying.
+            Harmonic Exchange explores a world where human value flows
+            freely—guided by resonance, trust, and mutual care. We’re
+            prototyping a community-led, post-currency practice where people
+            connect, offer, and receive without obligation or tallying.
           </p>
         </div>
       </section>
@@ -312,10 +245,14 @@ export default function HomePage() {
           </div>
 
           <div>
-            <h3 className="hx-heading-title text-2xl font-bold">Why Harmonic Exchange is different</h3>
+            <h3 className="hx-heading-title text-2xl font-bold">
+              Why Harmonic Exchange is different
+            </h3>
             <div className="hx-heading-accent" />
             <p className="mt-4 mx-auto max-w-prose text-center font-semibold text-[var(--hx-muted)]">
-              This isn’t bartering or transactional. It’s a flow economy where value is shared—not counted—and guided by resonance, trust, and intuitive reciprocity.
+              This isn’t bartering or transactional. It’s a flow economy where
+              value is shared—not counted—and guided by resonance, trust, and
+              intuitive reciprocity.
             </p>
 
             <div className="mt-6 space-y-4">
@@ -363,8 +300,12 @@ export default function HomePage() {
           </div>
 
           <div className="mt-8 flex justify-center gap-3">
-            <Link href="/offers/new" className="hx-btn hx-btn--primary">Share My Value</Link>
-            <Link href="/browse" className="hx-btn hx-btn--outline-primary">See Offerings</Link>
+            <Link href="/offers/new" className="hx-btn hx-btn--primary">
+              Share My Value
+            </Link>
+            <Link href="/browse" className="hx-btn hx-btn--outline-primary">
+              See Offerings
+            </Link>
           </div>
         </div>
       </section>
@@ -372,7 +313,9 @@ export default function HomePage() {
       {/* Community Guidelines — brand gradient */}
       <section id="guidelines" className="hx-section hx-section--brand">
         <div className="mx-auto max-w-6xl px-4 py-14 sm:py-16">
-          <h3 className="text-center text-2xl font-bold text-white">Community Guidelines</h3>
+          <h3 className="text-center text-2xl font-bold text-white">
+            Community Guidelines
+          </h3>
           <ul className="mx-auto mt-6 max-w-3xl list-disc space-y-2 pl-6 text-white/90">
             <li>Honor consent, boundaries, and safety—always.</li>
             <li>Use clear, kind communication.</li>
@@ -381,8 +324,9 @@ export default function HomePage() {
             <li>Celebrate completion—share gratitude if you wish.</li>
           </ul>
           <p className="mx-auto mt-6 max-w-3xl text-center text-white/85">
-            This is a living experiment. We learn by doing. Local and global chapters welcome you to participate,
-            share updates, and help evolve the practice.
+            This is a living experiment. We learn by doing. Local and global
+            chapters welcome you to participate, share updates, and help evolve
+            the practice.
           </p>
         </div>
       </section>
@@ -391,9 +335,15 @@ export default function HomePage() {
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-6 text-sm text-[var(--hx-muted)]">
           <span>© {new Date().getFullYear()} Harmonic Exchange</span>
           <div className="flex gap-4">
-            <Link href="/browse" className="hx-link">Offerings</Link>
-            <Link href="/offers/new" className="hx-link">Share My Value</Link>
-            <Link href="/profile" className="hx-link">Create Space</Link>
+            <Link href="/browse" className="hx-link">
+              Offerings
+            </Link>
+            <Link href="/offers/new" className="hx-link">
+              Share My Value
+            </Link>
+            <Link href="/profile" className="hx-link">
+              Create Space
+            </Link>
           </div>
         </div>
       </footer>
@@ -405,7 +355,12 @@ export default function HomePage() {
 function WaveDivider() {
   return (
     <div className="hx-wave-wrap" aria-hidden="true">
-      <svg className="hx-wave" viewBox="0 0 1200 140" preserveAspectRatio="xMidYMid meet" role="img">
+      <svg
+        className="hx-wave"
+        viewBox="0 0 1200 140"
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+      >
         <defs>
           <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="0%">
             <stop offset="0%" stopColor="var(--hx-brand)" />
@@ -413,7 +368,11 @@ function WaveDivider() {
             <stop offset="100%" stopColor="#14b8a6" />
           </linearGradient>
         </defs>
-        <path d="M0,80 C200,30 360,130 600,80 C840,30 1000,130 1200,80 L1200,140 L0,140 Z" fill="url(#g)" opacity="0.85" />
+        <path
+          d="M0,80 C200,30 360,130 600,80 C840,30 1000,130 1200,80 L1200,140 L0,140 Z"
+          fill="url(#g)"
+          opacity="0.85"
+        />
       </svg>
     </div>
   );
