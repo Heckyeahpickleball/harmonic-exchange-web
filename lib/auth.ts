@@ -19,15 +19,18 @@ const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, '') ||
   (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
 
-/** ------- PASSWORDLESS (magic link) ------- */
-export async function sendMagicLink(email: string) {
+/** ------- PASSWORDLESS (magic link) -------
+ * Matches AuthPanel usage: returns { error: null } on success,
+ * throws on failure.
+ */
+export async function sendMagicLink(email: string): Promise<{ error: null }> {
   if (!email) throw new Error('Email is required');
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: { emailRedirectTo: `${SITE_URL}/auth/callback` },
   });
   if (error) throw error;
-  return true;
+  return { error: null };
 }
 
 /** ------- OAUTH ------- */
