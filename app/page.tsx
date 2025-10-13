@@ -1,11 +1,220 @@
+// app/page.tsx
+
 'use client';
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 type HXUser = { id: string; email?: string | null } | null;
+
+/* ---------------- REVIEWS CAROUSEL ---------------- */
+type GratitudeRowDB = {
+  id: string;
+  request_id: string | null;
+  offer_id: string | null;
+  owner_profile_id: string | null;
+  receiver_profile_id: string | null;
+  message: string | null;
+  created_at: string;
+};
+
+type EnrichedRow = GratitudeRowDB & {
+  offer_title?: string | null;
+  owner_name?: string | null;
+  receiver_name?: string | null;
+};
+
+function ReviewsCarousel() {
+  const [rows, setRows] = useState<EnrichedRow[]>([]);
+  const [i, setI] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const timerRef = useRef<number | null>(null);
+
+  // 1) Load base rows from your existing view (matches your schema)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setErr(null);
+
+      const { data, error } = await supabase
+        .from('review_gratitudes')
+        .select('id,request_id,offer_id,owner_profile_id,receiver_profile_id,message,created_at')
+        .order('created_at', { ascending: false })
+        .limit(25);
+
+      if (cancelled) return;
+
+      if (error) {
+        setErr(error.message ?? 'Failed to load reviews');
+        setRows([]);
+        setLoading(false);
+        return;
+      }
+
+      const base = (data ?? []) as GratitudeRowDB[];
+
+      // 2) Optional enrichment: fetch offer titles + profile display_names
+      //    These calls are best-effort. If RLS blocks them, we still render.
+      try {
+        const offersToFetch = Array.from(
+          new Set(base.map(r => r.offer_id).filter(Boolean))
+        ) as string[];
+        const profilesToFetch = Array.from(
+          new Set(
+            base
+              .flatMap(r => [r.owner_profile_id, r.receiver_profile_id])
+              .filter(Boolean)
+          )
+        ) as string[];
+
+        const [offersRes, profilesRes] = await Promise.all([
+          offersToFetch.length
+            ? supabase.from('offers').select('id,title').in('id', offersToFetch)
+            : Promise.resolve({ data: [] as { id: string; title: string | null }[] }),
+          profilesToFetch.length
+            ? supabase.from('profiles').select('id,display_name').in('id', profilesToFetch)
+            : Promise.resolve({ data: [] as { id: string; display_name: string | null }[] })
+        ]);
+
+        const offerTitleById = new Map<string, string | null>();
+        (offersRes.data ?? []).forEach(o => offerTitleById.set(o.id, o.title ?? null));
+
+        const nameByProfileId = new Map<string, string | null>();
+        (profilesRes.data ?? []).forEach(p => nameByProfileId.set(p.id, p.display_name ?? null));
+
+        const enriched: EnrichedRow[] = base.map(r => ({
+          ...r,
+          offer_title: r.offer_id ? offerTitleById.get(r.offer_id) ?? null : null,
+          owner_name: r.owner_profile_id ? nameByProfileId.get(r.owner_profile_id) ?? null : null,
+          receiver_name: r.receiver_profile_id ? nameByProfileId.get(r.receiver_profile_id) ?? null : null
+        }));
+
+        setRows(enriched);
+      } catch (_e) {
+        // If enrichment fails due to RLS, just show base rows
+        setRows(base);
+      } finally {
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Auto-advance
+  useEffect(() => {
+    if (!rows.length) return;
+    if (timerRef.current) window.clearInterval(timerRef.current);
+    timerRef.current = window.setInterval(() => {
+      setI(p => (p + 1) % rows.length);
+    }, 4000);
+    return () => {
+      if (timerRef.current) window.clearInterval(timerRef.current);
+    };
+  }, [rows.length]);
+
+  // Shell so we always render a visible block
+  const Shell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+    <section aria-label="Community Gratitude" className="bg-white">
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:py-10">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-2xl font-bold tracking-tight text-[var(--hx-ink)]">
+            Gratitude from Past Exchanges
+          </h3>
+          <Link href="/reviews" className="hx-btn hx-btn--primary">Past Exchanges</Link>
+        </div>
+        {children}
+      </div>
+    </section>
+  );
+
+  if (loading) {
+    return (
+      <Shell>
+        <div className="hx-card p-6">
+          <div className="h-4 w-40 animate-pulse rounded bg-gray-200" />
+          <div className="mt-3 h-4 w-3/4 animate-pulse rounded bg-gray-200" />
+          <div className="mt-2 h-4 w-2/3 animate-pulse rounded bg-gray-200" />
+        </div>
+      </Shell>
+    );
+  }
+
+  if (err) {
+    return (
+      <Shell>
+        <div className="hx-card p-6">
+          <p className="text-[var(--hx-muted)]">
+            Couldn’t load reviews. (RLS or missing view) — but the homepage is fine.
+          </p>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <Shell>
+        <div className="hx-card p-6">
+          <p className="text-[var(--hx-muted)]">
+            No public gratitude yet. Be the first to share after your next exchange!
+          </p>
+          <div className="mt-4 flex gap-2">
+          </div>
+        </div>
+      </Shell>
+    );
+  }
+
+  const active = rows[i];
+
+  return (
+    <Shell>
+      <div className="hx-card overflow-hidden transition-shadow hover:shadow-md">
+        <div className="p-5 sm:p-6">
+          <div className="text-sm text-[var(--hx-muted)]">
+            {new Date(active.created_at).toLocaleString()}
+          </div>
+          <div className="mt-1 font-semibold text-[var(--hx-ink)]">
+            {active.offer_title ?? 'An exchange'}
+          </div>
+          <p className="mt-2 text-[var(--hx-ink)]">
+            {active.message ?? '—'}
+          </p>
+          <div className="mt-3 text-sm text-[var(--hx-muted)]">
+            {active.receiver_name
+              ? `From ${active.receiver_name}`
+              : active.owner_name
+              ? `Shared by ${active.owner_name}`
+              : 'From a community member'}
+          </div>
+        </div>
+
+        {/* dots */}
+        <div className="flex items-center justify-center gap-1.5 pb-4">
+          {rows.map((_, idx) => (
+            <button
+              key={idx}
+              aria-label={`Go to slide ${idx + 1}`}
+              onClick={() => setI(idx)}
+              className={[
+                'h-1.5 w-5 rounded-full transition-opacity',
+                idx === i ? 'bg-[var(--hx-brand)] opacity-100' : 'bg-gray-300 opacity-60',
+              ].join(' ')}
+            />
+          ))}
+        </div>
+      </div>
+    </Shell>
+  );
+}
+/* --------------------------------------------------- */
 
 export default function HomePage() {
   const [user, setUser] = useState<HXUser>(null);
@@ -49,7 +258,7 @@ export default function HomePage() {
           ) : (
             <Link href="/sign-in" className="hx-btn hx-btn--outline-primary">Join the Community</Link>
           )}
-          {/* Quick access to About & Guidelines on this page */}
+          {/* Removed duplicate Past Exchanges CTA here */}
           <Link href="#about" className="hx-btn hx-btn--secondary">About</Link>
           <Link href="#guidelines" className="hx-btn hx-btn--secondary">Community Guidelines</Link>
         </div>
@@ -70,6 +279,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Reviews carousel */}
+      <ReviewsCarousel />
 
       {/* Wave ABOVE the Why section (white background) */}
       <WaveDivider />
@@ -102,7 +314,7 @@ export default function HomePage() {
           <div>
             <h3 className="hx-heading-title text-2xl font-bold">Why Harmonic Exchange is different</h3>
             <div className="hx-heading-accent" />
-            <p className="mt-4 mx-auto max-w-prose text-center font-semibold text[--hx-muted] text-[var(--hx-muted)]">
+            <p className="mt-4 mx-auto max-w-prose text-center font-semibold text-[var(--hx-muted)]">
               This isn’t bartering or transactional. It’s a flow economy where value is shared—not counted—and guided by resonance, trust, and intuitive reciprocity.
             </p>
 
@@ -176,7 +388,7 @@ export default function HomePage() {
       </section>
 
       <footer className="border-t">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-6 text-sm text[--hx-muted] text-[var(--hx-muted)]">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-6 text-sm text-[var(--hx-muted)]">
           <span>© {new Date().getFullYear()} Harmonic Exchange</span>
           <div className="flex gap-4">
             <Link href="/browse" className="hx-link">Offerings</Link>
@@ -201,10 +413,7 @@ function WaveDivider() {
             <stop offset="100%" stopColor="#14b8a6" />
           </linearGradient>
         </defs>
-        <path
-          d="M0,80 C200,30 360,130 600,80 C840,30 1000,130 1200,80 L1200,140 L0,140 Z"
-          fill="url(#g)" opacity="0.85"
-        />
+        <path d="M0,80 C200,30 360,130 600,80 C840,30 1000,130 1200,80 L1200,140 L0,140 Z" fill="url(#g)" opacity="0.85" />
       </svg>
     </div>
   );

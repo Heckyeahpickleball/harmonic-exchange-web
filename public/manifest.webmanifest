@@ -1,0 +1,13 @@
+{
+  "name": "Harmonic Exchange",
+  "short_name": "Harmonic",
+  "description": "Share time, skills, products, and support — wealth as shared human value.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF7F2",
+  "theme_color": "#0FB5BA",
+  "icons": [
+    { "src": "/android-chrome-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/android-chrome-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

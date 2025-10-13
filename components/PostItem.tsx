@@ -33,7 +33,10 @@ function Kebab({
         <button
           key={i}
           className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
-          onClick={() => { it.action(); onClose(); }}
+          onClick={() => {
+            it.action();
+            onClose();
+          }}
         >
           {it.label}
         </button>
@@ -43,13 +46,25 @@ function Kebab({
 }
 
 function ConfirmInline({
-  text, confirmLabel = 'Delete', cancelLabel = 'Cancel', onConfirm, onCancel, busy,
+  text,
+  confirmLabel = 'Delete',
+  cancelLabel = 'Cancel',
+  onConfirm,
+  onCancel,
+  busy,
 }: {
-  text: string; confirmLabel?: string; cancelLabel?: string;
-  onConfirm: () => void | Promise<void>; onCancel: () => void; busy?: boolean;
+  text: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  onConfirm: () => void | Promise<void>;
+  onCancel: () => void;
+  busy?: boolean;
 }) {
   const confirmBtnRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => { const t = setTimeout(() => confirmBtnRef.current?.focus(), 0); return () => clearTimeout(t); }, []);
+  useEffect(() => {
+    const t = setTimeout(() => confirmBtnRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, []);
   return (
     <div role="dialog" aria-modal="true" className="mt-2 rounded-lg border bg-white p-3 shadow-sm">
       <h3 className="mb-2 text-sm font-semibold">Confirm delete</h3>
@@ -77,15 +92,21 @@ function ConfirmInline({
 
 function normalizeProfile<T extends { profiles?: any }>(row: T) {
   const p = row.profiles;
-  return { ...row, profiles: Array.isArray(p) ? (p[0] ?? null) : p ?? null };
+  return { ...row, profiles: Array.isArray(p) ? p[0] ?? null : p ?? null };
 }
 function byCreatedAtAsc<A extends { created_at: string }>(a: A, b: A) {
   return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
 }
 
 export default function PostItem({
-  post, me, onDeleted,
-}: { post: PostRow; me: string | null; onDeleted: () => void; }) {
+  post,
+  me,
+  onDeleted,
+}: {
+  post: PostRow;
+  me: string | null;
+  onDeleted: () => void;
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [comments, setComments] = useState<CommentRow[]>([]);
@@ -112,10 +133,15 @@ export default function PostItem({
   }, [post.id]);
 
   useEffect(() => {
-    if (!commentsOpen) { if (channelRef.current) supabase.removeChannel(channelRef.current); return; }
+    if (!commentsOpen) {
+      if (channelRef.current) supabase.removeChannel(channelRef.current);
+      return;
+    }
     const ch = supabase
       .channel(`post_comments:${post.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'post_comments', filter: `post_id=eq.${post.id}` },
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'post_comments', filter: `post_id=eq.${post.id}` },
         (payload) => {
           if (payload.eventType === 'INSERT') {
             const row = normalizeProfile(payload.new as CommentRow) as CommentRow;
@@ -132,10 +158,13 @@ export default function PostItem({
             const row = normalizeProfile(payload.new as CommentRow) as CommentRow;
             setComments((prev) => prev.map((c) => (c.id === row.id ? row : c)));
           }
-        })
+        }
+      )
       .subscribe();
     channelRef.current = ch;
-    return () => { if (ch) supabase.removeChannel(ch); };
+    return () => {
+      if (ch) supabase.removeChannel(ch);
+    };
   }, [commentsOpen, post.id]);
 
   async function toggleComments() {
@@ -189,7 +218,11 @@ export default function PostItem({
     const urls: string[] = [];
     for (const f of imgs) {
       const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}_${f.name}`;
-      const { error } = await bucket.upload(path, f, { cacheControl: '3600', upsert: true, contentType: f.type || 'image/*' });
+      const { error } = await bucket.upload(path, f, {
+        cacheControl: '3600',
+        upsert: true,
+        contentType: f.type || 'image/*',
+      });
       if (error) throw error;
       urls.push(bucket.getPublicUrl(path).data.publicUrl);
     }
@@ -199,7 +232,8 @@ export default function PostItem({
   async function addComment() {
     const body = commentText.trim();
     if (!body && files.length === 0) return;
-    setBusy(true); setErr('');
+    setBusy(true);
+    setErr('');
     try {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth.user?.id;
@@ -218,16 +252,30 @@ export default function PostItem({
 
       setComments((prev) => [...prev, normalized].sort(byCreatedAtAsc));
       setCommentCount((c) => c + 1);
-      setCommentText(''); previews.forEach((u) => URL.revokeObjectURL(u)); setFiles([]); setPreviews([]);
-    } catch (e: any) { setErr(e?.message ?? 'Could not comment.'); }
-    finally { setBusy(false); }
+      setCommentText('');
+      previews.forEach((u) => URL.revokeObjectURL(u));
+      setFiles([]);
+      setPreviews([]);
+    } catch (e: any) {
+      setErr(e?.message ?? 'Could not comment.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   function onComposerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!busy) addComment(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (!busy) addComment();
+    }
   }
 
   const toggleLabel = commentsOpen ? `Hide comments (${commentCount})` : `See comments (${commentCount})`;
+
+  // Decide grid columns for post images:
+  const postImgCount = post.images?.length ?? 0;
+  const postGridCols =
+    postImgCount <= 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';
 
   return (
     <article className="hx-card p-3">
@@ -239,7 +287,13 @@ export default function PostItem({
         </div>
         {me === post.profile_id && (
           <div className="relative">
-            <button className="rounded border px-2 py-1 text-sm" aria-label="More actions" onClick={() => setMenuOpen((v) => !v)}>…</button>
+            <button
+              className="rounded border px-2 py-1 text-sm"
+              aria-label="More actions"
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              …
+            </button>
             {menuOpen && <Kebab items={[{ label: 'Delete post', action: deletePost }]} onClose={() => setMenuOpen(false)} />}
           </div>
         )}
@@ -247,12 +301,14 @@ export default function PostItem({
 
       {post.body && <p className="mb-2 whitespace-pre-wrap">{post.body}</p>}
 
+      {/* IMAGES: natural height; single image spans full width on desktop */}
       {post.images?.length ? (
-        <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className={`mb-2 grid ${postGridCols} gap-2`}>
           {post.images.map((src) => (
-            <div key={src} className="relative h-48 w-full overflow-hidden rounded">
-              <Image src={src} alt="" fill className="object-cover" sizes="(max-width: 640px) 100vw, 50vw" />
-            </div>
+            <figure key={src} className="w-full">
+              {/* Using native img for natural aspect without cropping */}
+              <img src={src} alt="" className="w-full h-auto rounded" />
+            </figure>
           ))}
         </div>
       ) : null}
@@ -278,7 +334,7 @@ export default function PostItem({
               <div className="flex flex-col items-end gap-2">
                 <label className="inline-flex items-center gap-2">
                   <span className="cursor-pointer rounded border px-2 py-1">Add image</span>
-                  <input ref={fileRef} type="file" accept="image/*" hidden multiple onChange={onCommentFiles}/>
+                  <input ref={fileRef} type="file" accept="image/*" hidden multiple onChange={onCommentFiles} />
                 </label>
                 <button className="rounded bg-black px-3 py-1 text-white disabled:opacity-60" disabled={busy} onClick={addComment}>
                   {busy ? 'Posting…' : 'Post'}
@@ -334,8 +390,16 @@ export default function PostItem({
 }
 
 function CommentItem({
-  comment, me, ownerId, onDeleted,
-}: { comment: CommentRow; me: string | null; ownerId: string; onDeleted: () => void; }) {
+  comment,
+  me,
+  ownerId,
+  onDeleted,
+}: {
+  comment: CommentRow;
+  me: string | null;
+  ownerId: string;
+  onDeleted: () => void;
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -358,6 +422,11 @@ function CommentItem({
     }
   }
 
+  // Decide grid columns for comment images:
+  const cImgCount = comment.images?.length ?? 0;
+  const commentGridCols =
+    cImgCount <= 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';
+
   return (
     <div className="relative rounded border p-2">
       <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
@@ -368,19 +437,27 @@ function CommentItem({
         </div>
         {canDelete && (
           <div className="relative">
-            <button className="rounded border px-2 py-1 text-sm" aria-label="More actions" onClick={() => setMenuOpen((v) => !v)}>…</button>
+            <button
+              className="rounded border px-2 py-1 text-sm"
+              aria-label="More actions"
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              …
+            </button>
             {menuOpen && <Kebab items={[{ label: 'Delete comment', action: () => setConfirmDel(true) }]} onClose={() => setMenuOpen(false)} />}
           </div>
         )}
       </div>
 
       {comment.body && <p className="whitespace-pre-wrap">{comment.body}</p>}
+
+      {/* Comment images: single image spans full width on desktop */}
       {comment.images?.length ? (
-        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className={`mt-2 grid ${commentGridCols} gap-2`}>
           {comment.images.map((src) => (
-            <div key={src} className="relative h-40 w-full overflow-hidden rounded">
-              <Image src={src} alt="" fill className="object-cover" sizes="(max-width: 640px) 100vw, 50vw" />
-            </div>
+            <figure key={src} className="w-full">
+              <img src={src} alt="" className="w-full h-auto rounded" />
+            </figure>
           ))}
         </div>
       ) : null}
