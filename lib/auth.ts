@@ -19,7 +19,7 @@ const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, '') ||
   (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
 
-/** Send a passwordless magic-link email */
+/** ------- PASSWORDLESS (magic link) ------- */
 export async function sendMagicLink(email: string) {
   if (!email) throw new Error('Email is required');
   const { error } = await supabase.auth.signInWithOtp({
@@ -30,7 +30,7 @@ export async function sendMagicLink(email: string) {
   return true;
 }
 
-/** Begin an OAuth sign-in flow */
+/** ------- OAUTH ------- */
 export async function signInWithProvider(provider: OAuthProvider) {
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,
@@ -40,24 +40,35 @@ export async function signInWithProvider(provider: OAuthProvider) {
     },
   });
   if (error) throw error;
-  return data?.url || null;
+  return data?.url || null; // client can window.location.assign(this)
 }
 
-/** Email + password sign-in (only if you support it) */
-export async function signInWithPassword(email: string, password: string) {
+/** ------- EMAIL + PASSWORD (used by AuthPanel) ------- */
+export async function signInWithEmail(email: string, password: string) {
+  if (!email || !password) throw new Error('Email and password are required');
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
   return data.user ?? null;
 }
 
-/** Get current user (client-side) */
+export async function signUpWithEmail(email: string, password: string) {
+  if (!email || !password) throw new Error('Email and password are required');
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: `${SITE_URL}/auth/callback` },
+  });
+  if (error) throw error;
+  return data.user ?? null;
+}
+
+/** ------- SESSION HELPERS ------- */
 export async function getUser() {
   const { data, error } = await supabase.auth.getUser();
   if (error) throw error;
   return data.user ?? null;
 }
 
-/** Sign out */
 export async function signOut() {
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
