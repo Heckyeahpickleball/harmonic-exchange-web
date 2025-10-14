@@ -30,9 +30,9 @@ export default function CityOffersRail({
   const STEP = 260;
 
   return (
-    <div className="mt-6">
+    <div className="mt-1">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-base font-semibold">{title}</h3>
+        <h3 className="text-base font-bold">{title}</h3>
         {seeAllHref && (
           <Link href={seeAllHref} className="text-sm underline underline-offset-2">
             See all

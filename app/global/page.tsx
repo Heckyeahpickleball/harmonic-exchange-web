@@ -29,7 +29,6 @@ export default function GlobalExchangePage() {
     let cancelled = false;
 
     function shuffle<T>(arr: T[]): T[] {
-      // Fisher–Yates in-place shuffle
       for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [arr[i], arr[j]] = [arr[j], arr[i]];
@@ -42,17 +41,15 @@ export default function GlobalExchangePage() {
         setLoading(true);
         setMsg('');
 
-        // who am I?
         const { data: auth } = await supabase.auth.getUser();
         const uid = auth.user?.id ?? null;
         if (!cancelled) setMeId(uid);
 
-        // OFFERS: all active (local + online), random order each load
         const { data: oRows } = await supabase
           .from('offers')
           .select('id,title,images,owner_id,created_at,status')
           .eq('status', 'active')
-          .limit(96); // grab a good chunk
+          .limit(96);
 
         const merged = (oRows || []) as any[];
 
@@ -83,14 +80,13 @@ export default function GlobalExchangePage() {
           };
         });
 
-        const randomized = shuffle(list.slice()); // new randomized order
+        const randomized = shuffle(list.slice());
         if (!cancelled) setOffers(randomized);
 
-        // POSTS: **only global** (group_id IS NULL), newest first
         const { data: pRows } = await supabase
           .from('posts')
           .select('id,profile_id,body,created_at,images,group_id,profiles(display_name,avatar_url)')
-          .is('group_id', null) // <- global only
+          .is('group_id', null)
           .order('created_at', { ascending: false })
           .limit(50);
 
@@ -137,10 +133,10 @@ export default function GlobalExchangePage() {
 
       {/* Global offers carousel (randomized each load) */}
       {offers && offers.length > 0 ? (
-        <div className="hx-card p-4">
+        <div className="hx-card p-3 pt-1 sm:p-4 sm:pt-2">
           <CityOffersRail
             offers={offers}
-            title="Offerings from across the community"
+            title="Offerings across the community"
             seeAllHref="/browse"
           />
         </div>
@@ -156,7 +152,7 @@ export default function GlobalExchangePage() {
         {meId ? (
           <PostComposer
             profileId={meId}
-            groupId={null} // <- GLOBAL
+            groupId={null}
             onPost={(row) => setPosts((prev) => [row as FeedPost, ...prev])}
           />
         ) : (
@@ -178,7 +174,7 @@ export default function GlobalExchangePage() {
               <PostItem
                 key={p.id}
                 post={{ ...p, body: p.body ?? '', images: p.images ?? [] }}
-                me={meId} // <- enable author delete + comment controls
+                me={meId}
                 onDeleted={() => setPosts((prev) => prev.filter((x) => x.id !== p.id))}
               />
             ))}

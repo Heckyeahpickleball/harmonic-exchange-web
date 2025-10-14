@@ -120,9 +120,12 @@ export default function ClientHeaderNav() {
   const showAdmin = role === 'admin' || role === 'moderator';
   const is = (p: string) => pathname === p || pathname.startsWith(p + '/');
 
+  // treat offers/exchange/browse as the same “Exchange” bucket for active state
+  const isExchangeBucket = is('/offers') || is('/exchange') || is('/browse');
+
   return (
     <header className="w-full border-b bg-white">
-      {/* ===== Desktop / tablet (unchanged) ===== */}
+      {/* ===== Desktop / tablet ===== */}
       <nav className="hidden md:flex items-center justify-between gap-3 py-2 max-w-6xl mx-auto px-4">
         {/* LEFT: brand + primary links */}
         <div className="flex flex-wrap items-center gap-3">
@@ -147,7 +150,8 @@ export default function ClientHeaderNav() {
             </button>
             {openExchange && (
               <div className="absolute z-50 mt-2 w-56 hx-card p-2" role="menu" onMouseLeave={() => setOpenExchange(false)}>
-                <Link href="/browse" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                {/* Browse & New Offer in dropdown */}
+                <Link href="/offers" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
                   Browse Offers
                 </Link>
                 <Link href="/offers/new" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
@@ -235,7 +239,7 @@ export default function ClientHeaderNav() {
         </div>
       </nav>
 
-      {/* ===== Mobile: add Admin button on the same line as bell/sign-out ===== */}
+      {/* ===== Mobile ===== */}
       <div className="md:hidden px-3 pt-2 pb-1">
         <div className="flex items-center justify-between">
           {/* Left slot: Admin (mods/admins only) */}
@@ -272,13 +276,13 @@ export default function ClientHeaderNav() {
           </div>
         </div>
 
-        {/* Your existing mobile icon row remains unchanged */}
+        {/* Mobile icon row */}
         <nav className="mt-2 flex items-center justify-between gap-1 rounded-xl border bg-white px-2 py-1.5" aria-label="Primary">
-          <NavIcon href="/"        icon={<Icon name="home" />}  label="Home"     active={is('/')} />
-          <NavIcon href="/global"  icon={<Icon name="globe" />} label="Global"   active={is('/global')} />
-          <NavIcon href="/exchange"icon={<Icon name="swap" />}  label="Exchange" active={is('/exchange')} />
-          <NavIcon href="/chapters"icon={<Icon name="map" />}   label="Chapters" active={is('/chapters')} />
-          <NavIcon href="/profile" icon={<Icon name="user" />}  label="Profile"  active={is('/profile')} />
+          <NavIcon href="/"         icon={<Icon name="home" />}  label="Home"     active={is('/')} />
+          <NavIcon href="/global"   icon={<Icon name="globe" />} label="Global"   active={is('/global')} />
+          <NavIcon href="/offers"   icon={<Icon name="swap" />}  label="Exchange" active={isExchangeBucket} />
+          <NavIcon href="/chapters" icon={<Icon name="map" />}   label="Chapters" active={is('/chapters')} />
+          <NavIcon href="/profile"  icon={<Icon name="user" />}  label="Profile"  active={is('/profile')} />
         </nav>
       </div>
     </header>

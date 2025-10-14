@@ -186,12 +186,6 @@ export default function OfferCard({
             View
           </Link>
 
-          {!mine && (
-            <Link href={href} className="hx-btn hx-btn--primary text-sm">
-              Ask to Receive
-            </Link>
-          )}
-
           {/* View Provider */}
           {offer.owner_id && (
             <Link
