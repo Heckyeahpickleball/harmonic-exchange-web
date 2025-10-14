@@ -64,7 +64,7 @@ function ReviewsCarousel() {
     if (timerRef.current) window.clearInterval(timerRef.current);
     timerRef.current = window.setInterval(() => {
       setI((p) => (p + 1) % rows.length);
-    }, 5000);
+    }, 3500);
   };
 
   useEffect(() => {

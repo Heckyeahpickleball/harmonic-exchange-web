@@ -35,7 +35,9 @@ export default function Page() {
 function NewGratitude() {
   const sp = useSearchParams();
   const router = useRouter();
-  const requestId = sp.get('request') || '';
+
+  // Accept BOTH ?request_id= and ?request=
+  const requestId = (sp.get('request_id') || sp.get('request') || '').trim();
 
   const [viewer, setViewer] = useState<string | null>(null);
   const [req, setReq] = useState<ReqRow | null>(null);
@@ -44,13 +46,14 @@ function NewGratitude() {
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [value, setValue] = useState('');
+
   const minLen = 10;
   const maxLen = 4000;
 
   const canSubmit = useMemo(() => {
     if (!viewer || !req || !offer) return false;
     if (!['fulfilled', 'completed', 'done'].includes((req.status || '').toLowerCase())) return false;
-    if (viewer !== req.requester_profile_id) return false;
+    if (viewer !== req.requester_profile_id) return false; // only the receiver writes gratitude
     const len = value.trim().length;
     return len >= minLen && len <= maxLen;
   }, [viewer, req, offer, value]);
@@ -65,11 +68,14 @@ function NewGratitude() {
   }, []);
 
   useEffect(() => {
-    if (!requestId) return;
+    if (!requestId) {
+      setMsg('Missing request id.');
+      return;
+    }
     let cancel = false;
     (async () => {
       setMsg('');
-      // Load request
+      // 1) Load request
       const { data: r, error: rErr } = await supabase
         .from('requests')
         .select('id,offer_id,requester_profile_id,status')
@@ -81,7 +87,7 @@ function NewGratitude() {
       }
       if (!cancel) setReq(r as ReqRow);
 
-      // Load offer & owner display name
+      // 2) Load offer
       const { data: o } = await supabase
         .from('offers')
         .select('id,title,owner_id')
@@ -89,6 +95,7 @@ function NewGratitude() {
         .single();
       if (!cancel) setOffer((o || null) as any);
 
+      // 3) Load owner display name (optional)
       if (o?.owner_id) {
         const { data: p } = await supabase
           .from('profiles')
@@ -109,11 +116,9 @@ function NewGratitude() {
       const { error } = await supabase.from('gratitude_reviews').insert({
         request_id: req.id,
         message: value.trim(),
-        published: true, // public by default
+        published: true,
       });
       if (error) throw error;
-
-      // Nice redirect: to Reviews index with “created” flash, or to the offer
       router.replace('/reviews?created=1');
     } catch (e: any) {
       setMsg(e?.message ?? 'Could not save your gratitude.');

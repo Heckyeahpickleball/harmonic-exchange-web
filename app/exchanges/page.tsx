@@ -317,6 +317,9 @@ async function fetchRequestStatus(id: string) {
   return data as { id: string; status: Status; updated_at: string | null } | null;
 }
 
+/** tiny helper: sleep ms */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 function ExchangesContent() {
   const thread = useSafeThreadParam();
 
@@ -463,7 +466,7 @@ function ExchangesContent() {
     }
   }
 
-  /** Update + award badges */
+  /** Update + award badges (with graceful handling of ON CONFLICT noise from triggers) */
   async function setStatus(req: ReqRow, next: Status) {
     setMsg('');
     setBusyId(req.id);
@@ -476,29 +479,37 @@ function ExchangesContent() {
     );
 
     try {
-      {
-        const { error } = await supabase
-          .from('requests')
-          .update({ status: next })
-          .eq('id', req.id)
-          .select('id,status')
-          .maybeSingle();
+      const { error } = await supabase
+        .from('requests')
+        .update({ status: next })
+        .eq('id', req.id)
+        .select('id,status')
+        .maybeSingle();
 
-        if (error) {
-          const msgLower = String(error?.message ?? '').toLowerCase();
-          const code = (error as any)?.code ?? '';
-          const isOnConflict =
-            msgLower.includes('on conflict') ||
-            msgLower.includes('unique or exclusion constraint') ||
-            code === '42P10' ||
-            code === '23505';
+      if (error) {
+        const msgLower = String(error?.message ?? '').toLowerCase();
+        const code = (error as any)?.code ?? '';
+        const isOnConflict =
+          msgLower.includes('on conflict') ||
+          msgLower.includes('unique or exclusion constraint') ||
+          code === '42P10' ||
+          code === '23505';
 
         if (isOnConflict) {
-            const latest = await fetchRequestStatus(req.id);
-            if (latest?.status !== next) throw new Error(fmtError('requests.update', error));
-          } else {
+          // Give the DB a moment; then confirm the row actually changed.
+          let latest: { id: string; status: Status; updated_at: string | null } | null = null;
+          for (let i = 0; i < 3; i++) {
+            await sleep(200);
+            latest = await fetchRequestStatus(req.id);
+            if (latest?.status === next) break;
+          }
+          if (latest?.status !== next) {
+            // Didn't stick — show the real error.
             throw new Error(fmtError('requests.update', error));
           }
+          // It did stick — swallow this noisy trigger error and continue.
+        } else {
+          throw new Error(fmtError('requests.update', error));
         }
       }
 
