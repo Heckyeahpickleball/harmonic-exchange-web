@@ -24,6 +24,27 @@ function BrowseOffersPage() {
   const sp = useSearchParams();
   const router = useRouter();
 
+  // --- auth (for New Offer button behavior)
+  const [signedIn, setSignedIn] = useState<boolean>(false);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (!mounted) return;
+        setSignedIn(!!data.user);
+      } finally {
+        if (mounted) setAuthLoading(false);
+      }
+    })();
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      setSignedIn(!!session?.user);
+    });
+    return () => sub?.subscription?.unsubscribe();
+  }, []);
+
   // --- UI state (from URL on first render)
   const [qInput, setQInput] = useState(sp.get('q') ?? '');
   const [q, setQ] = useState(sp.get('q') ?? '');
@@ -105,7 +126,7 @@ function BrowseOffersPage() {
           'status',
           'created_at',
           'owner_id',
-        ].join(',')
+        ].join(','),
       )
       .eq('status', 'active')
       .order('created_at', { ascending: false })
@@ -266,7 +287,7 @@ function BrowseOffersPage() {
       <div className="mb-1 flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Browse Offers</h1>
         <Link
-          href="/offers/new"
+          href={authLoading ? '/offers/new' : signedIn ? '/offers/new' : '/sign-in'}
           className="inline-flex items-center justify-center rounded-full bg-[var(--hx-brand)] text-white px-4 py-2 text-sm font-semibold shadow hover:opacity-95 active:opacity-90 whitespace-nowrap"
         >
           New Offer
@@ -296,7 +317,7 @@ function BrowseOffersPage() {
 
         <input
           value={city}
-            onChange={(e) => setCity(e.target.value)}
+          onChange={(e) => setCity(e.target.value)}
           placeholder="City (optional)"
           className="rounded border px-3 py-2"
         />

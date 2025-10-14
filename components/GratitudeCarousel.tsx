@@ -89,7 +89,7 @@ export default function GratitudeCarousel() {
   const title = offers[active.offer_id]?.title || 'Offer';
 
   return (
-    <div className="rounded-2xl border p-4 md:p-5">
+    <div className="rounded-2xl border p-4 md:p-5 touch-pan-y" style={{ touchAction: 'pan-y' }}>
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-700">From the community</h3>
         <div className="flex items-center gap-2">

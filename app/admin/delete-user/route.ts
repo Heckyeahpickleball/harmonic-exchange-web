@@ -1,58 +1,77 @@
+// /app/admin/reviews/delete/route.ts
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY!; // server-only
+
+const admin = createClient(url, serviceRole, { auth: { persistSession: false } });
 
 export async function POST(req: Request) {
   try {
-    const { profile_id, reason } = await req.json().catch(() => ({}));
-    if (!profile_id) {
-      return NextResponse.json({ error: 'profile_id required' }, { status: 400 });
+    const { id, reason } = await req.json();
+
+    if (!id) {
+      return NextResponse.json({ error: 'Missing id' }, { status: 400 });
     }
 
-    const auth = req.headers.get('authorization') || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // 1) Try 'reviews'
+    let deleted = 0;
+    {
+      const { data, error, count } = await admin
+        .from('reviews')
+        .delete({ count: 'exact' })
+        .eq('id', id);
+
+      if (!error) deleted = (count ?? 0);
+      else if (!/relation "reviews" does not exist/i.test(error.message)) {
+        // If the table exists and failed for other reasons, surface it
+        throw error;
+      }
     }
 
-    const supabaseAuth = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { persistSession: false },
-    });
-    const { data: userRes, error: authErr } = await supabaseAuth.auth.getUser(token);
-    if (authErr || !userRes?.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // 2) Try 'review_gratitudes' if not deleted
+    if (!deleted) {
+      const { data, error, count } = await admin
+        .from('review_gratitudes')
+        .delete({ count: 'exact' })
+        .eq('id', id);
+
+      if (!error) deleted = (count ?? 0);
+      else if (!/relation "review_gratitudes" does not exist/i.test(error.message)) {
+        throw error;
+      }
     }
-    const myId = userRes.user.id;
 
-    const admin = supabaseAdmin();
+    // 3) Try 'gratitudes' if still not deleted
+    if (!deleted) {
+      const { data, error, count } = await admin
+        .from('gratitudes')
+        .delete({ count: 'exact' })
+        .eq('id', id);
 
-    const { data: meRow, error: meErr } = await admin
-      .from('profiles')
-      .select('role')
-      .eq('id', myId)
-      .maybeSingle();
-    if (meErr) return NextResponse.json({ error: meErr.message }, { status: 500 });
-    if (!meRow || meRow.role !== 'admin') return NextResponse.json({ error: 'not_admin' }, { status: 403 });
-    if (myId === profile_id) return NextResponse.json({ error: 'cannot_delete_self' }, { status: 400 });
+      if (!error) deleted = (count ?? 0);
+      else throw error;
+    }
 
-    const { error: delErr } = await admin.auth.admin.deleteUser(profile_id);
-    if (delErr) return NextResponse.json({ error: delErr.message }, { status: 400 });
+    if (!deleted) {
+      return NextResponse.json({ error: 'Review not found' }, { status: 404 });
+    }
 
+    // Best-effort audit log
     try {
       await admin.from('admin_actions').insert({
-        admin_profile_id: myId,
-        action: 'users.delete',
-        target_type: 'profile',
-        target_id: profile_id,
+        admin_profile_id: null, // could decode JWT and look up admin if desired
+        action: 'reviews.delete',
+        target_type: 'review',
+        target_id: id,
         reason: reason ?? null,
       });
-    } catch {}
+    } catch { /* ignore */ }
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? 'Unexpected error' }, { status: 500 });
+    console.error(e);
+    return NextResponse.json({ error: e?.message ?? 'Failed to delete review' }, { status: 500 });
   }
 }

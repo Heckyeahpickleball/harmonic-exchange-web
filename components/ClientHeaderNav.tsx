@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import NotificationsBell from '@/components/NotificationsBell';
 import MessagesUnreadBadge from '@/components/MessagesUnreadBadge';
@@ -85,10 +85,12 @@ function NavIcon({
 }
 
 export default function ClientHeaderNav() {
+  const router = useRouter();
   const pathname = usePathname() || '/';
   const [uid, setUid] = useState<string | null>(null);
   const [role, setRole] = useState<Role>('user');
   const [busy, setBusy] = useState(false);
+  const signedIn = !!uid;
 
   // desktop dropdowns
   const [openExchange, setOpenExchange] = useState(false);
@@ -131,7 +133,11 @@ export default function ClientHeaderNav() {
         <div className="flex flex-wrap items-center gap-3">
           <Link href="/" className="underline-offset-4 hover:underline">Home</Link>
 
-          <Link href="/global" className="hx-btn hx-btn--secondary text-sm px-3 py-2">
+          {/* Global now gated when logged out */}
+          <Link
+            href={signedIn ? '/global' : '/sign-in'}
+            className="hx-btn hx-btn--secondary text-sm px-3 py-2"
+          >
             Global Exchange
           </Link>
 
@@ -139,6 +145,7 @@ export default function ClientHeaderNav() {
             <button
               className="hx-btn hx-btn--secondary text-sm px-3 py-2"
               onClick={() => {
+                // Exchange dropdown is fine to open for everyone
                 setOpenExchange(v => !v);
                 setOpenChapters(false);
                 setOpenProfile(false);
@@ -154,7 +161,11 @@ export default function ClientHeaderNav() {
                 <Link href="/offers" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
                   Browse Offers
                 </Link>
-                <Link href="/offers/new" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                <Link
+                  href={signedIn ? '/offers/new' : '/sign-in'}
+                  className="block rounded px-3 py-2 hover:bg-gray-50"
+                  role="menuitem"
+                >
                   New Offer
                 </Link>
                 <Link href="/exchanges" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
@@ -168,6 +179,10 @@ export default function ClientHeaderNav() {
             <button
               className="hx-btn hx-btn--secondary text-sm px-3 py-2"
               onClick={() => {
+                if (!signedIn) {
+                  router.push('/sign-in');
+                  return;
+                }
                 setOpenChapters(v => !v);
                 setOpenExchange(false);
                 setOpenProfile(false);
@@ -177,7 +192,7 @@ export default function ClientHeaderNav() {
             >
               Local Chapters
             </button>
-            {openChapters && (
+            {openChapters && signedIn && (
               <div className="absolute z-50 mt-2 w-60 hx-card p-2" role="menu" onMouseLeave={() => setOpenChapters(false)}>
                 <Link href="/chapters" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
                   Explore Chapters
@@ -193,6 +208,10 @@ export default function ClientHeaderNav() {
             <button
               className="hx-btn hx-btn--secondary text-sm px-3 py-2"
               onClick={() => {
+                if (!signedIn) {
+                  router.push('/sign-in');
+                  return;
+                }
                 setOpenProfile(v => !v);
                 setOpenExchange(false);
                 setOpenChapters(false);
@@ -202,12 +221,16 @@ export default function ClientHeaderNav() {
             >
               Profile
             </button>
-            {openProfile && (
+            {openProfile && signedIn && (
               <div className="absolute z-50 mt-2 w-56 hx-card p-2" role="menu" onMouseLeave={() => setOpenProfile(false)}>
                 <Link href="/profile" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
                   My Profile
                 </Link>
-                <Link href="/messages" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                <Link
+                  href={signedIn ? '/messages' : '/sign-in'}
+                  className="block rounded px-3 py-2 hover:bg-gray-50"
+                  role="menuitem"
+                >
                   Messages <span className="ml-1 align-middle"><MessagesUnreadBadge /></span>
                 </Link>
               </div>
@@ -222,7 +245,7 @@ export default function ClientHeaderNav() {
         {/* RIGHT: bell + auth */}
         <div className="flex items-center gap-2">
           <NotificationsBell />
-          {!uid ? (
+          {!signedIn ? (
             <Link href="/sign-in" className="hx-btn hx-btn--outline-primary text-sm px-3 py-2">
               Sign in
             </Link>
@@ -257,7 +280,7 @@ export default function ClientHeaderNav() {
           {/* Right slot: bell + sign in/out */}
           <div className="flex items-center gap-2">
             <NotificationsBell />
-            {!uid ? (
+            {!signedIn ? (
               <Link
                 href="/sign-in"
                 className="inline-flex items-center rounded-full border border-[var(--hx-brand)] text-[var(--hx-brand)] px-3 py-1.5 text-sm font-medium hover:bg-emerald-50"
@@ -278,11 +301,11 @@ export default function ClientHeaderNav() {
 
         {/* Mobile icon row */}
         <nav className="mt-2 flex items-center justify-between gap-1 rounded-xl border bg-white px-2 py-1.5" aria-label="Primary">
-          <NavIcon href="/"         icon={<Icon name="home" />}  label="Home"     active={is('/')} />
-          <NavIcon href="/global"   icon={<Icon name="globe" />} label="Global"   active={is('/global')} />
-          <NavIcon href="/offers"   icon={<Icon name="swap" />}  label="Exchange" active={isExchangeBucket} />
-          <NavIcon href="/chapters" icon={<Icon name="map" />}   label="Chapters" active={is('/chapters')} />
-          <NavIcon href="/profile"  icon={<Icon name="user" />}  label="Profile"  active={is('/profile')} />
+          <NavIcon href="/"                                        icon={<Icon name="home" />}  label="Home"     active={is('/')} />
+          <NavIcon href={signedIn ? '/global' : '/sign-in'}        icon={<Icon name="globe" />} label="Global"   active={is('/global')} />
+          <NavIcon href="/offers"                                  icon={<Icon name="swap" />}  label="Exchange" active={isExchangeBucket} />
+          <NavIcon href={signedIn ? '/chapters' : '/sign-in'}      icon={<Icon name="map" />}   label="Chapters" active={is('/chapters')} />
+          <NavIcon href="/profile"                                 icon={<Icon name="user" />}  label="Profile"  active={is('/profile')} />
         </nav>
       </div>
     </header>

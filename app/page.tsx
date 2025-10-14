@@ -1,4 +1,4 @@
-// app/page.tsx  (UPDATED FOOTER LINKS)
+// app/page.tsx  (UPDATED for logged-out Share My Value routing)
 'use client';
 
 import Link from 'next/link';
@@ -181,6 +181,7 @@ function ReviewsCarousel() {
 export default function HomePage() {
   const [user, setUser] = useState<HXUser>(null);
   const [loading, setLoading] = useState(true);
+  const signedIn = !!user;
 
   useEffect(() => {
     let mounted = true;
@@ -210,7 +211,7 @@ export default function HomePage() {
           <Link href="/browse" className="hx-btn hx-btn--primary">Explore Offerings</Link>
           {loading ? (
             <span className="hx-btn hx-btn--outline-primary">Checking…</span>
-          ) : user ? (
+          ) : signedIn ? (
             <>
             </>
           ) : (
@@ -323,7 +324,7 @@ export default function HomePage() {
           </div>
 
           <div className="mt-8 flex justify-center gap-3">
-            <Link href="/offers/new" className="hx-btn hx-btn--primary">Share My Value</Link>
+            <Link href={signedIn ? '/offers/new' : '/sign-in'} className="hx-btn hx-btn--primary">Share My Value</Link>
             <Link href="/browse" className="hx-btn hx-btn--outline-primary">See Offerings</Link>
           </div>
         </div>

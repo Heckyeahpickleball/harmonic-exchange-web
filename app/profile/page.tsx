@@ -319,9 +319,22 @@ export default function ProfilePage() {
     }
   }
 
-  // Carousel helpers (mobile)
-  const railRef = useRef<HTMLDivElement | null>(null);
-  const scrollBy = (dx: number) => railRef.current?.scrollBy({ left: dx, behavior: 'smooth' });
+  // ===== Mobile "Active Offers" carousel (ARROWS ONLY; no drag/scroll) =====
+  const [carouselIndex, setCarouselIndex] = useState(0);
+  const SLIDE_W = 260; // px
+  const GAP = 12;      // Tailwind gap-3 = 0.75rem ~ 12px
+  const STEP = SLIDE_W + GAP;
+  const canPrev = carouselIndex > 0;
+  const canNext = carouselIndex < Math.max(0, offers.length - 1);
+  const trackTranslate = `translateX(-${carouselIndex * STEP}px)`;
+
+  const prev = () => setCarouselIndex((i) => Math.max(0, i - 1));
+  const next = () => setCarouselIndex((i) => Math.min(offers.length - 1, i + 1));
+
+  // Clamp index when offers change
+  useEffect(() => {
+    setCarouselIndex((i) => Math.min(i, Math.max(0, offers.length - 1)));
+  }, [offers.length]);
 
   if (loading) return <p className="p-4">Loading...</p>;
 
@@ -567,44 +580,73 @@ export default function ProfilePage() {
             <p className="text-sm text-gray-600">No active offers yet.</p>
           )}
 
-          {/* Mobile carousel */}
+          {/* Mobile carousel — ARROWS ONLY (no drag/scroll) */}
           <div className="md:hidden">
             {offers.length > 0 && (
               <div className="relative">
-                <div className="absolute left-1 top-1/2 z-10 hidden xs:flex -translate-y-1/2">
+                {/* Left / Right buttons */}
+                <div className="absolute left-0 top-1/2 z-10 -translate-y-1/2">
                   <button
                     type="button"
-                    onClick={() => scrollBy(-280)}
-                    className="rounded-full bg-white/90 px-2 py-1 shadow hover:bg-white"
-                    aria-label="Scroll left"
+                    onClick={prev}
+                    disabled={!canPrev}
+                    className="rounded-full bg-white/90 px-4 py-2 shadow hover:bg-white disabled:opacity-50"
+                    aria-label="Previous offer"
                   >
                     ‹
                   </button>
                 </div>
-                <div className="absolute right-1 top-1/2 z-10 hidden xs:flex -translate-y-1/2">
+                <div className="absolute right-0 top-1/2 z-10 -translate-y-1/2">
                   <button
                     type="button"
-                    onClick={() => scrollBy(280)}
-                    className="rounded-full bg-white/90 px-2 py-1 shadow hover:bg-white"
-                    aria-label="Scroll right"
+                    onClick={next}
+                    disabled={!canNext}
+                    className="rounded-full bg-white/90 px-4 py-2 shadow hover:bg-white disabled:opacity-50"
+                    aria-label="Next offer"
                   >
                     ›
                   </button>
                 </div>
 
-                <div
-                  ref={railRef}
-                  className="-mx-2 flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-contain px-2 py-1 scrollbar-thin"
-                  aria-label="Your offers carousel"
-                >
-                  {offers.map((o) => (
-                    <div key={o.id} className="min-w-[260px] max-w-[280px] snap-start">
-                      <OfferCard
-                        offer={o}
-                        mine
-                        onDeleted={(id) => setOffers((prev) => prev.filter((x) => x.id !== id))}
-                      />
-                    </div>
+                {/* Track: overflow-hidden so no horizontal scrolling/drag at all */}
+                <div className="-mx-2 overflow-hidden px-2 py-1 select-none" aria-label="Your offers carousel">
+                  <div
+                    className="flex gap-3 transition-transform duration-300 ease-out will-change-transform"
+                    style={{ transform: trackTranslate, touchAction: 'auto' }}
+                    // prevent accidental horizontal drags from stealing vertical scroll
+                    onTouchMove={() => {
+                      // no preventDefault — allow vertical page scroll
+                    }}
+                    onWheel={() => {
+                      // no-op; wheel scroll should bubble to page
+                    }}
+                  >
+                    {offers.map((o) => (
+                      <div key={o.id} className="w-[260px] flex-shrink-0">
+                        <OfferCard
+                          offer={o}
+                          mine
+                          onDeleted={(id) => {
+                            // Remove the card and clamp the index to the new length
+                            setOffers((prev) => {
+                              const next = prev.filter((x) => x.id !== id);
+                              setCarouselIndex((i) => Math.min(i, Math.max(0, next.length - 1)));
+                              return next;
+                            });
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Position indicator (optional, small) */}
+                <div className="mt-1 flex justify-center gap-1">
+                  {offers.map((_, idx) => (
+                    <span
+                      key={idx}
+                      className={['h-1.5 w-1.5 rounded-full', idx === carouselIndex ? 'bg-gray-800' : 'bg-gray-300'].join(' ')}
+                    />
                   ))}
                 </div>
               </div>

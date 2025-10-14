@@ -15,8 +15,8 @@ type NotifType =
   | 'offer_pending'
   | 'fulfillment_reminder'
   | 'badge_earned'
-  | 'gratitude_prompt'    // important for “Say thanks”
-  | 'review_prompt'       // legacy alias
+  | 'gratitude_prompt'
+  | 'review_prompt'
   | 'system'
   | string;
 
@@ -27,8 +27,8 @@ type Notif = {
   created_at: string;
   read_at: string | null;
   profile_id: string;
-  request_id?: string | null; // ⬅ pulled from column
-  offer_id?: string | null;   // ⬅ pulled from column
+  request_id?: string | null;
+  offer_id?: string | null;
   _fresh?: boolean;
 };
 
@@ -61,7 +61,6 @@ export default function NotificationsBell() {
   const requesterCache = useRef(new Map<string, string>());
   const sigSeen = useRef<Set<string>>(new Set());
 
-  // Helper to read ids from either JSON or columns
   const getOfferId = (n: Notif) =>
     (n.data?.offer_id as string | undefined) || (n.offer_id || undefined);
   const getReqId = (n: Notif) =>
@@ -146,19 +145,14 @@ export default function NotificationsBell() {
       case 'request_fulfilled':
         return { text: `Request marked fulfilled${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=fulfilled' };
 
-      // ✅ Explicit prompts after fulfillment
       case 'gratitude_prompt': {
         const text = `Say thanks${offerTitle ? ` for “${offerTitle}”` : ''}`;
-        const href = reqId
-          ? `/reviews/new?request_id=${encodeURIComponent(reqId)}`
-          : '/reviews/new';
+        const href = reqId ? `/reviews/new?request_id=${encodeURIComponent(reqId)}` : '/reviews/new';
         return { text, href };
       }
       case 'review_prompt': {
         const text = `Please leave a review${offerTitle ? ` for “${offerTitle}”` : ''}`;
-        const href = reqId
-          ? `/gratitude/write?request_id=${encodeURIComponent(reqId)}`
-          : '/reviews/new';
+        const href = reqId ? `/gratitude/write?request_id=${encodeURIComponent(reqId)}` : '/reviews/new';
         return { text, href };
       }
 
@@ -166,19 +160,13 @@ export default function NotificationsBell() {
         const track = n.data?.track as string | undefined;
         const tier = n.data?.tier as number | undefined;
         const niceTrack =
-          track === 'give'
-            ? 'Giver'
-            : track === 'receive'
-            ? 'Receiver'
-            : track === 'streak'
-            ? 'Streak'
-            : track === 'completed_exchange'
-            ? 'Completed Exchanges'
-            : track === 'requests_made'
-            ? 'Requests Made'
-            : track === 'shared_offers'
-            ? 'Offers Shared'
-            : track ?? 'Badge';
+          track === 'give' ? 'Giver'
+          : track === 'receive' ? 'Receiver'
+          : track === 'streak' ? 'Streak'
+          : track === 'completed_exchange' ? 'Completed Exchanges'
+          : track === 'requests_made' ? 'Requests Made'
+          : track === 'shared_offers' ? 'Offers Shared'
+          : track ?? 'Badge';
         const text = `🎉 New badge earned — ${niceTrack}${tier != null ? ` (Tier ${tier})` : ''}`;
         return { text, href: '/profile#badges' };
       }
@@ -231,9 +219,8 @@ export default function NotificationsBell() {
       const { data } = await supabase.auth.getUser();
       const u = data?.user?.id ?? null;
       setUid(u);
-      if (!u) return;
+      if (!u) return; // logged out: skip loading notifications
 
-      // ⬇️ include request_id, offer_id columns
       const { data: list } = await supabase
         .from('notifications')
         .select('id,type,data,created_at,read_at,profile_id,request_id,offer_id')
@@ -337,6 +324,21 @@ export default function NotificationsBell() {
   const listClass =
     'overflow-auto sm:max-h-[55vh] sm:rounded-b-xl max-h-[calc(85dvh-110px)] pb-[env(safe-area-inset-bottom)]';
 
+  // === Logged-out behavior: clicking the bell goes to /sign-in ===
+  if (!uid) {
+    return (
+      <button
+        className="hx-btn hx-btn--outline-primary text-sm px-3 py-2 relative"
+        onClick={() => router.push('/sign-in')}
+        title="Notifications"
+        aria-label="Open notifications"
+        type="button"
+      >
+        <span aria-hidden>🔔</span>
+      </button>
+    );
+  }
+
   return (
     <div ref={rootRef} className="relative" onMouseEnter={cancelScheduledClose}>
       <button
@@ -389,7 +391,7 @@ export default function NotificationsBell() {
                 onClick={() => {
                   setActiveTab('messages');
                   setOpen(false);
-                  router.push('/messages');
+                  router.push('/messages'); // (user is logged in here)
                 }}
                 className="hx-btn hx-btn--primary text-sm w-full"
               >
@@ -425,58 +427,56 @@ export default function NotificationsBell() {
             </div>
           </div>
 
-          {activeTab === 'notifications' && (
-            <ul className={listClass}>
-              {rows.length === 0 && (
-                <li className="px-3 py-3 text-sm text-[var(--hx-muted)]">No notifications.</li>
-              )}
-              {rows.map((n) => {
-                const { text, href } = label(n);
-                const ts = new Date(n.created_at).toLocaleString();
-                const isUnread = !n.read_at;
-                return (
-                  <li
-                    key={n.id}
-                    className={['border-b px-3 py-2 text-sm transition-colors', isUnread ? 'bg-teal-50/50' : ''].join(' ')}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          {isUnread && (
-                            <span
-                              className={[
-                                'mt-1 inline-block h-2 w-2 rounded-full bg-[var(--hx-brand)]',
-                                n._fresh ? 'animate-pulse' : '',
-                              ].join(' ')}
-                              aria-hidden
-                            />
-                          )}
-                          <div className="text-[11px] text-[var(--hx-muted)]">{ts}</div>
-                        </div>
-                        <div className="mt-0.5 break-words">{text}</div>
+          <ul className={listClass}>
+            {rows.length === 0 && (
+              <li className="px-3 py-3 text-sm text-[var(--hx-muted)]">No notifications.</li>
+            )}
+            {rows.map((n) => {
+              const { text, href } = label(n);
+              const ts = new Date(n.created_at).toLocaleString();
+              const isUnread = !n.read_at;
+              return (
+                <li
+                  key={n.id}
+                  className={['border-b px-3 py-2 text-sm transition-colors', isUnread ? 'bg-teal-50/50' : ''].join(' ')}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        {isUnread && (
+                          <span
+                            className={[
+                              'mt-1 inline-block h-2 w-2 rounded-full bg-[var(--hx-brand)]',
+                              n._fresh ? 'animate-pulse' : '',
+                            ].join(' ')}
+                            aria-hidden
+                          />
+                        )}
+                        <div className="text-[11px] text-[var(--hx-muted)]">{ts}</div>
                       </div>
-
-                      {href && (
-                        <button
-                          type="button"
-                          className="hx-btn hx-btn--outline-primary text-xs px-2 py-1 shrink-0"
-                          onClick={async () => {
-                            await markOneRead(n.id);
-                            setOpen(false);
-                            router.push(href);
-                          }}
-                          aria-label="View"
-                          title="View"
-                        >
-                          View
-                        </button>
-                      )}
+                      <div className="mt-0.5 break-words">{text}</div>
                     </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+
+                    {href && (
+                      <button
+                        type="button"
+                        className="hx-btn hx-btn--outline-primary text-xs px-2 py-1 shrink-0"
+                        onClick={async () => {
+                          await markOneRead(n.id);
+                          setOpen(false);
+                          router.push(href);
+                        }}
+                        aria-label="View"
+                        title="View"
+                      >
+                        View
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
     </div>
