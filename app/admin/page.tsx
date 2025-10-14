@@ -282,77 +282,58 @@ function AdminContent() {
           setGroups((data || []) as GroupRow[]);
         }
 
-        if (tab === 'reviews') {
-          // Try canonical `reviews` table first
-          let loaded: ReviewRow[] = [];
-          let source: 'reviews' | 'gratitudes' | null = null;
+if (tab === 'reviews') {
+  // Fetch via server route so we can bypass RLS safely
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
 
-          const attemptReviews = await supabase
-            .from('reviews')
-            .select('id, quote, rating, author_id, subject_id, offer_id, request_id, created_at')
-            .order('created_at', { ascending: false })
-            .limit(500);
+  const res = await fetch('/api/admin/reviews', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
 
-          if (!attemptReviews.error && Array.isArray(attemptReviews.data)) {
-            loaded = (attemptReviews.data as any[]).map((r) => ({
-              id: r.id,
-              quote: r.quote ?? null,
-              rating: (typeof r.rating === 'number' ? r.rating : null),
-              author_id: r.author_id ?? null,
-              subject_id: r.subject_id ?? null,
-              offer_id: r.offer_id ?? null,
-              request_id: r.request_id ?? null,
-              created_at: r.created_at,
-            }));
-            source = 'reviews';
-          } else {
-            // Fallback to existing gratitude-style data (select '*' to avoid unknown column errors)
-            const attemptGratitudes = await supabase
-              .from('gratitudes')
-              .select('*')
-              .order('created_at', { ascending: false })
-              .limit(500);
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j?.error || 'Failed to load reviews');
+  }
 
-            if (attemptGratitudes.error) throw attemptGratitudes.error;
+  const j = await res.json() as {
+    source: 'reviews' | 'gratitudes',
+    items: Array<{
+      id: string;
+      created_at: string;
+      quote: string | null;
+      rating: number | null;
+      author_id: string | null;
+      subject_id: string | null;
+      offer_id: string | null;
+      request_id: string | null;
+    }>;
+  };
 
-            loaded = (attemptGratitudes.data || []).map((g: any) => ({
-              id: g.id,
-              // pick the first available text-like field
-              quote: g.quote ?? g.message ?? g.text ?? g.content ?? g.body ?? null,
-              rating: null,
-              author_id: g.from_profile ?? g.from_profile_id ?? null,
-              subject_id: g.to_profile ?? g.to_profile_id ?? null,
-              offer_id: g.offer_id ?? null,
-              request_id: g.request_id ?? null,
-              created_at: g.created_at,
-            }));
-            source = 'gratitudes';
-          }
+  const loaded = j.items;
 
-          // Best-effort enrich names for author/subject (optional)
-          const profileIds = Array.from(
-            new Set(
-              loaded.flatMap((r) => [r.author_id, r.subject_id].filter(Boolean) as string[])
-            )
-          );
-          let nameMap = new Map<string, string>();
-          if (profileIds.length) {
-            const { data: profs } = await supabase
-              .from('profiles')
-              .select('id,display_name')
-              .in('id', profileIds);
-            for (const p of (profs || []) as Profile[]) nameMap.set(p.id, p.display_name);
-          }
+  // Optional: enrich names
+  const profileIds = Array.from(new Set(
+    loaded.flatMap((r) => [r.author_id, r.subject_id].filter(Boolean) as string[])
+  ));
+  let nameMap = new Map<string, string>();
+  if (profileIds.length) {
+    const { data: profs } = await supabase
+      .from('profiles')
+      .select('id,display_name')
+      .in('id', profileIds);
+    for (const p of (profs || []) as any[]) nameMap.set(p.id, p.display_name);
+  }
 
-          setReviews(
-            loaded.map((r) => ({
-              ...r,
-              author_name: r.author_id ? (nameMap.get(r.author_id) || r.author_id) : null,
-              subject_name: r.subject_id ? (nameMap.get(r.subject_id) || r.subject_id) : null,
-            }))
-          );
-          setReviewsSource(source);
-        }
+  setReviews(
+    loaded.map((r) => ({
+      ...r,
+      author_name: r.author_id ? (nameMap.get(r.author_id) || r.author_id) : null,
+      subject_name: r.subject_id ? (nameMap.get(r.subject_id) || r.subject_id) : null,
+    }))
+  );
+  setReviewsSource(j.source);
+}
 
         if (tab === 'audit') {
           if (!isAdmin) { setTab('users'); return; }
@@ -826,61 +807,42 @@ function AdminContent() {
   }
 
   // ===== Reviews actions (admin-only hard delete) =====
-  async function deleteReview(id: string) {
-    if (!isAdmin) {
-      setMsg('Only admins can delete reviews.');
-      return;
+async function deleteReview(id: string) {
+  if (!isAdmin) { setMsg('Only admins can delete reviews.'); return; }
+  const confirmed = confirm('PERMANENTLY delete this review? This cannot be undone.');
+  if (!confirmed) return;
+
+  const reason = prompt('Reason (optional):') || null;
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
+    // Server route performs the actual delete (reviews or gratitudes) with elevated privileges.
+    const res = await fetch('/admin/reviews/delete', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ id, reason }),
+    });
+
+    if (!res.ok) {
+      let msg = 'Failed to delete review';
+      try {
+        const j = await res.json();
+        if (j?.error) msg = `${msg}: ${j.error}`;
+      } catch {}
+      throw new Error(msg);
     }
-    const confirmed = confirm('PERMANENTLY delete this review? This cannot be undone.');
-    if (!confirmed) return;
 
-    const reason = prompt('Reason (optional):') || null;
-
-    const source = reviewsSource; // 'reviews' or 'gratitudes'
-    if (!source) { setMsg('No review source detected.'); return; }
-
-    try {
-      // Try RPC first (works for canonical `reviews`; harmless if function missing)
-      const rpc = await supabase.rpc('admin_review_delete', {
-        p_review_id: id,
-        p_reason: reason,
-      });
-
-      if (rpc.error && !/function .* does not exist/i.test(rpc.error.message || '')) {
-        // If the RPC exists but failed for other reasons, throw
-        throw rpc.error;
-      }
-
-      if (rpc.error) {
-        // Fallback: direct delete from whichever source we loaded
-        const table = source === 'reviews' ? 'reviews' : 'gratitudes';
-        const { error: delErr } = await supabase.from(table).delete().eq('id', id);
-        if (delErr) {
-          if (/permission denied|row-level security/i.test(delErr.message)) {
-            throw new Error(
-              `RLS blocked this delete. Your admin policy for '${table}' is missing or too strict.`
-            );
-          }
-          throw delErr;
-        }
-
-        // Best-effort audit log
-        try {
-          await supabase.from('admin_actions').insert({
-            admin_profile_id: me?.id,
-            action: `${table}.delete`,
-            target_type: 'review',
-            target_id: id,
-            reason,
-          });
-        } catch { /* non-blocking */ }
-      }
-
-      setReviews((prev) => prev.filter((r) => r.id !== id));
-    } catch (e: any) {
-      showError(e, 'Failed to delete review');
-    }
+    // Update UI
+    setReviews((prev) => prev.filter((r) => r.id !== id));
+  } catch (e: any) {
+    showError(e, 'Failed to delete review');
   }
+}
 
   useEffect(() => {
     if (tab !== 'offers' || !urlFocusOffer) return;
