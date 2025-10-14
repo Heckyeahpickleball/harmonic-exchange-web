@@ -36,16 +36,15 @@ export async function POST(req: Request) {
     if (!SERVICE_KEY_PRESENT) {
       return NextResponse.json(
         { error: 'Service key missing', message: 'SUPABASE_SERVICE_ROLE_KEY not set', env_ok: false },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
-    // --- Auth: must have a bearer token from the signed-in caller ---
+    // Bearer token from the signed-in admin
     const authz = req.headers.get('authorization') || '';
     const token = authz.toLowerCase().startsWith('bearer ') ? authz.slice(7) : null;
     if (!token) return NextResponse.json({ error: 'Missing bearer token' }, { status: 401 });
 
-    // IMPORTANT: create a client WITH THE USER TOKEN (not service key) for the RPC call.
     const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: `Bearer ${token}` } },
       auth: { persistSession: false },
@@ -55,8 +54,10 @@ export async function POST(req: Request) {
     if (authErr || !auth?.user) return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     const myId = auth.user.id;
 
-    // Verify caller is admin (use service-role just for this read; RLS-safe)
-    const { data: meRow, error: meErr } = await supabaseAdmin
+    const admin = supabaseAdmin();
+
+    // Verify caller is admin (server-side read, bypasses RLS safely)
+    const { data: meRow, error: meErr } = await admin
       .from('profiles')
       .select('role')
       .eq('id', myId)
@@ -66,7 +67,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Only admins can change user roles' }, { status: 403 });
     }
 
-    // Input
+    // Body
     let body: { profile_id?: string; role?: UiRole; reason?: string };
     try {
       body = await req.json();
@@ -83,7 +84,7 @@ export async function POST(req: Request) {
     }
 
     // Ensure target exists
-    const { data: target, error: tErr } = await supabaseAdmin
+    const { data: target, error: tErr } = await admin
       .from('profiles')
       .select('id')
       .eq('id', profile_id)
@@ -93,7 +94,7 @@ export async function POST(req: Request) {
 
     const dbRole = UI_TO_DB_ROLE[role];
 
-    // ---- Call RPC USING THE USER CLIENT (so auth.uid() inside the function is YOUR admin id) ----
+    // Call RPC WITH THE USER TOKEN so auth.uid() inside SQL is your admin id
     let rpcErr: any = null;
     try {
       const { error } = await userClient.rpc('admin_set_role', {
@@ -107,9 +108,9 @@ export async function POST(req: Request) {
     }
 
     if (!rpcErr) {
-      // Best-effort audit (often already done inside RPC; harmless to double-log)
+      // Best-effort audit (RPC may already log)
       try {
-        await supabaseAdmin.from('admin_actions').insert({
+        await admin.from('admin_actions').insert({
           admin_profile_id: myId,
           action: `profiles.role -> ${dbRole}`,
           target_type: 'profile',
@@ -120,8 +121,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, db_role: dbRole, via: 'rpc' });
     }
 
-    // ---- Fallback: try direct service-role update (may be blocked by your trigger; still useful to report) ----
-    const { error: upErr } = await supabaseAdmin
+    // Service-role fallback (may be blocked by your trigger in DB)
+    const { error: upErr } = await admin
       .from('profiles')
       .update({ role: dbRole } as any)
       .eq('id', profile_id);
@@ -129,22 +130,21 @@ export async function POST(req: Request) {
     if (upErr) {
       const msg = combine(
         rpcErr?.message, rpcErr?.details, rpcErr?.hint, rpcErr?.code && `rpc:${rpcErr.code}`,
-        (upErr as any)?.message, (upErr as any)?.details, (upErr as any)?.hint, (upErr as any)?.code && `direct:${(upErr as any).code}`
+        (upErr as any)?.message, (upErr as any)?.details, (upErr as any)?.hint, (upErr as any)?.code && `direct:${(upErr as any).code}`,
       );
       return NextResponse.json(
         {
           error: 'Role change failed',
           message: msg,
           rpc: { message: rpcErr?.message ?? null, details: rpcErr?.details ?? null, hint: rpcErr?.hint ?? null, code: rpcErr?.code ?? null },
-          direct: { message: (upErr as any)?.message ?? null, details: (upErr as any)?.details ?? null, hint: (upErr as any)?.hint ?? null, code: (upErr as any)?.code ?? null },
+          direct: { message: (upErr as any)?.message ?? null, details: (upErr as any)?.details ?? null, hint: (upErr as any)?.hint ?? null, code: (upErr as any).code ?? null },
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    // Audit on success via direct path
     try {
-      await supabaseAdmin.from('admin_actions').insert({
+      await admin.from('admin_actions').insert({
         admin_profile_id: myId,
         action: `profiles.role -> ${dbRole}`,
         target_type: 'profile',
