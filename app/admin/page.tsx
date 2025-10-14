@@ -1,13 +1,13 @@
-/* HX v1.2.1 — Admin panel (Users, Offers, Chapters, Audit) — Mobile friendly
-   UI changes (no logic changes):
-   - Mobile-first responsive cards for Users / Offers / Chapters.
+/* HX v1.2.1 — Admin panel (Users, Offers, Chapters, Audit, Reviews) — Mobile friendly
+   UI changes (no logic changes except added Reviews tab + deleteReview):
+   - Mobile-first responsive cards for Users / Offers / Chapters / Reviews.
    - Desktop keeps tables; headers are sticky; cell padding tightened.
    - Actions grouped & wrapped; buttons use compact sizes on mobile.
    - Preserves all RPC fallbacks and permissions logic.
 
    Notes:
-   - Nothing else in the app needs to change.
-   - All original behavior retained; just different rendering below md.
+   - New "Reviews" tab lists reviews from `reviews` table; if not found, falls back to `gratitudes`.
+   - Admin-only hard delete for reviews with RPC-first, then direct delete fallback, plus audit log.
 */
 
 'use client';
@@ -41,7 +41,7 @@ type AdminAction = {
   id: string;
   admin_profile_id: string;
   action: string;
-  target_type: 'profile' | 'offer' | 'group';
+  target_type: 'profile' | 'offer' | 'group' | 'review';
   target_id: string;
   reason: string | null;
   created_at: string;
@@ -64,7 +64,21 @@ type GroupRow = {
 
 type EmailRow = { id: string; email: string | null; display_name?: string };
 
-type Tab = 'users' | 'offers' | 'chapters' | 'audit';
+/** Minimal, resilient review row shape that can map from either `reviews` or `gratitudes`. */
+type ReviewRow = {
+  id: string;
+  quote?: string | null;
+  rating?: number | null;
+  author_id?: string | null;        // reviewer
+  author_name?: string | null;
+  subject_id?: string | null;       // person being reviewed / receiver
+  subject_name?: string | null;
+  offer_id?: string | null;
+  request_id?: string | null;
+  created_at: string;
+};
+
+type Tab = 'users' | 'offers' | 'chapters' | 'reviews' | 'audit';
 
 /** Small component to show "Fulfilled received" (view created in SQL) */
 function FulfilledCount({ profileId }: { profileId: string }) {
@@ -127,8 +141,9 @@ function AdminContent() {
 
   const [pendingOnly, setPendingOnly] = useState<boolean>(urlPendingOnly);
   const [offerQ, setOfferQ] = useState('');
-
   const [userQ, setUserQ] = useState(''); // users search query
+  const [groupQ, setGroupQ] = useState('');
+  const [groupFilter, setGroupFilter] = useState<'pending' | 'active' | 'suspended' | 'archived' | 'all'>('pending');
 
   const [users, setUsers] = useState<Profile[]>([]);
   const [userEmails, setUserEmails] = useState<Record<string, string | null>>({});
@@ -140,14 +155,16 @@ function AdminContent() {
   >({});
 
   const [groups, setGroups] = useState<GroupRow[]>([]);
-  const [groupQ, setGroupQ] = useState('');
-  const [groupFilter, setGroupFilter] = useState<'pending' | 'active' | 'suspended' | 'archived' | 'all'>('pending');
 
   const [audit, setAudit] = useState<AdminAction[]>([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
 
-  // Small helper to surface useful errors
+  // Reviews state
+  const [reviews, setReviews] = useState<ReviewRow[]>([]);
+  const [reviewsSource, setReviewsSource] = useState<'reviews' | 'gratitudes' | null>(null);
+  const [reviewQ, setReviewQ] = useState('');
+
   function showError(e: any, fallback = 'Something went wrong.') {
     const m =
       e?.message ||
@@ -265,72 +282,162 @@ function AdminContent() {
           setGroups((data || []) as GroupRow[]);
         }
 
-if (tab === 'audit') {
-  if (!isAdmin) { setTab('users'); return; }
+        if (tab === 'reviews') {
+          // Try canonical `reviews` table first
+          let loaded: ReviewRow[] = [];
+          let source: 'reviews' | 'gratitudes' | null = null;
 
-  const { data: rows } = await supabase
-    .from('admin_actions')
-    .select('id,admin_profile_id,action,target_type,target_id,reason,created_at')
-    .order('created_at', { ascending: false })
-    .limit(200);
+          const attemptReviews = await supabase
+            .from('reviews')
+            .select('id, quote, rating, author_id, subject_id, offer_id, request_id, created_at')
+            .order('created_at', { ascending: false })
+            .limit(500);
 
-  const acts = (rows || []) as AdminAction[];
-  const adminIds = Array.from(new Set(acts.map((a) => a.admin_profile_id)));
+          if (!attemptReviews.error && Array.isArray(attemptReviews.data)) {
+            loaded = (attemptReviews.data as any[]).map((r) => ({
+              id: r.id,
+              quote: r.quote ?? null,
+              rating: (typeof r.rating === 'number' ? r.rating : null),
+              author_id: r.author_id ?? null,
+              subject_id: r.subject_id ?? null,
+              offer_id: r.offer_id ?? null,
+              request_id: r.request_id ?? null,
+              created_at: r.created_at,
+            }));
+            source = 'reviews';
+          } else {
+            // Fallback to existing gratitude-style data (select '*' to avoid unknown column errors)
+            const attemptGratitudes = await supabase
+              .from('gratitudes')
+              .select('*')
+              .order('created_at', { ascending: false })
+              .limit(500);
 
-  // map admin id -> name
-  const adminMap = new Map<string, string>();
-  if (adminIds.length) {
-    const { data: admins } = await supabase
-      .from('profiles')
-      .select('id,display_name')
-      .in('id', adminIds);
-    for (const a of ((admins || []) as Profile[])) adminMap.set(a.id, a.display_name);
-  }
+            if (attemptGratitudes.error) throw attemptGratitudes.error;
 
-  // collect target ids by type
-  const profileTargets = acts.filter((a) => a.target_type === 'profile').map((a) => a.target_id);
-  const offerTargets   = acts.filter((a) => a.target_type === 'offer').map((a) => a.target_id);
-  const groupTargets   = acts.filter((a) => a.target_type === 'group').map((a) => a.target_id);
+            loaded = (attemptGratitudes.data || []).map((g: any) => ({
+              id: g.id,
+              // pick the first available text-like field
+              quote: g.quote ?? g.message ?? g.text ?? g.content ?? g.body ?? null,
+              rating: null,
+              author_id: g.from_profile ?? g.from_profile_id ?? null,
+              subject_id: g.to_profile ?? g.to_profile_id ?? null,
+              offer_id: g.offer_id ?? null,
+              request_id: g.request_id ?? null,
+              created_at: g.created_at,
+            }));
+            source = 'gratitudes';
+          }
 
-  // fetch label sources
-  const [profileRows, offerRows, groupRows] = await Promise.all([
-    profileTargets.length
-      ? supabase.from('profiles').select('id,display_name').in('id', profileTargets)
-      : Promise.resolve({ data: [] as any[] }),
-    offerTargets.length
-      ? supabase.from('offers').select('id,title').in('id', offerTargets)
-      : Promise.resolve({ data: [] as any[] }),
-    groupTargets.length
-      ? supabase.from('groups').select('id,name,city,country,slug').in('id', groupTargets)
-      : Promise.resolve({ data: [] as any[] }),
-  ]);
+          // Best-effort enrich names for author/subject (optional)
+          const profileIds = Array.from(
+            new Set(
+              loaded.flatMap((r) => [r.author_id, r.subject_id].filter(Boolean) as string[])
+            )
+          );
+          let nameMap = new Map<string, string>();
+          if (profileIds.length) {
+            const { data: profs } = await supabase
+              .from('profiles')
+              .select('id,display_name')
+              .in('id', profileIds);
+            for (const p of (profs || []) as Profile[]) nameMap.set(p.id, p.display_name);
+          }
 
-  const profMap  = new Map<string, string>();
-  const offerMap = new Map<string, string>();
-  const groupMap = new Map<string, string>();
+          setReviews(
+            loaded.map((r) => ({
+              ...r,
+              author_name: r.author_id ? (nameMap.get(r.author_id) || r.author_id) : null,
+              subject_name: r.subject_id ? (nameMap.get(r.subject_id) || r.subject_id) : null,
+            }))
+          );
+          setReviewsSource(source);
+        }
 
-  for (const p of ((profileRows as any).data || []) as any[]) profMap.set(p.id, p.display_name);
-  for (const o of ((offerRows   as any).data || []) as any[]) offerMap.set(o.id, o.title);
+        if (tab === 'audit') {
+          if (!isAdmin) { setTab('users'); return; }
 
-  // ✅ Prefer human label for chapters, never slug
-  for (const g of ((groupRows   as any).data || []) as any[]) {
-    // Try "City, Country" if present, otherwise fall back to Name, then id
-    const cityCountry = (g.city && g.country) ? `${g.city}, ${g.country}` : null;
-    const label = cityCountry || g.name || g.id;
-    groupMap.set(g.id, label);
-  }
+          const { data: rows } = await supabase
+            .from('admin_actions')
+            .select('id,admin_profile_id,action,target_type,target_id,reason,created_at')
+            .order('created_at', { ascending: false })
+            .limit(200);
 
-  setAudit(
-    acts.map((a) => ({
-      ...a,
-      admin_name: adminMap.get(a.admin_profile_id) || a.admin_profile_id,
-      target_label:
-        a.target_type === 'profile' ? (profMap.get(a.target_id) || a.target_id) :
-        a.target_type === 'offer'   ? (offerMap.get(a.target_id) || a.target_id) :
-        a.target_type === 'group'   ? (groupMap.get(a.target_id) || a.target_id) : a.target_id
-    }))
-  );
-}
+          const acts = (rows || []) as AdminAction[];
+          const adminIds = Array.from(new Set(acts.map((a) => a.admin_profile_id)));
+
+          // map admin id -> name
+          const adminMap = new Map<string, string>();
+          if (adminIds.length) {
+            const { data: admins } = await supabase
+              .from('profiles')
+              .select('id,display_name')
+              .in('id', adminIds);
+            for (const a of ((admins || []) as Profile[])) adminMap.set(a.id, a.display_name);
+          }
+
+          // collect target ids by type
+          const profileTargets = acts.filter((a) => a.target_type === 'profile').map((a) => a.target_id);
+          const offerTargets   = acts.filter((a) => a.target_type === 'offer').map((a) => a.target_id);
+          const groupTargets   = acts.filter((a) => a.target_type === 'group').map((a) => a.target_id);
+          const reviewTargets  = acts.filter((a) => a.target_type === 'review').map((a) => a.target_id);
+
+          // fetch label sources
+          const [profileRows, offerRows, groupRows] = await Promise.all([
+            profileTargets.length
+              ? supabase.from('profiles').select('id,display_name').in('id', profileTargets)
+              : Promise.resolve({ data: [] as any[] }),
+            offerTargets.length
+              ? supabase.from('offers').select('id,title').in('id', offerTargets)
+              : Promise.resolve({ data: [] as any[] }),
+            groupTargets.length
+              ? supabase.from('groups').select('id,name,city,country,slug').in('id', groupTargets)
+              : Promise.resolve({ data: [] as any[] }),
+          ]);
+
+          // Reviews/Gratitudes labels: try reviews, then fallback to gratitudes (*)
+          let reviewRows: any = { data: [] as any[] };
+          if (reviewTargets.length) {
+            reviewRows = await supabase.from('reviews').select('id,quote').in('id', reviewTargets);
+            if (!reviewRows.data?.length) {
+              const gr = await supabase.from('gratitudes').select('*').in('id', reviewTargets);
+              reviewRows = {
+                data: (gr.data || []).map((g: any) => ({
+                  id: g.id,
+                  quote: g.quote ?? g.message ?? g.text ?? g.content ?? g.body ?? g.id,
+                })),
+              };
+            }
+          }
+
+          const profMap  = new Map<string, string>();
+          const offerMap = new Map<string, string>();
+          const groupMap = new Map<string, string>();
+          const reviewMap = new Map<string, string>();
+
+          for (const p of ((profileRows as any).data || []) as any[]) profMap.set(p.id, p.display_name);
+          for (const o of ((offerRows   as any).data || []) as any[]) offerMap.set(o.id, o.title);
+          for (const r of ((reviewRows  as any).data || []) as any[]) reviewMap.set(r.id, r.quote ?? r.id);
+
+          // Prefer human label for chapters
+          for (const g of ((groupRows   as any).data || []) as any[]) {
+            const cityCountry = (g.city && g.country) ? `${g.city}, ${g.country}` : null;
+            const label = cityCountry || g.name || g.id;
+            groupMap.set(g.id, label);
+          }
+
+          setAudit(
+            acts.map((a) => ({
+              ...a,
+              admin_name: adminMap.get(a.admin_profile_id) || a.admin_profile_id,
+              target_label:
+                a.target_type === 'profile' ? (profMap.get(a.target_id) || a.target_id) :
+                a.target_type === 'offer'   ? (offerMap.get(a.target_id) || a.target_id) :
+                a.target_type === 'group'   ? (groupMap.get(a.target_id) || a.target_id) :
+                a.target_type === 'review'  ? (reviewMap.get(a.target_id) || a.target_id) : a.target_id
+            }))
+          );
+        }
 
       } catch (e: any) {
         showError(e, 'Failed to load admin data.');
@@ -373,11 +480,7 @@ if (tab === 'audit') {
       const name = (u.display_name || '').toLowerCase();
       const email = (userEmails[u.id] || '').toLowerCase();
       const role = (u.role || '').toLowerCase();
-      return (
-        name.includes(q) ||
-        email.includes(q) ||
-        role.includes(q)
-      );
+      return name.includes(q) || email.includes(q) || role.includes(q);
     });
   }, [users, userEmails, userQ]);
 
@@ -391,6 +494,18 @@ if (tab === 'audit') {
       return label.includes(q);
     });
   }, [groups, groupFilter, groupQ]);
+
+  // Reviews visible (filter by quote or names if present)
+  const reviewsVisible = useMemo(() => {
+    const q = reviewQ.trim().toLowerCase();
+    if (!q) return reviews;
+    return reviews.filter((r) => {
+      const quote = (r.quote || '').toLowerCase();
+      const author = (r.author_name || '').toLowerCase();
+      const subject = (r.subject_name || '').toLowerCase();
+      return quote.includes(q) || author.includes(q) || subject.includes(q);
+    });
+  }, [reviews, reviewQ]);
 
   // ===== User actions =====
   async function setUserStatus(id: string, targetRole: Role, next: Status) {
@@ -424,33 +539,75 @@ if (tab === 'audit') {
       setMsg('Only admins can change roles.');
       return;
     }
+    if (id === me?.id) {
+      setMsg("You can't change your own role.");
+      return;
+    }
+
     setMsg('');
+    const reason = prompt(`Reason for setting role to ${next}? (optional)`) || null;
+
     try {
-      const { error } = await supabase.rpc('admin_set_role', { p_profile: id, p_role: next });
-      if (error) throw error;
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const res = await fetch('/admin/set-role', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ profile_id: id, role: next, reason }),
+      });
+
+      if (!res.ok) {
+        let msg = 'Failed to change role';
+        try {
+          const j = await res.json();
+          if (j?.error) msg = `${msg}: ${j.error}`;
+        } catch {}
+        throw new Error(msg);
+      }
+
       setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, role: next } : u)));
     } catch (e: any) {
       showError(e, 'Failed to change role');
     }
   }
 
+  // CHANGED: Use App Route and send Bearer token so the server can auth us
   async function deleteUser(id: string) {
-    if (!isAdmin) {
-      setMsg('Only admins can delete users.');
-      return;
-    }
-    if (id === me?.id) {
-      setMsg("You can't delete your own account.");
-      return;
-    }
+    if (!isAdmin) { setMsg('Only admins can delete users.'); return; }
+    if (id === me?.id) { setMsg("You can't delete your own account."); return; }
+
     const confirmed = confirm('PERMANENTLY delete this member? This cannot be undone.');
     if (!confirmed) return;
 
     const reason = prompt('Reason (optional):') || null;
+
     try {
-      const { error } = await supabase.rpc('admin_user_delete', { p_profile_id: id, p_reason: reason });
-      if (error) throw error;
-      setUsers((prev) => prev.filter((u) => u.id !== id));
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const res = await fetch('/admin/delete-user', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ profile_id: id, reason }),
+      });
+
+      if (!res.ok) {
+        let msg = 'Failed to delete user';
+        try {
+          const j = await res.json();
+          if (j?.error) msg = `${msg}: ${j.error}`;
+        } catch {}
+        throw new Error(msg);
+      }
+
+      setUsers(prev => prev.filter(u => u.id !== id));
     } catch (e: any) {
       showError(e, 'Failed to delete user');
     }
@@ -512,7 +669,7 @@ if (tab === 'audit') {
     }
   }
 
-  // NEW: hard delete an offer (admin-only). RPC first, then direct delete fallback.
+  // hard delete an offer (admin-only). RPC first, then direct delete fallback.
   async function deleteOffer(id: string) {
     if (!isAdmin) {
       setMsg('Only admins can delete offers.');
@@ -668,6 +825,63 @@ if (tab === 'audit') {
     }
   }
 
+  // ===== Reviews actions (admin-only hard delete) =====
+  async function deleteReview(id: string) {
+    if (!isAdmin) {
+      setMsg('Only admins can delete reviews.');
+      return;
+    }
+    const confirmed = confirm('PERMANENTLY delete this review? This cannot be undone.');
+    if (!confirmed) return;
+
+    const reason = prompt('Reason (optional):') || null;
+
+    const source = reviewsSource; // 'reviews' or 'gratitudes'
+    if (!source) { setMsg('No review source detected.'); return; }
+
+    try {
+      // Try RPC first (works for canonical `reviews`; harmless if function missing)
+      const rpc = await supabase.rpc('admin_review_delete', {
+        p_review_id: id,
+        p_reason: reason,
+      });
+
+      if (rpc.error && !/function .* does not exist/i.test(rpc.error.message || '')) {
+        // If the RPC exists but failed for other reasons, throw
+        throw rpc.error;
+      }
+
+      if (rpc.error) {
+        // Fallback: direct delete from whichever source we loaded
+        const table = source === 'reviews' ? 'reviews' : 'gratitudes';
+        const { error: delErr } = await supabase.from(table).delete().eq('id', id);
+        if (delErr) {
+          if (/permission denied|row-level security/i.test(delErr.message)) {
+            throw new Error(
+              `RLS blocked this delete. Your admin policy for '${table}' is missing or too strict.`
+            );
+          }
+          throw delErr;
+        }
+
+        // Best-effort audit log
+        try {
+          await supabase.from('admin_actions').insert({
+            admin_profile_id: me?.id,
+            action: `${table}.delete`,
+            target_type: 'review',
+            target_id: id,
+            reason,
+          });
+        } catch { /* non-blocking */ }
+      }
+
+      setReviews((prev) => prev.filter((r) => r.id !== id));
+    } catch (e: any) {
+      showError(e, 'Failed to delete review');
+    }
+  }
+
   useEffect(() => {
     if (tab !== 'offers' || !urlFocusOffer) return;
     const el = ownerRowRefs.current.get(urlFocusOffer);
@@ -701,7 +915,7 @@ if (tab === 'audit') {
       <div className="flex flex-wrap items-center gap-3 justify-between">
         <h2 className="text-xl sm:text-2xl font-bold">Admin</h2>
         <div className="flex gap-2">
-          {(['users', 'offers', 'chapters'] as Tab[]).map((t) => (
+          {(['users', 'offers', 'chapters', 'reviews'] as Tab[]).map((t) => (
             <button key={t} onClick={() => setTab(t)} className={TAB_BTN(tab === t)}>
               {t[0].toUpperCase() + t.slice(1)}
             </button>
@@ -1346,14 +1560,8 @@ if (tab === 'audit') {
           {/* Desktop table */}
           <div className="hidden md:block overflow-auto rounded border">
             <table className="min-w-full text-sm table-fixed">
-              <colgroup>
-  <col className="w-[30%]" />  {/* Chapter — SMALLER */}
-  <col className="w-[18%]" />  {/* Slug   */}
-  <col className="w-[12%]" />  {/* Status */}
-  <col className="w-[14%]" />  {/* Created*/}
-  <col className="w-[40%]" />  {/* Actions — wider */}
-</colgroup>
-
+              {/* IMPORTANT: no whitespace or comments inside colgroup */}
+              <colgroup><col className="w-[30%]" /><col className="w-[18%]" /><col className="w-[12%]" /><col className="w-[14%]" /><col className="w-[40%]" /></colgroup>
               <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
                   <th className="px-3 py-2 text-left">Chapter</th>
@@ -1480,6 +1688,99 @@ if (tab === 'audit') {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* REVIEWS TAB */}
+      {tab === 'reviews' && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="ml-auto flex items-center gap-2">
+              <label className="text-sm text-gray-600">Search</label>
+              <input
+                value={reviewQ}
+                onChange={(e) => setReviewQ(e.target.value)}
+                className="rounded border px-2 py-1 text-sm"
+                placeholder="Quote / author / subject…"
+              />
+            </div>
+          </div>
+
+          {/* Mobile cards */}
+          <ul className="md:hidden space-y-2">
+            {reviewsVisible.map((r) => (
+              <li key={r.id} className="rounded border p-3">
+                <div className="text-sm font-medium line-clamp-3">{r.quote || '—'}</div>
+                <div className="mt-1 text-xs text-gray-700 space-y-0.5">
+                  {typeof r.rating === 'number' ? <div>rating: {r.rating}</div> : null}
+                  <div>author: {r.author_name || r.author_id || '—'}</div>
+                  <div>subject: {r.subject_name || r.subject_id || '—'}</div>
+                  <div>created: {new Date(r.created_at).toLocaleDateString()}</div>
+                </div>
+                {isAdmin && (
+                  <div className="mt-2">
+                    <button onClick={() => deleteReview(r.id)} className={ACTION_BTN}>
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
+            {reviewsVisible.length === 0 && <p className="text-sm text-gray-600">No reviews.</p>}
+          </ul>
+
+          {/* Desktop table */}
+          <div className="hidden md:block overflow-auto rounded border">
+            <table className="min-w-full text-sm table-fixed">
+              <colgroup>
+                <col className="w-[52%]" />
+                <col className="w-[12%]" />
+                <col className="w-[18%]" />
+                <col className="w-[18%]" />
+              </colgroup>
+              <thead className="bg-gray-50 sticky top-0 z-10">
+                <tr>
+                  <th className="px-3 py-2 text-left">Quote</th>
+                  <th className="px-3 py-2 text-left">Rating</th>
+                  <th className="px-3 py-2 text-left">Author</th>
+                  <th className="px-3 py-2 text-left">Subject</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reviewsVisible.map((r) => (
+                  <tr key={r.id} className="border-t">
+                    <td className="px-3 py-2">
+                      <div className="line-clamp-2">{r.quote || '—'}</div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {isAdmin && (
+                          <button onClick={() => deleteReview(r.id)} className="rounded border px-2 py-1 hover:bg-gray-50">
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">{typeof r.rating === 'number' ? r.rating : '—'}</td>
+                    <td className="px-3 py-2">{r.author_name || r.author_id || '—'}</td>
+                    <td className="px-3 py-2">{r.subject_name || r.subject_id || '—'}</td>
+                  </tr>
+                ))}
+
+                {reviewsVisible.length === 0 && (
+                  <tr>
+                    <td className="px-3 py-4 text-gray-600" colSpan={4}>
+                      No reviews.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {reviewsSource && (
+            <p className="text-xs text-gray-500">
+              Loaded from <span className="font-mono">{reviewsSource}</span> table.
+            </p>
+          )}
         </div>
       )}
 

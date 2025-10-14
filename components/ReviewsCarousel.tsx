@@ -14,7 +14,7 @@ type Row = {
   offer_title: string | null;
 };
 
-const INTERVAL_MS = 4000;
+const INTERVAL_MS = 2500;
 
 export default function ReviewsCarousel() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -41,9 +41,9 @@ export default function ReviewsCarousel() {
     if (timer.current) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       setI((p) => (p + 1) % rows.length);
-    }, INTERVAL_MS) as unknown as number;
+    }, INTERVAL_MS);
     return () => { if (timer.current) window.clearTimeout(timer.current); };
-  }, [i, rows.length]);
+  }, [i, rows.length, INTERVAL_MS]);
 
   // pause on hover
   const wrapRef = useRef<HTMLDivElement>(null);

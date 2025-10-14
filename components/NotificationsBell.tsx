@@ -15,6 +15,8 @@ type NotifType =
   | 'offer_pending'
   | 'fulfillment_reminder'
   | 'badge_earned'
+  | 'gratitude_prompt'    // important for “Say thanks”
+  | 'review_prompt'       // legacy alias
   | 'system'
   | string;
 
@@ -25,6 +27,8 @@ type Notif = {
   created_at: string;
   read_at: string | null;
   profile_id: string;
+  request_id?: string | null; // ⬅ pulled from column
+  offer_id?: string | null;   // ⬅ pulled from column
   _fresh?: boolean;
 };
 
@@ -35,10 +39,8 @@ export default function NotificationsBell() {
   const [rows, setRows] = useState<Notif[]>([]);
   const unread = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
 
-  // Mobile-only tab
   const [activeTab, setActiveTab] = useState<'notifications' | 'messages'>('notifications');
 
-  // Refs for close behavior
   const rootRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeTimer = useRef<number | null>(null);
@@ -47,7 +49,6 @@ export default function NotificationsBell() {
     if (closeTimer.current) window.clearTimeout(closeTimer.current);
     closeTimer.current = window.setTimeout(() => setOpen(false), delay);
   }, []);
-
   const cancelScheduledClose = useCallback(() => {
     if (closeTimer.current) {
       window.clearTimeout(closeTimer.current);
@@ -55,16 +56,25 @@ export default function NotificationsBell() {
     }
   }, []);
 
-  // Caches + de-dupe
+  // caches & dedupe
   const titleCache = useRef(new Map<string, string>());
   const requesterCache = useRef(new Map<string, string>());
   const sigSeen = useRef<Set<string>>(new Set());
+
+  // Helper to read ids from either JSON or columns
+  const getOfferId = (n: Notif) =>
+    (n.data?.offer_id as string | undefined) || (n.offer_id || undefined);
+  const getReqId = (n: Notif) =>
+    (n.data?.request_id as string | undefined) || (n.request_id || undefined);
 
   async function enrichOfferTitles(notifs: Notif[]) {
     const missing = Array.from(
       new Set(
         notifs
-          .map((n) => (n?.data?.offer_title ? null : n?.data?.offer_id))
+          .map((n) => {
+            const oid = getOfferId(n);
+            return n?.data?.offer_title ? null : oid;
+          })
           .filter((v): v is string => !!v && !titleCache.current.has(v)),
       ),
     );
@@ -76,7 +86,7 @@ export default function NotificationsBell() {
     }
     setRows((prev) =>
       prev.map((n) => {
-        const oid = n?.data?.offer_id as string | undefined;
+        const oid = getOfferId(n);
         const t = oid ? titleCache.current.get(oid) : undefined;
         return t ? { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } } : n;
       }),
@@ -87,7 +97,7 @@ export default function NotificationsBell() {
     const ids = Array.from(
       new Set(
         notifs
-          .map((n) => (n.type === 'request_received' && !n?.data?.requester_name ? n?.data?.request_id : null))
+          .map((n) => (n.type === 'request_received' && !n?.data?.requester_name ? getReqId(n) : null))
           .filter((v): v is string => !!v && !requesterCache.current.has(v)),
       ),
     );
@@ -104,7 +114,7 @@ export default function NotificationsBell() {
 
     setRows((prev) =>
       prev.map((n) => {
-        const rid = n?.data?.request_id as string | undefined;
+        const rid = getReqId(n);
         const name = rid ? requesterCache.current.get(rid) : undefined;
         return name ? { ...n, data: { ...n.data, requester_name: n.data?.requester_name ?? name } } : n;
       }),
@@ -112,10 +122,10 @@ export default function NotificationsBell() {
   }
 
   function label(n: Notif): { text: string; href?: string } {
-    const offerId = n.data?.offer_id as string | undefined;
-    const offerTitle = n.data?.offer_title as string | undefined;
+    const offerId = getOfferId(n);
+    const offerTitle = (n.data?.offer_title as string | undefined) || (offerId ? titleCache.current.get(offerId) : undefined);
     const body = (n.data?.text ?? n.data?.message) as string | undefined;
-    const reqId = n.data?.request_id as string | undefined;
+    const reqId = getReqId(n);
 
     switch (n.type) {
       case 'offer_pending': {
@@ -135,6 +145,22 @@ export default function NotificationsBell() {
         return { text: `Your request was declined${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
       case 'request_fulfilled':
         return { text: `Request marked fulfilled${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=fulfilled' };
+
+      // ✅ Explicit prompts after fulfillment
+      case 'gratitude_prompt': {
+        const text = `Say thanks${offerTitle ? ` for “${offerTitle}”` : ''}`;
+        const href = reqId
+          ? `/reviews/new?request_id=${encodeURIComponent(reqId)}`
+          : '/reviews/new';
+        return { text, href };
+      }
+      case 'review_prompt': {
+        const text = `Please leave a review${offerTitle ? ` for “${offerTitle}”` : ''}`;
+        const href = reqId
+          ? `/gratitude/write?request_id=${encodeURIComponent(reqId)}`
+          : '/reviews/new';
+        return { text, href };
+      }
 
       case 'badge_earned': {
         const track = n.data?.track as string | undefined;
@@ -182,7 +208,6 @@ export default function NotificationsBell() {
     const ids = rows.filter((r) => !r.read_at).map((r) => r.id);
     if (!ids.length) return;
     const now = new Date().toISOString();
-
     setRows((prev) => prev.map((r) => (ids.includes(r.id) ? { ...r, read_at: now, _fresh: false } : r)));
     await supabase.from('notifications').update({ read_at: now }).in('id', ids);
   }
@@ -196,12 +221,11 @@ export default function NotificationsBell() {
   }
 
   function sig(n: Notif) {
-    return `${n.profile_id}|${n.type}|${n.data?.offer_id ?? ''}|${n.data?.request_id ?? ''}|${n.data?.track ?? ''}|${
-      n.data?.tier ?? ''
-    }`;
+    const offerId = getOfferId(n) ?? '';
+    const reqId = getReqId(n) ?? '';
+    return `${n.profile_id}|${n.type}|${offerId}|${reqId}|${n.data?.track ?? ''}|${n.data?.tier ?? ''}`;
   }
 
-  // Load + realtime
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -209,9 +233,10 @@ export default function NotificationsBell() {
       setUid(u);
       if (!u) return;
 
+      // ⬇️ include request_id, offer_id columns
       const { data: list } = await supabase
         .from('notifications')
-        .select('id,type,data,created_at,read_at,profile_id')
+        .select('id,type,data,created_at,read_at,profile_id,request_id,offer_id')
         .eq('profile_id', u)
         .order('created_at', { ascending: false })
         .limit(50);
@@ -266,7 +291,6 @@ export default function NotificationsBell() {
     })();
   }, []);
 
-  // Close behavior (click-outside + Esc)
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent | TouchEvent) => {
@@ -288,7 +312,6 @@ export default function NotificationsBell() {
     };
   }, [open]);
 
-  // On mobile, lock body scroll while open
   useEffect(() => {
     const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 639.95px)').matches;
     if (open && isMobile) {
@@ -300,10 +323,7 @@ export default function NotificationsBell() {
     }
   }, [open]);
 
-  // Safely handle mouse/pointer leave (guard against non-Node relatedTarget)
-  const isNode = (v: any): v is Node =>
-    !!v && typeof v === 'object' && typeof (v as any).nodeType === 'number';
-
+  const isNode = (v: any): v is Node => !!v && typeof v === 'object' && typeof (v as any).nodeType === 'number';
   const handlePanelLeave = (evt: React.MouseEvent | React.PointerEvent) => {
     const next = (evt as any).relatedTarget ?? (evt as any).toElement ?? null;
     const root = rootRef.current;
@@ -314,14 +334,11 @@ export default function NotificationsBell() {
     scheduleClose(0);
   };
 
-  // Scrollable list sizing
   const listClass =
-    'overflow-auto sm:max-h-[55vh] sm:rounded-b-xl ' +
-    'max-h-[calc(85dvh-110px)] pb-[env(safe-area-inset-bottom)]';
+    'overflow-auto sm:max-h-[55vh] sm:rounded-b-xl max-h-[calc(85dvh-110px)] pb-[env(safe-area-inset-bottom)]';
 
   return (
     <div ref={rootRef} className="relative" onMouseEnter={cancelScheduledClose}>
-      {/* Trigger */}
       <button
         className="hx-btn hx-btn--outline-primary text-sm px-3 py-2 relative"
         onClick={() => {
@@ -353,14 +370,11 @@ export default function NotificationsBell() {
           onPointerLeave={handlePanelLeave}
           className={[
             'hx-card z-50 p-0',
-            // Desktop: absolute dropdown overlaps page
             'sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:w-[360px] sm:max-w-[92vw] sm:mx-0 sm:inset-auto',
-            // Mobile: fixed sheet
             'fixed inset-x-2 top-2 mx-auto w-[calc(100vw-1rem)] max-w-[560px]',
             'max-h-[85dvh] rounded-xl overflow-hidden',
           ].join(' ')}
         >
-          {/* MOBILE header: Notifications / Messages */}
           <div className="block sm:hidden p-2 border-b">
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -384,7 +398,6 @@ export default function NotificationsBell() {
             </div>
           </div>
 
-          {/* DESKTOP header: Notifications + teal Messages + Mark all read */}
           <div className="hidden sm:flex items-center justify-between border-b px-3 py-2">
             <strong className="text-sm">Notifications</strong>
             <div className="flex items-center gap-2">
@@ -412,7 +425,6 @@ export default function NotificationsBell() {
             </div>
           </div>
 
-          {/* CONTENT */}
           {activeTab === 'notifications' && (
             <ul className={listClass}>
               {rows.length === 0 && (
@@ -425,10 +437,7 @@ export default function NotificationsBell() {
                 return (
                   <li
                     key={n.id}
-                    className={[
-                      'border-b px-3 py-2 text-sm transition-colors',
-                      isUnread ? 'bg-teal-50/50' : '',
-                    ].join(' ')}
+                    className={['border-b px-3 py-2 text-sm transition-colors', isUnread ? 'bg-teal-50/50' : ''].join(' ')}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">

@@ -148,7 +148,9 @@ export default function ProfilePage() {
 
       setLoading(false);
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Load my active offers
@@ -193,7 +195,9 @@ export default function ProfilePage() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [userId]);
 
   // Load badges
@@ -218,7 +222,9 @@ export default function ProfilePage() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [profile?.id]);
 
   // ExpandedBadge -> BadgeCluster props
@@ -324,7 +330,9 @@ export default function ProfilePage() {
       <section className="max-w-lg space-y-4 p-4">
         <h2 className="text-2xl font-bold">My Profile</h2>
         <p>You are not signed in.</p>
-        <a className="underline" href="/sign-in">Go to Sign In</a>
+        <a className="underline" href="/sign-in">
+          Go to Sign In
+        </a>
       </section>
     );
   }
@@ -358,7 +366,7 @@ export default function ProfilePage() {
         </div>
 
         {/* Header content */}
-        <div className="relative px-4 pb- pt-1 md:px-6">
+        <div className="relative px-4 pt-1 pb-2 md:px-6">
           {/* MOBILE */}
           <div className="md:hidden relative">
             {/* Avatar — nudged a tad left */}
@@ -374,7 +382,9 @@ export default function ProfilePage() {
             {/* Name row — tiny gap under cover */}
             <div className="pl-[123px] mt-0">
               <div className="flex items-end gap-2">
-                <h1 className="truncate text-[25px] leading-[1.1] font-bold">{form.display_name || 'Unnamed'}</h1>
+                <h1 className="truncate text-[25px] leading-[1.1] font-bold">
+                  {form.display_name || 'Unnamed'}
+                </h1>
                 {profile?.role && (
                   <span className="mb-[2px] rounded-full border px-2 py-0.5 text-[10px] capitalize text-gray-700">
                     {profile.role}
@@ -394,12 +404,7 @@ export default function ProfilePage() {
             {/* Badges — centered line */}
             {!!clusterBadges.length && (
               <div className="mt-1 flex justify-center">
-                <BadgeCluster
-                  badges={clusterBadges.slice(0, 3)}
-                  size={48}
-                  className="gap-1.5"
-                  href="/profile/badges"
-                />
+                <BadgeCluster badges={clusterBadges.slice(0, 3)} size={48} className="gap-1.5" href="/profile/badges" />
               </div>
             )}
             {!clusterBadges.length && badgesMsg && (
@@ -407,7 +412,7 @@ export default function ProfilePage() {
             )}
           </div>
 
-          {/* DESKTOP/TABLET (unchanged) */}
+          {/* DESKTOP/TABLET */}
           <div className="hidden md:grid md:grid-cols-12 md:items-start">
             <div className="absolute -top-10 left-4 h-24 w-24 overflow-hidden rounded-full border-4 border-white md:left-6">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -422,7 +427,9 @@ export default function ProfilePage() {
               <div className="flex flex-wrap items-center gap-2 leading-tight">
                 <h1 className="text-2xl font-semibold">{form.display_name || 'Unnamed'}</h1>
                 {profile?.role && (
-                  <span className="rounded-full border px-2 py-0.5 text-xs capitalize text-gray-700">{profile.role}</span>
+                  <span className="rounded-full border px-2 py-0.5 text-xs capitalize text-gray-700">
+                    {profile.role}
+                  </span>
                 )}
               </div>
 
@@ -441,7 +448,10 @@ export default function ProfilePage() {
               </div>
 
               <div className="mt-3 flex items-center gap-2">
-                <button onClick={() => setEditing(true)} className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50">
+                <button
+                  onClick={() => setEditing(true)}
+                  className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
+                >
                   Edit Profile
                 </button>
                 <button
@@ -470,9 +480,10 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* About + Skills (mobile collapsed) */}
+      {/* About + Skills */}
       {(form.bio || skillsList.length) && (
-        <div className="relative rounded-xl border px-4 pt-0 pb-4">
+        <div className="relative rounded-xl border px-4 pt-0 md:pt-4 pb-4">
+          {/* Mobile (collapsible) */}
           <div className="md:hidden">
             {!aboutOpen ? (
               <h3 className="text-center text-sm font-semibold">About</h3>
@@ -513,7 +524,7 @@ export default function ProfilePage() {
             </button>
           </div>
 
-          {/* Desktop: unchanged */}
+          {/* Desktop (spaced from top border via md:pt-4) */}
           <div className="hidden md:block">
             {form.bio && (
               <>
@@ -552,7 +563,9 @@ export default function ProfilePage() {
 
           {offersLoading && <p className="text-sm text-gray-600">Loading…</p>}
           {offersMsg && <p className="text-sm text-amber-700">{offersMsg}</p>}
-          {!offersLoading && offers.length === 0 && <p className="text-sm text-gray-600">No active offers yet.</p>}
+          {!offersLoading && offers.length === 0 && (
+            <p className="text-sm text-gray-600">No active offers yet.</p>
+          )}
 
           {/* Mobile carousel */}
           <div className="md:hidden">
@@ -625,7 +638,10 @@ export default function ProfilePage() {
           <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-xl max-h-[85vh] overflow-y-auto">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-lg font-semibold">Edit Profile</h3>
-              <button onClick={() => setEditing(false)} className="rounded border px-2 py-1 text-sm hover:bg-gray-50">
+              <button
+                onClick={() => setEditing(false)}
+                className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
+              >
                 Close
               </button>
             </div>
@@ -661,7 +677,7 @@ export default function ProfilePage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium">Country</label>
+                    <label className="block text sm font-medium">Country</label>
                     <input
                       className="mt-1 w-full rounded border p-2"
                       value={form.area_country}

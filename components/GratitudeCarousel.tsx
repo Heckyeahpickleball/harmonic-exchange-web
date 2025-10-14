@@ -75,7 +75,7 @@ export default function GratitudeCarousel() {
     if (!items.length) return;
     timerRef.current = window.setInterval(() => {
       setI((x) => (x + 1) % items.length);
-    }, 4000);
+    }, 3500);
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
     };
