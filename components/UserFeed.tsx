@@ -11,7 +11,7 @@ type PostRow = {
   body: string | null;
   created_at: string;
   images?: string[] | null;
-  profiles?: { display_name: string | null } | null;
+  profiles?: { display_name: string | null; avatar_url?: string | null } | null;
 };
 
 export default function UserFeed({ profileId }: { profileId: string }) {
@@ -32,7 +32,7 @@ export default function UserFeed({ profileId }: { profileId: string }) {
 
         const { data, error } = await supabase
           .from('posts')
-          .select('id,profile_id,body,created_at,images,profiles(display_name)')
+          .select('id,profile_id,body,created_at,images,profiles(display_name,avatar_url)')
           .eq('profile_id', profileId)
           .order('created_at', { ascending: false })
           .limit(200);
@@ -66,7 +66,7 @@ export default function UserFeed({ profileId }: { profileId: string }) {
     async function fetchOne(id: string): Promise<PostRow | null> {
       const { data, error } = await supabase
         .from('posts')
-        .select('id,profile_id,body,created_at,images,profiles(display_name)')
+        .select('id,profile_id,body,created_at,images,profiles(display_name,avatar_url)')
         .eq('id', id)
         .maybeSingle();
       if (error) return null;
@@ -111,18 +111,18 @@ export default function UserFeed({ profileId }: { profileId: string }) {
   return (
     <div className="space-y-3">
       {loading && <p className="text-sm text-gray-600">Loading…</p>}
-     <p className="text-sm text-amber-700">{err}</p>
+      {err && <p className="text-sm text-amber-700">{err}</p>}
 
-        {posts.map((p) => (
-          <PostItem
-            key={p.id}
-            post={{ ...p, body: p.body ?? '', images: p.images ?? [] }}
-            me={me}
-            onDeleted={() => setPosts((prev) => prev.filter((x) => x.id !== p.id))}
-          />
-        ))}
+      {posts.map((p) => (
+        <PostItem
+          key={p.id}
+          post={{ ...p, body: p.body ?? '', images: p.images ?? [] }}
+          me={me}
+          onDeleted={() => setPosts((prev) => prev.filter((x) => x.id !== p.id))}
+        />
+      ))}
 
-        {!loading && posts.length === 0 && (
+      {!loading && posts.length === 0 && (
         <p className="text-sm text-gray-600">No posts yet.</p>
       )}
     </div>

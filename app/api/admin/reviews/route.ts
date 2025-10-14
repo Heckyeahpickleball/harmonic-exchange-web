@@ -8,7 +8,7 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-// Anonymous client (for decoding explicit Bearer JWTs)
+// Anonymous client (only to decode a Bearer JWT if present)
 const anon = createClient(SUPABASE_URL, ANON_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
@@ -18,12 +18,10 @@ const service = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-function firstText(o: any) {
-  return o?.quote ?? o?.message ?? o?.text ?? o?.content ?? o?.body ?? null;
-}
-function idOrNull(v: any) {
-  return typeof v === 'string' ? v : v ?? null;
-}
+// helpers
+const firstText = (o: any) =>
+  o?.quote ?? o?.message ?? o?.text ?? o?.content ?? o?.body ?? null;
+const idOrNull = (v: any) => (typeof v === 'string' ? v : v ?? null);
 
 /** Resolve the current user from Authorization header or Supabase auth cookie. */
 async function getUserFromRequest(req: Request) {
@@ -38,17 +36,13 @@ async function getUserFromRequest(req: Request) {
     if (data?.user) return data.user;
   }
 
-  // B) Supabase auth cookie (works server-side with Next/SSR helper)
-  const cookieStore = await cookies(); // now asynchronous
+  // B) Supabase auth cookie (Next 15 cookies() is async)
+  const store = await cookies();
   const supaFromCookie = createServerClient(SUPABASE_URL, ANON_KEY, {
     cookies: {
-      get: (name: string) => cookieStore.get(name)?.value,
-      set: (_name: string, _value: string, _options: CookieOptions) => {
-        // no-op: API route doesn't need to mutate cookies
-      },
-      remove: (_name: string, _options: CookieOptions) => {
-        // no-op
-      },
+      get: (name: string) => store.get(name)?.value,
+      set: (_n: string, _v: string, _o: CookieOptions) => {},
+      remove: (_n: string, _o: CookieOptions) => {},
     },
   });
 
@@ -78,10 +72,40 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'forbidden' }, { status: 403 });
     }
 
-    // 3) Load reviews or fall back to gratitudes
-    let source: 'reviews' | 'gratitudes' = 'reviews';
+    // 3) Prefer the view used by the public page; then try reviews; then gratitudes
+    //    This maximizes compatibility with your current schema.
+    let source: 'review_gratitudes' | 'reviews' | 'gratitudes' = 'review_gratitudes';
     let rows: any[] = [];
 
+    // A) view: review_gratitudes (what the Reviews page uses)
+    const view = await service
+      .from('review_gratitudes')
+      .select('id, request_id, offer_id, quote, owner_name, receiver_name, offer_title, created_at')
+      .order('created_at', { ascending: false })
+      .limit(500);
+
+    if (!view.error && view.data?.length) {
+      rows = view.data;
+      source = 'review_gratitudes';
+
+      // Normalize to Admin UI shape
+      const items = rows.map((r: any) => ({
+        id: r.id,
+        created_at: r.created_at,
+        quote: firstText(r),
+        rating: null, // view has no rating column
+        author_id: null,
+        subject_id: null,
+        author_name: r.owner_name ?? null,   // shows who wrote it (sender/receiver wording differs per schema)
+        subject_name: r.receiver_name ?? null,
+        offer_id: idOrNull(r.offer_id),
+        request_id: idOrNull(r.request_id),
+      }));
+
+      return NextResponse.json({ source, items });
+    }
+
+    // B) fallback: canonical reviews table
     const rv = await service
       .from('reviews')
       .select('id, quote, rating, author_id, subject_id, offer_id, request_id, created_at')
@@ -91,28 +115,41 @@ export async function GET(req: Request) {
     if (!rv.error && rv.data?.length) {
       rows = rv.data;
       source = 'reviews';
-    } else {
-      const gr = await service
-        .from('gratitudes')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(500);
 
-      if (gr.error) {
-        const msg = rv.error?.message || gr.error?.message || 'failed to load reviews';
-        return NextResponse.json({ error: msg }, { status: 500 });
-      }
+      const items = rows.map((r: any) => ({
+        id: r.id,
+        created_at: r.created_at,
+        quote: firstText(r),
+        rating: typeof r.rating === 'number' ? r.rating : null,
+        author_id: idOrNull(r.author_id),
+        subject_id: idOrNull(r.subject_id),
+        offer_id: idOrNull(r.offer_id),
+        request_id: idOrNull(r.request_id),
+      }));
 
-      rows = gr.data || [];
-      source = 'gratitudes';
+      return NextResponse.json({ source, items });
     }
 
-    // 4) Normalize payload for Admin UI
+    // C) fallback: raw gratitudes table (older installs)
+    const gr = await service
+      .from('gratitudes')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(500);
+
+    if (gr.error) {
+      const msg = rv.error?.message || gr.error?.message || 'failed to load reviews';
+      return NextResponse.json({ error: msg }, { status: 500 });
+    }
+
+    rows = gr.data || [];
+    source = 'gratitudes';
+
     const items = rows.map((r: any) => ({
       id: r.id,
       created_at: r.created_at,
       quote: firstText(r),
-      rating: typeof r.rating === 'number' ? r.rating : null,
+      rating: null,
       author_id: idOrNull(r.author_id ?? r.from_profile ?? r.from_profile_id),
       subject_id: idOrNull(r.subject_id ?? r.to_profile ?? r.to_profile_id),
       offer_id: idOrNull(r.offer_id),
@@ -123,7 +160,7 @@ export async function GET(req: Request) {
   } catch (e: any) {
     return NextResponse.json(
       { error: e?.message || 'server error' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

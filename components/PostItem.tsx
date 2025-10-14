@@ -1,8 +1,14 @@
+// components/PostItem.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Image from 'next/image';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
+
+type ProfileLite = {
+  display_name: string | null;
+  avatar_url?: string | null;
+} | null;
 
 type PostRow = {
   id: string;
@@ -10,7 +16,7 @@ type PostRow = {
   body: string | null;
   images?: string[] | null;
   created_at: string;
-  profiles?: { display_name: string | null } | null;
+  profiles?: ProfileLite;
 };
 
 type CommentRow = {
@@ -20,7 +26,7 @@ type CommentRow = {
   body: string | null;
   images?: string[] | null;
   created_at: string;
-  profiles?: { display_name: string | null } | null;
+  profiles?: ProfileLite;
 };
 
 function Kebab({
@@ -92,10 +98,76 @@ function ConfirmInline({
 
 function normalizeProfile<T extends { profiles?: any }>(row: T) {
   const p = row.profiles;
-  return { ...row, profiles: Array.isArray(p) ? p[0] ?? null : p ?? null };
+  return { ...row, profiles: Array.isArray(p) ? (p[0] ?? null) : (p ?? null) };
 }
 function byCreatedAtAsc<A extends { created_at: string }>(a: A, b: A) {
   return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+}
+
+/** Resolve avatar URL even if it's a storage path (tries common buckets). */
+function resolveAvatarUrl(raw?: string | null): string | null {
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+
+  // Try common buckets where avatars might be stored.
+  try {
+    const a = supabase.storage.from('avatars').getPublicUrl(raw).data.publicUrl;
+    if (a) return a;
+  } catch {}
+  try {
+    const b = supabase.storage.from('profile-images').getPublicUrl(raw).data.publicUrl;
+    if (b) return b;
+  } catch {}
+  return raw; // last resort; if it's already a full URL-like string it may still work
+}
+
+/** Tiny avatar (image or initials fallback), always clickable */
+function TinyAvatar({
+  name,
+  href,
+  src,
+  size = 36, // bigger default
+}: {
+  name: string;
+  href: string;
+  src?: string | null;
+  size?: number;
+}) {
+  const resolved = resolveAvatarUrl(src);
+  const initials =
+    (name || 'S')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? '')
+      .join('') || 'S';
+
+  const dimension = `${size}px`;
+
+  if (resolved) {
+    return (
+      <Link href={href} className="shrink-0" aria-label={`${name}'s profile`}>
+        <img
+          src={resolved}
+          alt=""
+          className="rounded-full object-cover"
+          style={{ width: dimension, height: dimension }}
+        />
+      </Link>
+    );
+  }
+
+  return (
+    <Link
+      href={href}
+      className="grid place-items-center shrink-0 rounded-full bg-gray-300 text-xs font-semibold"
+      style={{ width: dimension, height: dimension }}
+      aria-label={`${name}'s profile`}
+      title={name}
+    >
+      {initials}
+    </Link>
+  );
 }
 
 export default function PostItem({
@@ -174,7 +246,7 @@ export default function PostItem({
     if (open && comments.length === 0) {
       const { data, error } = await supabase
         .from('post_comments')
-        .select('id, post_id, profile_id, body, created_at, images, profiles(display_name)')
+        .select('id, post_id, profile_id, body, created_at, images, profiles(display_name,avatar_url)')
         .eq('post_id', post.id)
         .order('created_at', { ascending: true })
         .limit(200);
@@ -242,7 +314,7 @@ export default function PostItem({
       const { data, error } = await supabase
         .from('post_comments')
         .insert({ post_id: post.id, profile_id: uid, body: body || ' ', images: imageUrls })
-        .select('id, post_id, profile_id, body, created_at, images, profiles(display_name)')
+        .select('id, post_id, profile_id, body, created_at, images, profiles(display_name,avatar_url)')
         .single();
       if (error) throw error;
       const normalized = normalizeProfile(data) as CommentRow;
@@ -277,13 +349,22 @@ export default function PostItem({
   const postGridCols =
     postImgCount <= 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';
 
+  const authorName = post.profiles?.display_name ?? 'Someone';
+  const authorAvatar = post.profiles?.avatar_url ?? null;
+  const authorHref = `/u/${post.profile_id}`;
+
   return (
     <article className="hx-card p-3">
       <header className="mb-2 flex items-center justify-between text-sm text-gray-600">
-        <div>
-          <span className="font-medium">{post.profiles?.display_name ?? 'Someone'}</span>
-          <span className="mx-1">•</span>
-          <time dateTime={post.created_at}>{new Date(post.created_at).toLocaleString()}</time>
+        <div className="flex items-center gap-2">
+          <TinyAvatar name={authorName} href={authorHref} src={authorAvatar} />
+          <div>
+            <Link href={authorHref} className="font-medium underline">
+              {authorName}
+            </Link>
+            <span className="mx-1">•</span>
+            <time dateTime={post.created_at}>{new Date(post.created_at).toLocaleString()}</time>
+          </div>
         </div>
         {me === post.profile_id && (
           <div className="relative">
@@ -294,7 +375,12 @@ export default function PostItem({
             >
               …
             </button>
-            {menuOpen && <Kebab items={[{ label: 'Delete post', action: deletePost }]} onClose={() => setMenuOpen(false)} />}
+            {menuOpen && (
+              <Kebab
+                items={[{ label: 'Delete post', action: deletePost }]}
+                onClose={() => setMenuOpen(false)}
+              />
+            )}
           </div>
         )}
       </header>
@@ -306,7 +392,6 @@ export default function PostItem({
         <div className={`mb-2 grid ${postGridCols} gap-2`}>
           {post.images.map((src) => (
             <figure key={src} className="w-full">
-              {/* Using native img for natural aspect without cropping */}
               <img src={src} alt="" className="w-full h-auto rounded" />
             </figure>
           ))}
@@ -416,7 +501,7 @@ function CommentItem({
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to delete comment.');
     } finally {
-      setBusy(false);
+           setBusy(false);
       setConfirmDel(false);
       setMenuOpen(false);
     }
@@ -427,14 +512,24 @@ function CommentItem({
   const commentGridCols =
     cImgCount <= 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';
 
+  const commenterName = comment.profiles?.display_name ?? 'Someone';
+  const commenterAvatar = comment.profiles?.avatar_url ?? null;
+  const commenterHref = `/u/${comment.profile_id}`;
+
   return (
     <div className="relative rounded border p-2">
       <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
-        <div>
-          <span className="font-medium">{comment.profiles?.display_name ?? 'Someone'}</span>
-          <span className="mx-1">•</span>
-          <time dateTime={comment.created_at}>{new Date(comment.created_at).toLocaleString()}</time>
+        <div className="flex items-center gap-2">
+          <TinyAvatar name={commenterName} href={commenterHref} src={commenterAvatar} />
+          <div>
+            <Link href={commenterHref} className="font-medium underline">
+              {commenterName}
+            </Link>
+            <span className="mx-1">•</span>
+            <time dateTime={comment.created_at}>{new Date(comment.created_at).toLocaleString()}</time>
+          </div>
         </div>
+
         {canDelete && (
           <div className="relative">
             <button
@@ -444,7 +539,12 @@ function CommentItem({
             >
               …
             </button>
-            {menuOpen && <Kebab items={[{ label: 'Delete comment', action: () => setConfirmDel(true) }]} onClose={() => setMenuOpen(false)} />}
+            {menuOpen && (
+              <Kebab
+                items={[{ label: 'Delete comment', action: () => setConfirmDel(true) }]}
+                onClose={() => setMenuOpen(false)}
+              />
+            )}
           </div>
         )}
       </div>

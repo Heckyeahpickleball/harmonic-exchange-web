@@ -6,8 +6,8 @@
    - Preserves all RPC fallbacks and permissions logic.
 
    Notes:
-   - New "Reviews" tab lists reviews from `reviews` table; if not found, falls back to `gratitudes`.
-   - Admin-only hard delete for reviews with RPC-first, then direct delete fallback, plus audit log.
+   - New "Reviews" tab lists reviews via API that prefers `review_gratitudes` view, then `reviews`, then `gratitudes`.
+   - Admin-only hard delete for reviews with server route (placeholder), plus audit log.
 */
 
 'use client';
@@ -64,7 +64,7 @@ type GroupRow = {
 
 type EmailRow = { id: string; email: string | null; display_name?: string };
 
-/** Minimal, resilient review row shape that can map from either `reviews` or `gratitudes`. */
+/** Minimal, resilient review row shape for Admin UI. */
 type ReviewRow = {
   id: string;
   quote?: string | null;
@@ -162,7 +162,7 @@ function AdminContent() {
 
   // Reviews state
   const [reviews, setReviews] = useState<ReviewRow[]>([]);
-  const [reviewsSource, setReviewsSource] = useState<'reviews' | 'gratitudes' | null>(null);
+  const [reviewsSource, setReviewsSource] = useState<'review_gratitudes' | 'reviews' | 'gratitudes' | null>(null);
   const [reviewQ, setReviewQ] = useState('');
 
   function showError(e: any, fallback = 'Something went wrong.') {
@@ -282,58 +282,61 @@ function AdminContent() {
           setGroups((data || []) as GroupRow[]);
         }
 
-if (tab === 'reviews') {
-  // Fetch via server route so we can bypass RLS safely
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token;
+        if (tab === 'reviews') {
+          // Fetch via server route so we can bypass RLS safely
+          const { data: { session } } = await supabase.auth.getSession();
+          const token = session?.access_token;
 
-  const res = await fetch('/api/admin/reviews', {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+          const res = await fetch('/api/admin/reviews', {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            cache: 'no-store',
+          });
 
-  if (!res.ok) {
-    const j = await res.json().catch(() => ({}));
-    throw new Error(j?.error || 'Failed to load reviews');
-  }
+          if (!res.ok) {
+            const j = await res.json().catch(() => ({}));
+            throw new Error(j?.error || 'Failed to load reviews');
+          }
 
-  const j = await res.json() as {
-    source: 'reviews' | 'gratitudes',
-    items: Array<{
-      id: string;
-      created_at: string;
-      quote: string | null;
-      rating: number | null;
-      author_id: string | null;
-      subject_id: string | null;
-      offer_id: string | null;
-      request_id: string | null;
-    }>;
-  };
+          const j = await res.json() as {
+            source: 'review_gratitudes' | 'reviews' | 'gratitudes',
+            items: Array<{
+              id: string;
+              created_at: string;
+              quote: string | null;
+              rating: number | null;
+              author_id: string | null;
+              subject_id: string | null;
+              author_name?: string | null;
+              subject_name?: string | null;
+              offer_id: string | null;
+              request_id: string | null;
+            }>;
+          };
 
-  const loaded = j.items;
+          const loaded = j.items || [];
 
-  // Optional: enrich names
-  const profileIds = Array.from(new Set(
-    loaded.flatMap((r) => [r.author_id, r.subject_id].filter(Boolean) as string[])
-  ));
-  let nameMap = new Map<string, string>();
-  if (profileIds.length) {
-    const { data: profs } = await supabase
-      .from('profiles')
-      .select('id,display_name')
-      .in('id', profileIds);
-    for (const p of (profs || []) as any[]) nameMap.set(p.id, p.display_name);
-  }
+          // Optional: enrich names when IDs are present
+          const profileIds = Array.from(new Set(
+            loaded.flatMap((r) => [r.author_id, r.subject_id].filter(Boolean) as string[])
+          ));
+          const nameMap = new Map<string, string>();
+          if (profileIds.length) {
+            const { data: profs } = await supabase
+              .from('profiles')
+              .select('id,display_name')
+              .in('id', profileIds);
+            for (const p of (profs || []) as any[]) nameMap.set(p.id, p.display_name);
+          }
 
-  setReviews(
-    loaded.map((r) => ({
-      ...r,
-      author_name: r.author_id ? (nameMap.get(r.author_id) || r.author_id) : null,
-      subject_name: r.subject_id ? (nameMap.get(r.subject_id) || r.subject_id) : null,
-    }))
-  );
-  setReviewsSource(j.source);
-}
+          setReviews(
+            loaded.map((r) => ({
+              ...r,
+              author_name: r.author_name ?? (r.author_id ? (nameMap.get(r.author_id) || r.author_id) : null),
+              subject_name: r.subject_name ?? (r.subject_id ? (nameMap.get(r.subject_id) || r.subject_id) : null),
+            }))
+          );
+          setReviewsSource(j.source || null);
+        }
 
         if (tab === 'audit') {
           if (!isAdmin) { setTab('users'); return; }
@@ -807,42 +810,42 @@ if (tab === 'reviews') {
   }
 
   // ===== Reviews actions (admin-only hard delete) =====
-async function deleteReview(id: string) {
-  if (!isAdmin) { setMsg('Only admins can delete reviews.'); return; }
-  const confirmed = confirm('PERMANENTLY delete this review? This cannot be undone.');
-  if (!confirmed) return;
+  async function deleteReview(id: string) {
+    if (!isAdmin) { setMsg('Only admins can delete reviews.'); return; }
+    const confirmed = confirm('PERMANENTLY delete this review? This cannot be undone.');
+    if (!confirmed) return;
 
-  const reason = prompt('Reason (optional):') || null;
+    const reason = prompt('Reason (optional):') || null;
 
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
 
-    // Server route performs the actual delete (reviews or gratitudes) with elevated privileges.
-    const res = await fetch('/admin/reviews/delete', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ id, reason }),
-    });
+      // Server route performs the actual delete (reviews or gratitudes) with elevated privileges.
+      const res = await fetch('/admin/reviews/delete', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ id, reason }),
+      });
 
-    if (!res.ok) {
-      let msg = 'Failed to delete review';
-      try {
-        const j = await res.json();
-        if (j?.error) msg = `${msg}: ${j.error}`;
-      } catch {}
-      throw new Error(msg);
+      if (!res.ok) {
+        let msg = 'Failed to delete review';
+        try {
+          const j = await res.json();
+          if (j?.error) msg = `${msg}: ${j.error}`;
+        } catch {}
+        throw new Error(msg);
+      }
+
+      // Update UI
+      setReviews((prev) => prev.filter((r) => r.id !== id));
+    } catch (e: any) {
+      showError(e, 'Failed to delete review');
     }
-
-    // Update UI
-    setReviews((prev) => prev.filter((r) => r.id !== id));
-  } catch (e: any) {
-    showError(e, 'Failed to delete review');
   }
-}
 
   useEffect(() => {
     if (tab !== 'offers' || !urlFocusOffer) return;
@@ -1740,7 +1743,7 @@ async function deleteReview(id: string) {
 
           {reviewsSource && (
             <p className="text-xs text-gray-500">
-              Loaded from <span className="font-mono">{reviewsSource}</span> table.
+              Loaded from <span className="font-mono">{reviewsSource}</span>.
             </p>
           )}
         </div>

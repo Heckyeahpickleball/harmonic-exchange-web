@@ -330,7 +330,7 @@ export default function ChapterPage() {
         // 4) Posts
         const { data: pRows, error: pErr } = await supabase
           .from('posts')
-          .select('id,profile_id,body,created_at,images,group_id,profiles(display_name)')
+          .select('id,profile_id,body,created_at,images,group_id,profiles(display_name,avatar_url)')
           .eq('group_id', gRow.id)
           .order('created_at', { ascending: false })
           .limit(50);
@@ -601,7 +601,7 @@ export default function ChapterPage() {
 
       const { data: full } = await supabase
         .from('posts')
-        .select('id,profile_id,body,created_at,images,group_id,profiles(display_name)')
+        .select('id,profile_id,body,created_at,images,group_id,profiles(display_name,avatar_url)')
         .eq('id', inserted!.id)
         .maybeSingle();
 

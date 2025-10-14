@@ -89,7 +89,7 @@ export default function GlobalExchangePage() {
         // POSTS: **only global** (group_id IS NULL), newest first
         const { data: pRows } = await supabase
           .from('posts')
-          .select('id,profile_id,body,created_at,images,group_id,profiles(display_name)')
+          .select('id,profile_id,body,created_at,images,group_id,profiles(display_name,avatar_url)')
           .is('group_id', null) // <- global only
           .order('created_at', { ascending: false })
           .limit(50);

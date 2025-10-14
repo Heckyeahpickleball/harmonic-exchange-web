@@ -1,84 +1,125 @@
 // app/api/admin/reviews/route.ts
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 
-const URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const SRV  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-// anon client just to validate the caller's JWT
-const anon = createClient(URL, ANON, { auth: { persistSession: false } });
-// service client (bypasses RLS); must be the service key from the SAME project
-const svc  = createClient(URL, SRV,  { auth: { persistSession: false } });
+// Anonymous client (for decoding explicit Bearer JWTs)
+const anon = createClient(SUPABASE_URL, ANON_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
 
-function textish(o: any) {
+// Service client (server-only; bypasses RLS)
+const service = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
+function firstText(o: any) {
   return o?.quote ?? o?.message ?? o?.text ?? o?.content ?? o?.body ?? null;
 }
-const sid = (v: any) => (typeof v === 'string' ? v : v ?? null);
+function idOrNull(v: any) {
+  return typeof v === 'string' ? v : v ?? null;
+}
+
+/** Resolve the current user from Authorization header or Supabase auth cookie. */
+async function getUserFromRequest(req: Request) {
+  // A) Authorization: Bearer <token>
+  const authHeader = req.headers.get('authorization') || '';
+  const token = authHeader.toLowerCase().startsWith('bearer ')
+    ? authHeader.slice(7).trim()
+    : null;
+
+  if (token) {
+    const { data } = await anon.auth.getUser(token);
+    if (data?.user) return data.user;
+  }
+
+  // B) Supabase auth cookie via SSR client (Next 15: cookies() is async)
+  const cookieStore = await cookies();
+  const supaFromCookie = createServerClient(SUPABASE_URL, ANON_KEY, {
+    cookies: {
+      get: (name: string) => cookieStore.get(name)?.value,
+      set: (_name: string, _value: string, _options: CookieOptions) => {},
+      remove: (_name: string, _options: CookieOptions) => {},
+    },
+  });
+
+  const { data } = await supaFromCookie.auth.getUser();
+  return data?.user ?? null;
+}
 
 export async function GET(req: Request) {
   try {
-    // ---- 1) Auth the caller (must be admin/mod) ----
-    const auth = req.headers.get('authorization') || '';
-    const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : null;
-    if (!token) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+    // 1) Identify user
+    const user = await getUserFromRequest(req);
+    if (!user) {
+      return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+    }
 
-    const { data: u } = await anon.auth.getUser(token);
-    const user = u?.user;
-    if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
-
-    const { data: me, error: meErr } = await svc
+    // 2) Ensure user is admin/mod
+    const { data: prof, error: profErr } = await service
       .from('profiles')
-      .select('id,role')
+      .select('id, role')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
-    if (meErr || !me || !['admin', 'moderator'].includes(me.role)) {
+    if (profErr) {
+      return NextResponse.json({ error: profErr.message }, { status: 500 });
+    }
+    if (!prof || (prof.role !== 'admin' && prof.role !== 'moderator')) {
       return NextResponse.json({ error: 'forbidden' }, { status: 403 });
     }
 
-    // ---- 2) Pull reviews with robust fallbacks + quick diagnostics ----
-    // try canonical reviews
-    const rv = await svc.from('reviews').select('*').order('created_at', { ascending: false }).limit(500);
+    // 3) Load reviews or fall back to gratitudes
     let source: 'reviews' | 'gratitudes' = 'reviews';
     let rows: any[] = [];
 
-    if (!rv.error && rv.data && rv.data.length) {
+    const rv = await service
+      .from('reviews')
+      .select('id, quote, rating, author_id, subject_id, offer_id, request_id, created_at')
+      .order('created_at', { ascending: false })
+      .limit(500);
+
+    if (!rv.error && rv.data?.length) {
       rows = rv.data;
       source = 'reviews';
     } else {
-      // fall back to gratitudes (handle multiple column names)
-      const gr = await svc.from('gratitudes').select('*').order('created_at', { ascending: false }).limit(500);
+      const gr = await service
+        .from('gratitudes')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(500);
+
+      if (gr.error) {
+        const msg = rv.error?.message || gr.error?.message || 'failed to load reviews';
+        return NextResponse.json({ error: msg }, { status: 500 });
+      }
+
       rows = gr.data || [];
       source = 'gratitudes';
     }
 
-    // normalize
+    // 4) Normalize payload for Admin UI
     const items = rows.map((r: any) => ({
       id: r.id,
-      created_at: r.created_at ?? r.inserted_at ?? r.createdAt ?? null,
-      quote: textish(r),
+      created_at: r.created_at,
+      quote: firstText(r),
       rating: typeof r.rating === 'number' ? r.rating : null,
-      author_id: sid(r.author_id ?? r.from_profile ?? r.from_profile_id),
-      subject_id: sid(r.subject_id ?? r.to_profile   ?? r.to_profile_id),
-      offer_id: sid(r.offer_id),
-      request_id: sid(r.request_id),
+      author_id: idOrNull(r.author_id ?? r.from_profile ?? r.from_profile_id),
+      subject_id: idOrNull(r.subject_id ?? r.to_profile ?? r.to_profile_id),
+      offer_id: idOrNull(r.offer_id),
+      request_id: idOrNull(r.request_id),
     }));
 
-    // DIAGNOSTIC payload helps catch project/ENV mismatches
-    const diag = {
-      url: URL,
-      anonKeyPrefix: ANON?.slice(0, 8),
-      serviceKeyPrefix: SRV?.slice(0, 8),
-      tableTried: source,
-      counts: {
-        reviewsTried: !rv.error ? (rv.data?.length ?? 0) : -1,
-        gratitudesTried: source === 'gratitudes' ? items.length : undefined,
-      },
-    };
-
-    return NextResponse.json({ source, items, _diag: diag });
+    return NextResponse.json({ source, items });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'server error' }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || 'server error' },
+      { status: 500 }
+    );
   }
 }

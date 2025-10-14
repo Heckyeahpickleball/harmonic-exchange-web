@@ -1,6 +1,7 @@
+// /components/OfferGratitude.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -9,157 +10,158 @@ type GratitudeItem = {
   created_at: string;
   text: string;
   author_name?: string | null; // the receiver who wrote the thank-you
+  author_id?: string | null;   // NEW: link to profile when present
 };
+
+type Source = 'gratitude_reviews' | 'notifications' | null;
 
 export default function OfferGratitude({
   offerId,
-  offerTitle,            // ← NEW: for the heading
-  limit = 3,
+  offerTitle,
+  limit = 3,           // initial number to show
 }: {
   offerId: string;
   offerTitle?: string;
   limit?: number;
 }) {
+  const pageStep = 5; // how many to load each "Show more" click
+
   const [items, setItems] = useState<GratitudeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
+  const [source, setSource] = useState<Source>(null);
+  const [total, setTotal] = useState<number>(0); // total rows available in the chosen source
+  const [loaded, setLoaded] = useState<number>(0); // how many we’ve loaded so far
+
+  const hasMore = useMemo(() => total > loaded, [total, loaded]);
+
+  // ---- Mapping helpers -------------------------------------------------------
+  function mapFromReviews(rows: any[]): GratitudeItem[] {
+    return (rows || []).map((g: any) => ({
+      id: g.id as string,
+      created_at: g.created_at as string,
+      text: (g.message as string) ?? '',
+      author_name: g.receiver?.display_name ?? null,
+      author_id: g.receiver_profile_id ?? null, // ← make name clickable
+    }));
+  }
+  function mapFromNotifs(rows: any[]): GratitudeItem[] {
+    return (rows || [])
+      .map((n: any) => {
+        const t = n?.data?.text ?? n?.data?.message ?? n?.data?.review ?? '';
+        // Try several common keys for an author id in your payloads
+        const pid =
+          n?.data?.receiver_id ??
+          n?.data?.sender_id ??
+          n?.data?.author_id ??
+          null;
+        const name =
+          n?.data?.receiver_name ??
+          n?.data?.sender_name ??
+          n?.data?.author_name ??
+          null;
+        return {
+          id: n.id as string,
+          created_at: n.created_at as string,
+          text: t,
+          author_name: name,
+          author_id: pid,
+        } as GratitudeItem;
+      })
+      .filter((g) => !!g.text?.trim());
+  }
+
+  // ---- Initial load: pick best available source + first page -----------------
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
-      setLoading(true);
-      setErr(null);
-
-      // --- 1) Primary source: gratitude_reviews ---
-      try {
-        const { data, error } = await supabase
+    async function tryReviews(first: number) {
+      // Try with `published` first; if column doesn’t exist, fall back without it
+      const run = async (withPublished: boolean) => {
+        const sel = supabase
           .from('gratitude_reviews')
-          .select(`
+          .select(
+            `
             id,
             created_at,
             message,
-            published,
+            ${withPublished ? 'published,' : ''}
             offer_id,
             receiver_profile_id,
             receiver:profiles!gratitude_reviews_receiver_profile_id_fkey(display_name)
-          `)
+          `,
+            { count: 'exact' }
+          )
           .eq('offer_id', offerId)
-          .eq('published', true)
-          .order('created_at', { ascending: false })
-          .limit(limit);
+          .order('created_at', { ascending: false });
 
-        if (error && String(error.message || '').toLowerCase().includes('column "published"')) {
-          const { data: data2, error: error2 } = await supabase
-            .from('gratitude_reviews')
-            .select(`
-              id,
-              created_at,
-              message,
-              offer_id,
-              receiver_profile_id,
-              receiver:profiles!gratitude_reviews_receiver_profile_id_fkey(display_name)
-            `)
-            .eq('offer_id', offerId)
-            .order('created_at', { ascending: false })
-            .limit(limit);
+        if (withPublished) sel.eq('published', true);
 
-          if (error2) throw error2;
+        // 0..first-1
+        sel.range(0, Math.max(first - 1, 0));
 
-          const mapped2: GratitudeItem[] =
-            (data2 || []).map((g: any) => ({
-              id: g.id as string,
-              created_at: g.created_at as string,
-              text: (g.message as string) ?? '',
-              author_name: g.receiver?.display_name ?? null,
-            })) ?? [];
+        const { data, error, count } = await sel;
+        return { data, error, count: count ?? 0, withPublished };
+      };
 
-          if (!cancelled && mapped2.length) {
-            setItems(mapped2);
-            setLoading(false);
-            return;
-          }
-        } else if (error) {
-          throw error;
-        } else {
-          const mapped: GratitudeItem[] =
-            (data || []).map((g: any) => ({
-              id: g.id as string,
-              created_at: g.created_at as string,
-              text: (g.message as string) ?? '',
-              author_name: g.receiver?.display_name ?? null,
-            })) ?? [];
+      // Attempt with published column
+      const a = await run(true);
+      // If “published” column is missing, PostgREST usually returns a clear error
+      const missingPublished =
+        a.error && String(a.error.message || '').toLowerCase().includes('column "published"');
 
-          if (!cancelled && mapped.length) {
-            setItems(mapped);
-            setLoading(false);
-            return;
-          }
+      const b = missingPublished ? await run(false) : null;
 
-          // minimal fallback without join
-          if (!cancelled && mapped.length === 0) {
-            const { data: plain, error: plainErr } = await supabase
-              .from('gratitude_reviews')
-              .select('id, created_at, message')
-              .eq('offer_id', offerId)
-              .order('created_at', { ascending: false })
-              .limit(limit);
+      const pick = missingPublished ? b! : a;
+      if (pick.error) throw pick.error;
 
-            if (plainErr) throw plainErr;
+      const rows = mapFromReviews(pick.data || []);
+      return { rows, count: pick.count };
+    }
 
-            const mappedPlain: GratitudeItem[] =
-              (plain || []).map((g: any) => ({
-                id: g.id as string,
-                created_at: g.created_at as string,
-                text: (g.message as string) ?? '',
-                author_name: null,
-              })) ?? [];
+    async function tryNotifications(first: number) {
+      const { data, error, count } = await supabase
+        .from('notifications')
+        .select('id, created_at, type, data', { count: 'exact' })
+        .contains('data', { offer_id: offerId })
+        .order('created_at', { ascending: false })
+        .range(0, Math.max(first - 1, 0));
 
-            if (!cancelled && mappedPlain.length) {
-              setItems(mappedPlain);
-              setLoading(false);
-              return;
-            }
-          }
+      if (error) throw error;
+
+      const rows = mapFromNotifs(data || []);
+      return { rows, count: count ?? 0 };
+    }
+
+    async function init() {
+      setLoading(true);
+      setErr(null);
+
+      try {
+        // Prefer gratitude_reviews
+        const r = await tryReviews(limit);
+        if (!cancelled && r.count > 0) {
+          setSource('gratitude_reviews');
+          setItems(r.rows);
+          setTotal(r.count);
+          setLoaded(r.rows.length);
+          setLoading(false);
+          return;
         }
       } catch (e) {
-        // Fall through to notifications
-        console.warn('[OfferGratitude] gratitude_reviews query failed/empty, falling back:', e);
+        console.warn('[OfferGratitude] reviews failed, will fall back to notifications:', e);
       }
 
-      // --- 2) Fallback: notifications produced when a gratitude was posted ---
+      // Fallback to notifications
       try {
-        const { data, error } = await supabase
-          .from('notifications')
-          .select('id, created_at, type, data')
-          .contains('data', { offer_id: offerId })
-          .order('created_at', { ascending: false })
-          .limit(limit);
-
-        if (error) throw error;
-
-        const mapped: GratitudeItem[] =
-          (data || [])
-            .map((n: any) => {
-              const t =
-                n?.data?.text ??
-                n?.data?.message ??
-                n?.data?.review ??
-                '';
-              return {
-                id: n.id as string,
-                created_at: n.created_at as string,
-                text: t,
-                author_name:
-                  n?.data?.receiver_name ??
-                  n?.data?.sender_name ??
-                  n?.data?.author_name ??
-                  null,
-              } as GratitudeItem;
-            })
-            .filter((g: GratitudeItem) => !!g.text?.trim()) ?? [];
-
-        if (!cancelled) setItems(mapped);
+        const n = await tryNotifications(limit);
+        if (!cancelled) {
+          setSource('notifications');
+          setItems(n.rows);
+          setTotal(n.count);
+          setLoaded(n.rows.length);
+        }
       } catch (e: any) {
         if (!cancelled) setErr(e?.message ?? 'Could not load reviews.');
       } finally {
@@ -167,35 +169,150 @@ export default function OfferGratitude({
       }
     }
 
-    load();
+    init();
     return () => {
       cancelled = true;
     };
   }, [offerId, limit]);
 
-  if (loading) return null;
+  // ---- Pagination actions ----------------------------------------------------
+  async function loadTo(newSize: number) {
+    // Re-query from 0..newSize-1 to keep sort stable and avoid merging logic
+    try {
+      setLoading(true);
+      if (source === 'gratitude_reviews') {
+        // same two-step logic as initial load re: published column
+        const run = async (withPublished: boolean) => {
+          const sel = supabase
+            .from('gratitude_reviews')
+            .select(
+              `
+              id,
+              created_at,
+              message,
+              ${withPublished ? 'published,' : ''}
+              offer_id,
+              receiver_profile_id,
+              receiver:profiles!gratitude_reviews_receiver_profile_id_fkey(display_name)
+            `
+            )
+            .eq('offer_id', offerId)
+            .order('created_at', { ascending: false })
+            .range(0, Math.max(newSize - 1, 0));
+
+          if (withPublished) sel.eq('published', true);
+
+          const { data, error } = await sel;
+          return { data, error, withPublished };
+        };
+
+        const a = await run(true);
+        const missingPublished =
+          a.error && String(a.error.message || '').toLowerCase().includes('column "published"');
+        const b = missingPublished ? await run(false) : null;
+        const pick = missingPublished ? b! : a;
+        if (pick.error) throw pick.error;
+
+        const rows = mapFromReviews(pick.data || []);
+        setItems(rows);
+        setLoaded(rows.length);
+      } else if (source === 'notifications') {
+        const { data, error } = await supabase
+          .from('notifications')
+          .select('id, created_at, type, data')
+          .contains('data', { offer_id: offerId })
+          .order('created_at', { ascending: false })
+          .range(0, Math.max(newSize - 1, 0));
+
+        if (error) throw error;
+
+        const rows = mapFromNotifs(data || []);
+        setItems(rows);
+        setLoaded(rows.length);
+      }
+    } catch (e) {
+      console.warn('[OfferGratitude] loadTo failed:', e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onShowMore() {
+    const next = Math.min(loaded + pageStep, total || loaded + pageStep);
+    await loadTo(next);
+  }
+
+  async function onShowAll() {
+    if (total > 0) {
+      await loadTo(total);
+    } else {
+      // total might be unknown (shouldn't happen with our queries),
+      // but as a fallback, grab a big window.
+      await loadTo(200);
+    }
+  }
+
+  // ---- Render ---------------------------------------------------------------
+  if (loading && items.length === 0) return null;
   if (err) return null;
   if (!items.length) return null;
 
   return (
     <div className="mt-4">
       <h3 className="mb-2 text-lg font-semibold">
-        {/* requested copy change */}
         {`Recent Gratitude for ${offerTitle ?? 'this offer'}`}
       </h3>
+
       <ul className="space-y-2">
         {items.map((g) => (
           <li key={g.id} className="rounded border p-3">
             <div className="text-xs text-gray-500">
               {new Date(g.created_at).toLocaleString()}
-              {g.author_name ? ` • from ${g.author_name}` : ''}
+              {' '}
+              {g.author_name ? (
+                g.author_id ? (
+                  <>
+                    • from{' '}
+                    <Link href={`/u/${g.author_id}`} className="underline">
+                      {g.author_name}
+                    </Link>
+                  </>
+                ) : (
+                  <>• from {g.author_name}</>
+                )
+              ) : null}
             </div>
             <div className="mt-1 whitespace-pre-wrap text-sm">{g.text}</div>
           </li>
         ))}
       </ul>
 
-      {items.length >= limit && (
+      {/* Controls */}
+      {(hasMore || source === 'notifications') && (
+        <div className="mt-3 flex items-center gap-2">
+          {hasMore && (
+            <button
+              onClick={onShowMore}
+              disabled={loading}
+              className="rounded border px-3 py-1 text-sm hover:bg-gray-50 disabled:opacity-60"
+            >
+              {loading ? 'Loading…' : 'Show more'}
+            </button>
+          )}
+          {hasMore && (
+            <button
+              onClick={onShowAll}
+              disabled={loading}
+              className="rounded border px-3 py-1 text-sm hover:bg-gray-50 disabled:opacity-60"
+            >
+              {loading ? 'Loading…' : 'Show all'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Keep the deep link around as a secondary path */}
+      {items.length >= limit && !hasMore && (
         <div className="mt-2">
           <Link
             href={`/profile/exchanges?tab=public&offer=${offerId}`}
