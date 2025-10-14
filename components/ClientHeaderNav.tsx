@@ -311,8 +311,8 @@ export default function ClientHeaderNav() {
               <Image
                 src="/Facebook-Round-Icon.jpg"
                 alt="Facebook"
-                width={24}
-                height={24}
+                width={40}
+                height={40}
                 className="block"
                 priority={false}
               />
