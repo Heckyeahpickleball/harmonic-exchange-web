@@ -2,6 +2,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
@@ -242,9 +243,29 @@ export default function ClientHeaderNav() {
           )}
         </div>
 
-        {/* RIGHT: bell + auth */}
+        {/* RIGHT: Facebook -> bell -> auth */}
         <div className="flex items-center gap-2">
+          {/* Facebook group button (borderless icon) */}
+          <Link
+            href="https://www.facebook.com/groups/harmonicexchangeglobal"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Harmonic Exchange Facebook Group"
+            title="Harmonic Exchange Facebook Group"
+            className="inline-flex items-center focus:outline-none hover:opacity-90 active:opacity-80"
+          >
+            <Image
+              src="/Facebook-Round-Icon.jpg"
+              alt="Facebook"
+              width={40}
+              height={40}
+              className="block"
+              priority={false}
+            />
+          </Link>
+
           <NotificationsBell />
+
           {!signedIn ? (
             <Link href="/sign-in" className="hx-btn hx-btn--outline-primary text-sm px-3 py-2">
               Sign in
@@ -277,9 +298,28 @@ export default function ClientHeaderNav() {
             )}
           </div>
 
-          {/* Right slot: bell + sign in/out */}
+          {/* Right slot: Facebook -> bell -> sign in/out */}
           <div className="flex items-center gap-2">
+            <Link
+              href="https://www.facebook.com/groups/harmonicexchangeglobal"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Harmonic Exchange Facebook Group"
+              title="Harmonic Exchange Facebook Group"
+              className="inline-flex items-center focus:outline-none hover:opacity-90 active:opacity-80"
+            >
+              <Image
+                src="/Facebook-Round-Icon.jpg"
+                alt="Facebook"
+                width={24}
+                height={24}
+                className="block"
+                priority={false}
+              />
+            </Link>
+
             <NotificationsBell />
+
             {!signedIn ? (
               <Link
                 href="/sign-in"
