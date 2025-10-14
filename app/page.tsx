@@ -212,8 +212,6 @@ export default function HomePage() {
             <span className="hx-btn hx-btn--outline-primary">Checking…</span>
           ) : user ? (
             <>
-              <Link href="/offers/new" className="hx-btn hx-btn--outline-primary">New Offer</Link>
-              <Link href="/profile" className="hx-btn hx-btn--outline-primary">Create Space</Link>
             </>
           ) : (
             <Link href="/sign-in" className="hx-btn hx-btn--outline-primary">Join the Community</Link>
