@@ -123,7 +123,7 @@ export default function GlobalExchangePage() {
   }, []);
 
   return (
-    <div className="mx-auto max-w-6xl p-4 space-y-8">
+    <div className="mx-auto max-w-6xl px-0 sm:px-3 md:px-4 py-2 space-y-7">
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Global Exchange</h1>
         <div className="flex gap-2">
@@ -147,7 +147,7 @@ export default function GlobalExchangePage() {
         </div>
       )}
 
-      {/* Composer (global scope) — box removed */}
+      {/* Composer (global scope) — no wrapper box */}
       <section>
         {meId ? (
           <PostComposer
