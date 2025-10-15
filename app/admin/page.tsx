@@ -579,7 +579,8 @@ function AdminContent() {
           'content-type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ profile_id: id, reason }),
+        // FIX: send `id`, not `profile_id`
+        body: JSON.stringify({ id, reason }),
       });
 
       if (!res.ok) {
