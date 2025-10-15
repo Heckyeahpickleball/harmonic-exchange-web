@@ -1,3 +1,4 @@
+// /app/global/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -146,9 +147,8 @@ export default function GlobalExchangePage() {
         </div>
       )}
 
-      {/* Composer (global scope) */}
-      <section className="hx-card p-4 sm:p-6">
-        <h2 className="mb-3 text-lg font-semibold">Share with the whole community</h2>
+      {/* Composer (global scope) — box removed */}
+      <section>
         {meId ? (
           <PostComposer
             profileId={meId}
