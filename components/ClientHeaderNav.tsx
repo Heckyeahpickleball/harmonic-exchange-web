@@ -139,7 +139,7 @@ export default function ClientHeaderNav() {
             href={signedIn ? '/global' : '/sign-in'}
             className="hx-btn hx-btn--secondary text-sm px-3 py-2"
           >
-            Global Exchange
+            Global Feed
           </Link>
 
           <div className="relative">
