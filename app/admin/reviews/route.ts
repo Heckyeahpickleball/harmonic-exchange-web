@@ -1,125 +1,93 @@
-// app/api/admin/reviews/route.ts
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY!; // SERVER-ONLY
 
-// Anonymous client (for decoding explicit Bearer JWTs)
-const anon = createClient(SUPABASE_URL, ANON_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
+const admin = createClient(url, serviceRole, { auth: { persistSession: false } });
 
-// Service client (server-only; bypasses RLS)
-const service = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
+type AnyRow = Record<string, any>;
 
-function firstText(o: any) {
-  return o?.quote ?? o?.message ?? o?.text ?? o?.content ?? o?.body ?? null;
-}
-function idOrNull(v: any) {
-  return typeof v === 'string' ? v : v ?? null;
-}
-
-/** Resolve the current user from Authorization header or Supabase auth cookie. */
-async function getUserFromRequest(req: Request) {
-  // A) Authorization: Bearer <token>
-  const authHeader = req.headers.get('authorization') || '';
-  const token = authHeader.toLowerCase().startsWith('bearer ')
-    ? authHeader.slice(7).trim()
-    : null;
-
-  if (token) {
-    const { data } = await anon.auth.getUser(token);
-    if (data?.user) return data.user;
-  }
-
-  // B) Supabase auth cookie via SSR client (Next 15: cookies() is async)
-  const cookieStore = await cookies();
-  const supaFromCookie = createServerClient(SUPABASE_URL, ANON_KEY, {
-    cookies: {
-      get: (name: string) => cookieStore.get(name)?.value,
-      set: (_name: string, _value: string, _options: CookieOptions) => {},
-      remove: (_name: string, _options: CookieOptions) => {},
-    },
-  });
-
-  const { data } = await supaFromCookie.auth.getUser();
-  return data?.user ?? null;
-}
-
-export async function GET(req: Request) {
+export async function GET() {
   try {
-    // 1) Identify user
-    const user = await getUserFromRequest(req);
-    if (!user) {
-      return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+    // Prefer the Security-Definer view: public_gratitude_reviews
+    let source: 'public_gratitude_reviews' | 'gratitudes' = 'public_gratitude_reviews';
+    let rows: AnyRow[] = [];
+
+    {
+      const { data, error } = await admin
+        .from('public_gratitude_reviews')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(400);
+
+      if (!error && data && data.length) {
+        rows = data as AnyRow[];
+      }
     }
 
-    // 2) Ensure user is admin/mod
-    const { data: prof, error: profErr } = await service
-      .from('profiles')
-      .select('id, role')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    if (profErr) {
-      return NextResponse.json({ error: profErr.message }, { status: 500 });
-    }
-    if (!prof || (prof.role !== 'admin' && prof.role !== 'moderator')) {
-      return NextResponse.json({ error: 'forbidden' }, { status: 403 });
-    }
-
-    // 3) Load reviews or fall back to gratitudes
-    let source: 'reviews' | 'gratitudes' = 'reviews';
-    let rows: any[] = [];
-
-    const rv = await service
-      .from('reviews')
-      .select('id, quote, rating, author_id, subject_id, offer_id, request_id, created_at')
-      .order('created_at', { ascending: false })
-      .limit(500);
-
-    if (!rv.error && rv.data?.length) {
-      rows = rv.data;
-      source = 'reviews';
-    } else {
-      const gr = await service
+    // Fallback to raw gratitudes if the view is ever empty
+    if (rows.length === 0) {
+      const { data, error } = await admin
         .from('gratitudes')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(500);
-
-      if (gr.error) {
-        const msg = rv.error?.message || gr.error?.message || 'failed to load reviews';
-        return NextResponse.json({ error: msg }, { status: 500 });
-      }
-
-      rows = gr.data || [];
+        .limit(400);
+      if (error) throw error;
+      rows = (data ?? []) as AnyRow[];
       source = 'gratitudes';
     }
 
-    // 4) Normalize payload for Admin UI
-    const items = rows.map((r: any) => ({
-      id: r.id,
-      created_at: r.created_at,
-      quote: firstText(r),
-      rating: typeof r.rating === 'number' ? r.rating : null,
-      author_id: idOrNull(r.author_id ?? r.from_profile ?? r.from_profile_id),
-      subject_id: idOrNull(r.subject_id ?? r.to_profile ?? r.to_profile_id),
-      offer_id: idOrNull(r.offer_id),
-      request_id: idOrNull(r.request_id),
-    }));
+    // Normalize to Admin UI shape
+    const items = rows
+      .map((r) => {
+        // public_gratitude_reviews: message, offer_id, owner_profile_id, receiver_profile_id,
+        // receiver_name, owner_name, created_at, id, offer_title, etc.
+        // gratitudes fallback: message, offer_id, owner_profile_id, receiver_profile_id, created_at, id
+        const quote =
+          r.message ??
+          r.quote ??
+          r.text ??
+          r.body ??
+          r.content ??
+          null;
+
+        return {
+          id: r.id,
+          created_at: r.created_at,
+          quote,
+          rating: typeof r.rating === 'number' ? r.rating : null, // nullable (view doesn’t have rating)
+          author_id: r.receiver_profile_id ?? r.author_id ?? null,
+          subject_id: r.owner_profile_id ?? r.subject_id ?? null,
+          offer_id: r.offer_id ?? null,
+          request_id: r.request_id ?? null,
+          author_name: r.receiver_name ?? r.author_name ?? null,
+          subject_name: r.owner_name ?? r.subject_name ?? r.offer_title ?? null,
+        };
+      })
+      .filter((n) => n.quote && String(n.quote).trim().length > 0)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    // Enrich names only if missing and we have ids
+    const need = items.filter((n) => (n.author_id && !n.author_name) || (n.subject_id && !n.subject_name));
+    if (need.length) {
+      const ids = Array.from(
+        new Set(need.flatMap((n) => [n.author_id, n.subject_id].filter(Boolean) as string[]))
+      );
+      if (ids.length) {
+        const { data: profs } = await admin.from('profiles').select('id,display_name').in('id', ids);
+        const map = new Map<string, string>();
+        (profs ?? []).forEach((p: any) => map.set(p.id, p.display_name));
+        items.forEach((n) => {
+          if (n.author_id && !n.author_name) n.author_name = map.get(n.author_id) ?? null;
+          if (n.subject_id && !n.subject_name) n.subject_name = map.get(n.subject_id) ?? null;
+        });
+      }
+    }
 
     return NextResponse.json({ source, items });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'server error' },
-      { status: 500 }
-    );
+    console.error(e);
+    return NextResponse.json({ error: e?.message ?? 'Failed to load reviews' }, { status: 500 });
   }
 }

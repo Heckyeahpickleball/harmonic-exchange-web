@@ -431,20 +431,27 @@ function AdminContent() {
     })();
   }, [canViewAdmin, tab, isAdmin]);
 
-  // helper — best-effort email RPC
+  // helper — fetch emails via view (no RPC; avoids 404s)
   async function fetchEmails(ids: string[]) {
     try {
-      let res = await supabase.rpc('admin_get_profile_emails', { p_profile_ids: ids });
-      if (res.error) res = await supabase.rpc('admin_get_profile_emails', { ids });
-      if (res.error) res = await supabase.rpc('admin_get_profile_emails', { p_ids: ids });
-      if (res.error) throw res.error;
+      if (!ids?.length) return {};
+      const { data, error } = await supabase
+        .from('profiles_with_email')
+        .select('id,email')
+        .in('id', ids);
 
-      const rows = (res.data || []) as EmailRow[];
+      if (error) throw error;
+
+      const rows = (data || []) as EmailRow[];
       const map: Record<string, string | null> = {};
       for (const r of rows) map[r.id] = r.email ?? null;
+
+      // ensure all ids exist in map (fill missing as null)
+      for (const id of ids) if (!(id in map)) map[id] = null;
+
       return map;
     } catch (err) {
-      console.warn('email RPC failed (showing blanks):', err);
+      console.warn('email fetch (profiles_with_email) failed (showing blanks):', err);
       return {} as Record<string, string | null>;
     }
   }

@@ -1,8 +1,9 @@
 // components/PostItem.tsx
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 type ProfileLite = {
@@ -66,9 +67,13 @@ function ConfirmInline({
   onCancel: () => void;
   busy?: boolean;
 }) {
+  const [ready, setReady] = useState(false);
   const confirmBtnRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
-    const t = setTimeout(() => confirmBtnRef.current?.focus(), 0);
+    const t = setTimeout(() => {
+      setReady(true);
+      confirmBtnRef.current?.focus();
+    }, 0);
     return () => clearTimeout(t);
   }, []);
   return (
@@ -80,7 +85,7 @@ function ConfirmInline({
           ref={confirmBtnRef}
           className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
           onClick={onConfirm}
-          disabled={!!busy}
+          disabled={!!busy || !ready}
         >
           {busy ? 'Working…' : confirmLabel}
         </button>
@@ -118,7 +123,7 @@ function resolveAvatarUrl(raw?: string | null): string | null {
     const b = supabase.storage.from('profile-images').getPublicUrl(raw).data.publicUrl;
     if (b) return b;
   } catch {}
-  return raw; // last resort; if it's already a full URL-like string it may still work
+  return raw; // last resort
 }
 
 /** Tiny avatar (image or initials fallback), always clickable */
@@ -126,7 +131,7 @@ function TinyAvatar({
   name,
   href,
   src,
-  size = 36, // bigger default
+  size = 36,
 }: {
   name: string;
   href: string;
@@ -147,6 +152,7 @@ function TinyAvatar({
   if (resolved) {
     return (
       <Link href={href} className="shrink-0" aria-label={`${name}'s profile`}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={resolved}
           alt=""
@@ -170,6 +176,86 @@ function TinyAvatar({
   );
 }
 
+/* ---------------- Hearts helpers (shared) ---------------- */
+
+type TargetType = 'post' | 'comment';
+
+async function fetchHeartState(targetType: TargetType, targetId: string, me: string | null) {
+  // Count
+  const { count } = await supabase
+    .from('hearts')
+    .select('id', { head: true, count: 'exact' })
+    .eq('target_type', targetType)
+    .eq('target_id', targetId);
+
+  // Mine?
+  let iHearted = false;
+  if (me) {
+    const { data: mine } = await supabase
+      .from('hearts')
+      .select('id')
+      .eq('target_type', targetType)
+      .eq('target_id', targetId)
+      .eq('profile_id', me)
+      .maybeSingle();
+    iHearted = !!mine;
+  }
+
+  return { count: count || 0, iHearted };
+}
+
+function useHeartsRealtime(targetType: TargetType, targetId: string, setCount: (n: number) => void) {
+  useEffect(() => {
+    const channel = supabase
+      .channel(`hearts:${targetType}:${targetId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'hearts',
+          filter: `target_type=eq.${targetType},target_id=eq.${targetId}`,
+        },
+        async () => {
+          // Re-count on any change for robustness
+          const { count } = await supabase
+            .from('hearts')
+            .select('id', { head: true, count: 'exact' })
+            .eq('target_type', targetType)
+            .eq('target_id', targetId);
+          setCount(count || 0);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [targetType, targetId, setCount]);
+}
+
+async function toggleHeart(targetType: TargetType, targetId: string, me: string | null) {
+  if (!me) throw new Error('NOT_SIGNED_IN');
+  // Try to insert; if unique constraint hits, fall back to delete
+  const ins = await supabase
+    .from('hearts')
+    .insert({ target_type: targetType, target_id: targetId, profile_id: me });
+  if (ins.error) {
+    // If duplicate, delete to "unheart"
+    const del = await supabase
+      .from('hearts')
+      .delete()
+      .eq('target_type', targetType)
+      .eq('target_id', targetId)
+      .eq('profile_id', me);
+    if (del.error) throw del.error;
+    return { action: 'unheart' as const };
+  }
+  return { action: 'heart' as const };
+}
+
+/* ---------------- Main PostItem ---------------- */
+
 export default function PostItem({
   post,
   me,
@@ -179,6 +265,8 @@ export default function PostItem({
   me: string | null;
   onDeleted: () => void;
 }) {
+  const router = useRouter();
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [comments, setComments] = useState<CommentRow[]>([]);
@@ -194,6 +282,10 @@ export default function PostItem({
   const commentIdsRef = useRef<Set<string>>(new Set());
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
+  // Hearts (post)
+  const [postHearts, setPostHearts] = useState(0);
+  const [iHeartedPost, setIHeartedPost] = useState(false);
+
   useEffect(() => {
     (async () => {
       const { count } = await supabase
@@ -203,6 +295,24 @@ export default function PostItem({
       setCommentCount(count || 0);
     })();
   }, [post.id]);
+
+  // Initial hearts fetch for post
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const s = await fetchHeartState('post', post.id, me);
+      if (!cancelled) {
+        setPostHearts(s.count);
+        setIHeartedPost(s.iHearted);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [post.id, me]);
+
+  // Realtime hearts for post
+  useHeartsRealtime('post', post.id, setPostHearts);
 
   useEffect(() => {
     if (!commentsOpen) {
@@ -353,6 +463,21 @@ export default function PostItem({
   const authorAvatar = post.profiles?.avatar_url ?? null;
   const authorHref = `/u/${post.profile_id}`;
 
+  async function onToggleHeartPost() {
+    try {
+      const res = await toggleHeart('post', post.id, me);
+      setIHeartedPost(res.action === 'heart');
+      // Optimistic count adjustment (realtime will correct if needed)
+      setPostHearts((n) => n + (res.action === 'heart' ? 1 : -1));
+    } catch (e: any) {
+      if (String(e?.message) === 'NOT_SIGNED_IN') {
+        router.push('/signin');
+        return;
+      }
+      console.error(e);
+    }
+  }
+
   return (
     <article className="hx-card p-3">
       <header className="mb-2 flex items-center justify-between text-sm text-gray-600">
@@ -366,23 +491,41 @@ export default function PostItem({
             <time dateTime={post.created_at}>{new Date(post.created_at).toLocaleString()}</time>
           </div>
         </div>
-        {me === post.profile_id && (
-          <div className="relative">
-            <button
-              className="rounded border px-2 py-1 text-sm"
-              aria-label="More actions"
-              onClick={() => setMenuOpen((v) => !v)}
-            >
-              …
-            </button>
-            {menuOpen && (
-              <Kebab
-                items={[{ label: 'Delete post', action: deletePost }]}
-                onClose={() => setMenuOpen(false)}
-              />
-            )}
-          </div>
-        )}
+
+        {/* Post actions: delete + hearts */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onToggleHeartPost}
+            className={[
+              'inline-flex items-center gap-1 rounded border px-2 py-1 text-sm',
+              iHeartedPost ? 'bg-pink-50 border-pink-300 text-pink-700' : '',
+            ].join(' ')}
+            title={iHeartedPost ? 'Unheart' : 'Heart'}
+            aria-pressed={iHeartedPost}
+          >
+            <span aria-hidden>❤️</span>
+            <span>{postHearts}</span>
+          </button>
+
+          {me === post.profile_id && (
+            <div className="relative">
+              <button
+                className="rounded border px-2 py-1 text-sm"
+                aria-label="More actions"
+                onClick={() => setMenuOpen((v) => !v)}
+              >
+                …
+              </button>
+              {menuOpen && (
+                <Kebab
+                  items={[{ label: 'Delete post', action: deletePost }]}
+                  onClose={() => setMenuOpen(false)}
+                />
+              )}
+            </div>
+          )}
+        </div>
       </header>
 
       {post.body && <p className="mb-2 whitespace-pre-wrap">{post.body}</p>}
@@ -392,6 +535,7 @@ export default function PostItem({
         <div className={`mb-2 grid ${postGridCols} gap-2`}>
           {post.images.map((src) => (
             <figure key={src} className="w-full">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={src} alt="" className="w-full h-auto rounded" />
             </figure>
           ))}
@@ -431,6 +575,7 @@ export default function PostItem({
               <div className="flex flex-wrap gap-2">
                 {previews.map((src, idx) => (
                   <div key={src} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={src} alt="" className="h-16 w-24 rounded object-cover" />
                     <button
                       type="button"
@@ -474,6 +619,8 @@ export default function PostItem({
   );
 }
 
+/* ---------------- CommentItem (with hearts) ---------------- */
+
 function CommentItem({
   comment,
   me,
@@ -485,12 +632,50 @@ function CommentItem({
   ownerId: string;
   onDeleted: () => void;
 }) {
+  const router = useRouter();
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const canDelete = !!me && (me === comment.profile_id || me === ownerId);
+
+  // Hearts (comment)
+  const [hearts, setHearts] = useState(0);
+  const [iHearted, setIHearted] = useState(false);
+
+  // Initial heart state
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const s = await fetchHeartState('comment', comment.id, me);
+      if (!cancelled) {
+        setHearts(s.count);
+        setIHearted(s.iHearted);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [comment.id, me]);
+
+  // Realtime heart count
+  useHeartsRealtime('comment', comment.id, setHearts);
+
+  async function onToggleHeartComment() {
+    try {
+      const res = await toggleHeart('comment', comment.id, me);
+      setIHearted(res.action === 'heart');
+      setHearts((n) => n + (res.action === 'heart' ? 1 : -1));
+    } catch (e: any) {
+      if (String(e?.message) === 'NOT_SIGNED_IN') {
+        router.push('/signin');
+        return;
+      }
+      console.error(e);
+    }
+  }
 
   async function reallyDelete() {
     try {
@@ -501,7 +686,7 @@ function CommentItem({
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to delete comment.');
     } finally {
-           setBusy(false);
+      setBusy(false);
       setConfirmDel(false);
       setMenuOpen(false);
     }
@@ -530,23 +715,39 @@ function CommentItem({
           </div>
         </div>
 
-        {canDelete && (
-          <div className="relative">
-            <button
-              className="rounded border px-2 py-1 text-sm"
-              aria-label="More actions"
-              onClick={() => setMenuOpen((v) => !v)}
-            >
-              …
-            </button>
-            {menuOpen && (
-              <Kebab
-                items={[{ label: 'Delete comment', action: () => setConfirmDel(true) }]}
-                onClose={() => setMenuOpen(false)}
-              />
-            )}
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onToggleHeartComment}
+            className={[
+              'inline-flex items-center gap-1 rounded border px-2 py-1 text-xs',
+              iHearted ? 'bg-pink-50 border-pink-300 text-pink-700' : '',
+            ].join(' ')}
+            title={iHearted ? 'Unheart' : 'Heart'}
+            aria-pressed={iHearted}
+          >
+            <span aria-hidden>❤️</span>
+            <span>{hearts}</span>
+          </button>
+
+          {canDelete && (
+            <div className="relative">
+              <button
+                className="rounded border px-2 py-1 text-sm"
+                aria-label="More actions"
+                onClick={() => setMenuOpen((v) => !v)}
+              >
+                …
+              </button>
+              {menuOpen && (
+                <Kebab
+                  items={[{ label: 'Delete comment', action: () => setConfirmDel(true) }]}
+                  onClose={() => setMenuOpen(false)}
+                />
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {comment.body && <p className="whitespace-pre-wrap">{comment.body}</p>}
@@ -556,6 +757,7 @@ function CommentItem({
         <div className={`mt-2 grid ${commentGridCols} gap-2`}>
           {comment.images.map((src) => (
             <figure key={src} className="w-full">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={src} alt="" className="w-full h-auto rounded" />
             </figure>
           ))}
