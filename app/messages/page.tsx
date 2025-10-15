@@ -225,14 +225,25 @@ function ChatPane({
   const loadSharedOffers = useCallback(async () => {
     if (!thread) return;
     try {
-      const ids = [me, thread.peer_id];
-      const { data, error } = await supabase
-        .from('requests')
-        .select(`id, offer_id, offers!inner ( id, title, owner_id ), requester_profile_id`)
-        .or(`and(offers.owner_id.in.(${ids.join(',')}),requester_profile_id.in.(${ids.join(',')}))`)
-        .order('created_at', { ascending: false })
-        .limit(50);
-      if (error) throw error;
+const ids = [me, thread.peer_id];
+
+const { data, error } = await supabase
+  .from('requests')
+  .select(`
+    id,
+    offer_id,
+    offers!inner (
+      id,
+      title,
+      owner_id
+    )
+  `)
+  // either I own the offer OR I'm the requester
+  .or(`offers.owner_id.in.(${ids.join(',')}),requester_profile_id.in.(${ids.join(',')})`)
+  .order('created_at', { ascending: false })
+  .limit(50);
+
+if (error) throw error;
       const uniq = new Map<string, SharedOffer>();
       for (const r of (data || []) as any[]) {
         if (r.offers?.id) uniq.set(r.offers.id, { id: r.offers.id, title: r.offers.title });
