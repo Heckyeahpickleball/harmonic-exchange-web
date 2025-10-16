@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-/** Use service role so we can read admin views regardless of RLS */
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!, // required
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, // still works without SR key
   { auth: { persistSession: false } }
 )
 
-type Row = {
+type Item = {
   id: string
   created_at: string
   quote: string | null
@@ -19,24 +18,95 @@ type Row = {
   request_id: string | null
   author_name?: string | null
   subject_name?: string | null
+  offer_title?: string | null
+}
+
+async function tryQuery(view: string, select: string) {
+  const { data, error } = await supabaseAdmin.from(view as any).select(select).order('created_at', { ascending: false }).limit(500)
+  if (error) return { ok: false as const, error }
+  if (!data || data.length === 0) return { ok: false as const }
+  return { ok: true as const, data }
 }
 
 export async function GET() {
   try {
-    // 1) Preferred consolidated view if present
-    let source: 'public_gratitude_reviews' | 'review_gratitudes' | 'reviews' | 'gratitudes' = 'public_gratitude_reviews'
-    let rows: any[] = []
-
-    // Try public_gratitude_reviews first
+    // 1) Your MV with names & avatars
     {
-      const { data, error } = await supabaseAdmin
-        .from('public_gratitude_reviews')
-        .select('id, created_at, message:quote, rating, author_id, subject_id, offer_id, request_id, author_name, subject_name')
-        .order('created_at', { ascending: false })
-        .limit(500)
+      const q = await tryQuery(
+        'public_reviews_public_mv',
+        'id, created_at, message, offer_title, owner_name, receiver_name'
+      )
+      if (q.ok) {
+        const items: Item[] = q.data.map((r: any) => ({
+          id: r.id,
+          created_at: r.created_at,
+          quote: r.message ?? null,
+          rating: null,
+          author_id: null,
+          subject_id: null,
+          offer_id: null,
+          request_id: null,
+          author_name: r.owner_name ?? null,
+          subject_name: r.receiver_name ?? null,
+          offer_title: r.offer_title ?? null,
+        }))
+        return NextResponse.json({ source: 'public_reviews_public_mv', items })
+      }
+    }
 
-      if (!error && data?.length) {
-        rows = data.map(r => ({
+    // 2) Non-MV variant
+    {
+      const q = await tryQuery(
+        'public_reviews_public',
+        'id, created_at, message, offer_title, owner_name, receiver_name'
+      )
+      if (q.ok) {
+        const items: Item[] = q.data.map((r: any) => ({
+          id: r.id,
+          created_at: r.created_at,
+          quote: r.message ?? null,
+          rating: null,
+          author_id: null,
+          subject_id: null,
+          offer_id: null,
+          request_id: null,
+          author_name: r.owner_name ?? null,
+          subject_name: r.receiver_name ?? null,
+          offer_title: r.offer_title ?? null,
+        }))
+        return NextResponse.json({ source: 'public_reviews_public', items })
+      }
+    }
+
+    // 3) Older consolidated view (ids present but naming differs)
+    {
+      const q = await tryQuery(
+        'public_gratitude_reviews',
+        'id, created_at, message, owner_profile_id, receiver_profile_id, offer_id, request_id'
+      )
+      if (q.ok) {
+        const items: Item[] = q.data.map((r: any) => ({
+          id: r.id,
+          created_at: r.created_at,
+          quote: r.message ?? null,
+          rating: null,
+          author_id: r.owner_profile_id ?? null,
+          subject_id: r.receiver_profile_id ?? null,
+          offer_id: r.offer_id ?? null,
+          request_id: r.request_id ?? null,
+        }))
+        return NextResponse.json({ source: 'public_gratitude_reviews', items })
+      }
+    }
+
+    // 4) Historical view name
+    {
+      const q = await tryQuery(
+        'review_gratitudes',
+        'id, created_at, message, author_id, subject_id, offer_id, request_id, rating'
+      )
+      if (q.ok) {
+        const items: Item[] = q.data.map((r: any) => ({
           id: r.id,
           created_at: r.created_at,
           quote: r.message ?? null,
@@ -45,64 +115,31 @@ export async function GET() {
           subject_id: r.subject_id ?? null,
           offer_id: r.offer_id ?? null,
           request_id: r.request_id ?? null,
-          author_name: r.author_name ?? null,
-          subject_name: r.subject_name ?? null,
         }))
-        return NextResponse.json({ source, items: rows })
+        return NextResponse.json({ source: 'review_gratitudes', items })
       }
     }
 
-    // 2) Fallback: review_gratitudes view if that’s the name in your project
+    // 5) Raw reviews table (if it exists)
     {
-      source = 'review_gratitudes'
-      const { data, error } = await supabaseAdmin
-        .from('review_gratitudes')
-        .select('id, created_at, message:quote, rating, author_id, subject_id, offer_id, request_id')
-        .order('created_at', { ascending: false })
-        .limit(500)
-
-      if (!error && (data?.length ?? 0) > 0) {
-        rows = data.map(r => ({
-          id: r.id,
-          created_at: r.created_at,
-          quote: r.message ?? null,
-          rating: r.rating ?? null,
-          author_id: r.author_id ?? null,
-          subject_id: r.subject_id ?? null,
-          offer_id: r.offer_id ?? null,
-          request_id: r.request_id ?? null,
-        }))
-        return NextResponse.json({ source, items: rows })
+      const q = await tryQuery(
+        'reviews',
+        'id, created_at, quote, rating, author_id, subject_id, offer_id, request_id'
+      )
+      if (q.ok) {
+        const items: Item[] = q.data as any[]
+        return NextResponse.json({ source: 'reviews', items })
       }
     }
 
-    // 3) Fallback: reviews table (if it exists)
+    // 6) Last resort: gratitudes table
     {
-      source = 'reviews'
-      const { data, error } = await supabaseAdmin
-        .from('reviews')
-        .select('id, created_at, quote, rating, author_id, subject_id, offer_id, request_id')
-        .order('created_at', { ascending: false })
-        .limit(500)
-
-      if (!error && (data?.length ?? 0) > 0) {
-        rows = data as Row[]
-        return NextResponse.json({ source, items: rows })
-      }
-    }
-
-    // 4) Last resort: map from gratitudes to the ReviewRow shape
-    {
-      source = 'gratitudes'
-      const { data, error } = await supabaseAdmin
-        .from('gratitudes')
-        .select('id, created_at, message, owner_profile_id, receiver_profile_id, offer_id')
-        .order('created_at', { ascending: false })
-        .limit(500)
-
-      if (error) throw error
-
-      rows = (data || []).map((g: any) => ({
+      const q = await tryQuery(
+        'gratitudes',
+        'id, created_at, message, owner_profile_id, receiver_profile_id, offer_id'
+      )
+      if (!q.ok) throw q.error || new Error('No review sources found')
+      const items: Item[] = q.data.map((g: any) => ({
         id: g.id,
         created_at: g.created_at,
         quote: g.message ?? null,
@@ -112,10 +149,10 @@ export async function GET() {
         offer_id: g.offer_id ?? null,
         request_id: null,
       }))
-      return NextResponse.json({ source, items: rows })
+      return NextResponse.json({ source: 'gratitudes', items })
     }
-  } catch (err: any) {
-    console.error('/api/admin/reviews error:', err?.message || err)
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+  } catch (e: any) {
+    console.error('/api/admin/reviews error:', e?.message || e)
+    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 })
   }
 }

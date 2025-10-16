@@ -1,3 +1,5 @@
+// next.config.mjs
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   images: {
@@ -22,8 +24,7 @@ const nextConfig = {
     ],
   },
 
-  // Silence the deprecation warning by using the new key (no behavior change),
-  // and skip lint during Vercel builds so ESLint patching can't fail CI.
+  // Silence deprecation warnings + keep CI smooth on Vercel
   turbopack: {},
   eslint: {
     ignoreDuringBuilds: true,
