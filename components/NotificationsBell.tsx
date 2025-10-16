@@ -430,8 +430,6 @@ export default function NotificationsBell() {
   const handlePanelLeave = (
     evt: React.MouseEvent | React.PointerEvent,
   ) => {
-    // Ignore for mobile (touch) to allow scrolling without closing
-    // Also ignore non-mouse pointers (e.g. touch/pen)
     const anyEvt = evt as any;
     const pointerType = anyEvt?.nativeEvent?.pointerType as
       | 'mouse'
@@ -459,7 +457,7 @@ export default function NotificationsBell() {
   const onTouchMoveCapture = () => cancelScheduledClose();
 
   const listClass =
-    'overflow-auto sm:max-h-[55vh] sm:rounded-b-xl max-h-[calc(85dvh-110px)] pb-[env(safe-area-inset-bottom)]';
+    'overflow-auto sm:max-h-[70vh] sm:rounded-b-xl max-h-[calc(85dvh-110px)] pb-[env(safe-area-inset-bottom)]';
 
   // === Logged-out behavior: clicking the bell goes to /sign-in ===
   if (!uid) {
@@ -504,15 +502,16 @@ export default function NotificationsBell() {
           role="menu"
           aria-label="Notifications"
           onMouseEnter={cancelScheduledClose}
-          // Only apply leave handlers on non-mobile to prevent accidental closes while scrolling
           onMouseLeave={isMobile ? undefined : handlePanelLeave}
           onPointerEnter={cancelScheduledClose}
           onPointerLeave={isMobile ? undefined : handlePanelLeave}
           className={[
-            'hx-card z-50 p-0',
-            'sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:w[360px] sm:max-w-[92vw] sm:mx-0 sm:inset-auto',
+            // Desktop (>= sm): anchor to bell, fixed width and max height
+            'sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:w-[360px] sm:max-w-[92vw] sm:mx-0 sm:inset-auto',
+            // Mobile (< sm): full-width sheet
             'fixed inset-x-2 top-2 mx-auto w-[calc(100vw-1rem)] max-w-[560px]',
-            'max-h-[85dvh] rounded-xl overflow-hidden',
+            // Shared
+            'hx-card z-50 max-h-[85dvh] rounded-xl overflow-hidden p-0 shadow-xl',
           ].join(' ')}
         >
           {/* Mobile header with Messages button + badge */}
@@ -530,7 +529,7 @@ export default function NotificationsBell() {
                 onClick={() => {
                   setActiveTab('messages');
                   setOpen(false);
-                  router.push('/messages'); // (user is logged in here)
+                  router.push('/messages');
                 }}
                 className="hx-btn hx-btn--primary text-sm w-full relative"
               >
@@ -559,13 +558,6 @@ export default function NotificationsBell() {
                 aria-label="Go to Messages"
               >
                 Messages
-                {/* (Optional) show a tiny dot/count on desktop too.
-                    Uncomment if you want parity with mobile: */}
-                {/* {unreadMsgs > 0 && (
-                  <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-[var(--hx-brand)] px-1 text-[11px] font-bold text-white">
-                    {unreadMsgs > 99 ? '99+' : unreadMsgs}
-                  </span>
-                )} */}
               </button>
               <button
                 onClick={markAllRead}

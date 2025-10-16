@@ -159,12 +159,14 @@ function ChatPane({
   initialMsgs,
   onCache,
   onBackMobile,
+  onLeaveChat,
 }: {
   me: string;
   thread?: Thread;
   initialMsgs?: ChatMsg[];
   onCache: (peerId: string, msgs: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])) => void;
   onBackMobile: () => void;
+  onLeaveChat: (peerId: string) => void;
 }) {
   const [msgs, setMsgs] = useState<ChatMsg[]>(initialMsgs ?? []);
   const [draft, setDraft] = useState('');
@@ -173,9 +175,42 @@ function ChatPane({
   const [shared, setShared] = useState<SharedOffer[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // NEW: messages container ref for auto-scroll
+  const messagesRef = useRef<HTMLDivElement>(null);
+  const lastThreadRef = useRef<string | undefined>(undefined);
+
+  const scrollToBottom = useCallback((smooth = true) => {
+    const el = messagesRef.current;
+    if (!el) return;
+    const behavior = smooth ? 'smooth' : 'auto';
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  }, []);
+
+  // Reset messages when thread changes
   useEffect(() => {
     setMsgs(initialMsgs ?? []);
   }, [thread?.peer_id, initialMsgs]);
+
+  // On thread open/switch, jump to bottom once
+  useEffect(() => {
+    if (!thread) return;
+    if (lastThreadRef.current !== thread.peer_id) {
+      lastThreadRef.current = thread.peer_id;
+      // wait a frame so DOM has rendered messages
+      requestAnimationFrame(() => scrollToBottom(false));
+    }
+  }, [thread, scrollToBottom]);
+
+  // When new messages arrive, keep pinned to bottom if already near bottom
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (!el) return;
+    const threshold = 120; // px from bottom considered "near bottom"
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom <= threshold) {
+      scrollToBottom(true);
+    }
+  }, [msgs, scrollToBottom]);
 
   const canSend = useMemo(
     () => !!thread && !!draft.trim() && !!me && !!thread.peer_id && thread.request_ids.length > 0,
@@ -219,31 +254,34 @@ function ChatPane({
       .eq('type', 'message_received')
       .is('read_at', null)
       .in('data->>request_id', thread.request_ids);
-  }, [me, thread, onCache]);
+
+    // ensure we’re at bottom after load
+    requestAnimationFrame(() => scrollToBottom(false));
+  }, [me, thread, onCache, scrollToBottom]);
 
   // shared offers strip between the two users
   const loadSharedOffers = useCallback(async () => {
     if (!thread) return;
     try {
-const ids = [me, thread.peer_id];
+      const ids = [me, thread.peer_id];
 
-const { data, error } = await supabase
-  .from('requests')
-  .select(`
-    id,
-    offer_id,
-    offers!inner (
-      id,
-      title,
-      owner_id
-    )
-  `)
-  // either I own the offer OR I'm the requester
-  .or(`offers.owner_id.in.(${ids.join(',')}),requester_profile_id.in.(${ids.join(',')})`)
-  .order('created_at', { ascending: false })
-  .limit(50);
+      const { data, error } = await supabase
+        .from('requests')
+        .select(`
+          id,
+          offer_id,
+          offers!inner (
+            id,
+            title,
+            owner_id
+          )
+        `)
+        // either I own the offer OR I'm the requester
+        .or(`offers.owner_id.in.(${ids.join(',')}),requester_profile_id.in.(${ids.join(',')})`)
+        .order('created_at', { ascending: false })
+        .limit(50);
 
-if (error) throw error;
+      if (error) throw error;
       const uniq = new Map<string, SharedOffer>();
       for (const r of (data || []) as any[]) {
         if (r.offers?.id) uniq.set(r.offers.id, { id: r.offers.id, title: r.offers.title });
@@ -314,6 +352,8 @@ if (error) throw error;
     setMsgs((m) => [...m, optimistic]);
     onCache(thread.peer_id, (prev) => [...(prev || []), optimistic]);
     setDraft('');
+    // keep pinned when you send
+    requestAnimationFrame(() => scrollToBottom(true));
 
     try {
       const canonicalRequestId = thread.request_ids[0]; // newest
@@ -335,7 +375,7 @@ if (error) throw error;
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [draft, me, thread, onCache]);
+  }, [draft, me, thread, onCache, scrollToBottom]);
 
   if (!thread) {
     return (
@@ -383,14 +423,33 @@ if (error) throw error;
               <a className="rounded border px-2 py-1 text-xs hover:bg-gray-50" href={`/offers/${thread.offer_id}`}>
                 View offer
               </a>
+              {/* Leave chat (desktop) */}
+              <button
+                type="button"
+                className="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                onClick={() => onLeaveChat(thread.peer_id)}
+                aria-label="Leave this chat"
+                title="Leave this chat"
+              >
+                Leave chat
+              </button>
             </div>
           </div>
 
-          {/* Mobile action (profile) */}
+          {/* Mobile actions: profile + leave */}
           <div className="flex justify-end gap-2 px-3 pb-2 md:hidden">
             <a className="rounded border px-2 py-1 text-xs hover:bg-gray-50" href={`/u/${thread.peer_id}`}>
               View profile
             </a>
+            <button
+              type="button"
+              className="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+              onClick={() => onLeaveChat(thread.peer_id)}
+              aria-label="Leave this chat"
+              title="Leave this chat"
+            >
+              Leave chat
+            </button>
           </div>
 
           {shared.length > 0 && (
@@ -410,7 +469,10 @@ if (error) throw error;
         </div>
 
         {/* Messages */}
-        <div className="max-h-[55vh] min-h-[45vh] overflow-auto p-3">
+        <div
+          ref={messagesRef}
+          className="max-h-[55vh] min-h-[45vh] overflow-auto p-3"
+        >
           {msgs.map((m) => {
             const mine = m.sender_id === me;
             return (
@@ -481,6 +543,9 @@ function MessagesContent() {
   // purely for mobile show/hide of the list; CSS handles desktop
   const [showListOnMobile, setShowListOnMobile] = useState(true);
 
+  // locally hidden (left) peers per user
+  const [leftPeers, setLeftPeers] = useState<Set<string>>(new Set());
+
   // Read ?thread (peer id) once on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -489,6 +554,61 @@ function MessagesContent() {
       if (pid) setShowListOnMobile(false);
     }
   }, []);
+
+  // Load hidden/left peers from localStorage for this user
+  useEffect(() => {
+    if (!me || typeof window === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(`hx_left_peers:${me}`);
+      const parsed: string[] = raw ? JSON.parse(raw) : [];
+      setLeftPeers(new Set(parsed));
+    } catch {
+      setLeftPeers(new Set());
+    }
+  }, [me]);
+
+  const saveLeftPeers = useCallback(
+    (next: Set<string>) => {
+      if (!me || typeof window === 'undefined') return;
+      try {
+        localStorage.setItem(`hx_left_peers:${me}`, JSON.stringify([...next]));
+      } catch {}
+    },
+    [me]
+  );
+
+  const handleLeaveChat = useCallback(
+    (peerId: string) => {
+      if (!peerId) return;
+      const ok = typeof window !== 'undefined'
+        ? window.confirm('Leave this chat? You will no longer see it in Messages on this device.')
+        : true;
+      if (!ok) return;
+
+      setLeftPeers((prev) => {
+        const next = new Set(prev);
+        next.add(peerId);
+        saveLeftPeers(next);
+        return next;
+      });
+
+      // If current selection is the one left, go back to the list
+      if (selected?.peer_id === peerId) {
+        setSelected(undefined);
+        setShowListOnMobile(true);
+        if (typeof window !== 'undefined') {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('thread');
+          window.history.replaceState({}, '', url.toString());
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      }
+
+      // Also remove it visually from threads immediately
+      setThreads((prev) => prev.filter((t) => t.peer_id !== peerId));
+    },
+    [saveLeftPeers, selected]
+  );
 
   const setCache = useCallback(
     (peerId: string, next: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])) => {
@@ -635,15 +755,23 @@ function MessagesContent() {
       }
 
       const sorted = Array.from(byPeer.values()).sort((a, b) => (a.last_at < b.last_at ? 1 : -1));
-      setThreads(sorted);
 
-      // Desktop: auto-select first thread if none picked
-      if (!selected && sorted.length > 0) {
-        setSelected(sorted[0]);
+      // filter out "left" peers
+      const filtered = sorted.filter((t) => !leftPeers.has(t.peer_id));
+
+      setThreads(filtered);
+
+      // Desktop: auto-select first thread if none picked (after filter)
+      if (!selected && filtered.length > 0) {
+        setSelected(filtered[0]);
+      } else if (selected && leftPeers.has(selected.peer_id)) {
+        // If the selected one was left, clear selection
+        setSelected(undefined);
+        setShowListOnMobile(true);
       }
 
       // Prefetch first few peer threads into cache
-      const toPrefetch = sorted.slice(0, 3);
+      const toPrefetch = filtered.slice(0, 3);
       for (const t of toPrefetch) {
         if (msgCache[t.peer_id]) continue;
         const { data: m } = await supabase
@@ -662,7 +790,7 @@ function MessagesContent() {
         setMsgCache((prev) => ({ ...prev, [t.peer_id]: mapped }));
       }
     },
-    [msgCache, selected]
+    [msgCache, selected, leftPeers]
   );
 
   useEffect(() => {
@@ -712,6 +840,7 @@ function MessagesContent() {
           initialMsgs={selected ? msgCache[selected.peer_id] : undefined}
           onCache={setCache}
           onBackMobile={backToListMobile}
+          onLeaveChat={handleLeaveChat}
         />
       </div>
     </section>
