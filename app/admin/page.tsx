@@ -933,7 +933,12 @@ function AdminContent() {
                 <li key={u.id} className="rounded border p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="font-medium text-sm truncate">{u.display_name}</div>
+                    <div className="font-medium text-sm truncate">
+                     <a href={`/u/${u.id}`} className="underline">
+                      {u.display_name}
+                    </a>
+                  </div>
+
                       <div className="text-xs text-gray-600 truncate">{userEmails[u.id] ?? '—'}</div>
                       <div className="mt-1 flex flex-wrap gap-2 text-xs text-gray-700">
                         <span className="rounded bg-gray-100 px-2 py-0.5">role: {u.role}</span>
@@ -1029,7 +1034,12 @@ function AdminContent() {
 
                   return (
                     <tr key={u.id} className="border-t">
-                      <td className="px-3 py-2">{u.display_name}</td>
+<td className="px-3 py-2">
+  <a href={`/u/${u.id}`} className="underline">
+    {u.display_name}
+  </a>
+</td>
+
                       <td className="px-3 py-2">{userEmails[u.id] ?? '—'}</td>
                       <td className="px-3 py-2">{u.role}</td>
                       <td className="px-3 py-2">{u.status}</td>
