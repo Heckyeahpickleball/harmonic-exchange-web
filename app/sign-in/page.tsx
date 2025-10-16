@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import Link from 'next/link'
+import { getAuthCallbackUrl, getResetCallbackUrl } from '@/lib/url'  // ⟵ NEW
 
 type Mode = 'signin' | 'signup'
 
@@ -55,7 +56,8 @@ export default function SignInPage() {
       email,
       password,
       options: {
-        emailRedirectTo: `${location.origin}/auth/callback`,
+        // ⟵ use prod URL when current origin is localhost
+        emailRedirectTo: getAuthCallbackUrl(),
         data: {
           first_name: firstName.trim(),
           last_name: lastName.trim(),
@@ -75,7 +77,8 @@ export default function SignInPage() {
     setBusy(true)
     setStatus('Sending password reset link…')
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${location.origin}/auth/callback?type=recovery`,
+      // ⟵ also force correct domain for recovery emails
+      redirectTo: getResetCallbackUrl(),
     })
     setBusy(false)
     setStatus(error ? `Error: ${error.message}` : 'Check your email for a reset link.')
@@ -267,7 +270,7 @@ export default function SignInPage() {
             </div>
           </div>
 
-          {/* Right: brand / art panel — centered better & larger copy */}
+          {/* Right art panel */}
           <div className="relative hidden overflow-hidden rounded-2xl border border-teal-100 bg-gradient-to-br from-teal-600 via-teal-500 to-teal-400 p-8 text-teal-50 shadow-sm sm:flex">
             <div className="relative z-10 m-auto w-full max-w-md text-left">
               <h2 className="text-center text-2xl font-semibold tracking-tight sm:text-3xl">The Flow Economy</h2>
