@@ -2,6 +2,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   sendMagicLink,
   signInWithProvider,
@@ -10,6 +11,7 @@ import {
 } from '@/lib/auth';
 
 export default function AuthPanel() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [mode, setMode] = useState<'signin' | 'signup' | 'magic'>('signin');
@@ -28,8 +30,10 @@ export default function AuthPanel() {
         await sendMagicLink(email); // throws on failure
         setMsg('Check your email for a sign-in link.');
       } else if (mode === 'signup') {
-        await signUpWithEmail(email, pw); // throws on failure
-        setMsg('Account created. Check your email to confirm and then sign in.');
+        const { pendingUrl } = await signUpWithEmail(email, pw); // throws on failure
+        // Send new users to the "Waiting for authorization" page
+        router.push(pendingUrl);
+        return; // stop here; no success message needed
       } else {
         await signInWithEmail(email, pw); // throws on failure
         setMsg('Welcome back!');
