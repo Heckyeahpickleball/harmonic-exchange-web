@@ -1,4 +1,4 @@
-// app/page.tsx  (UPDATED for logged-out Share My Value routing)
+// app/page.tsx  (ADD waves: after Welcome, after Reviews, after About)
 'use client';
 
 import Link from 'next/link';
@@ -56,7 +56,9 @@ function ReviewsCarousel() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const startTimer = () => {
@@ -69,10 +71,14 @@ function ReviewsCarousel() {
 
   useEffect(() => {
     startTimer();
-    return () => { if (timerRef.current) window.clearInterval(timerRef.current); };
+    return () => {
+      if (timerRef.current) window.clearInterval(timerRef.current);
+    };
   }, [rows.length]);
 
-  const onMouseEnter = () => { if (timerRef.current) window.clearInterval(timerRef.current); };
+  const onMouseEnter = () => {
+    if (timerRef.current) window.clearInterval(timerRef.current);
+  };
   const onMouseLeave = () => startTimer();
 
   const onTouchStart: React.TouchEventHandler<HTMLDivElement> = (e) => {
@@ -86,7 +92,7 @@ function ReviewsCarousel() {
     const dx = (startX ?? endX) - endX;
     const threshold = 40;
     if (Math.abs(dx) > threshold && rows.length > 1) {
-      setI((p) => (dx > 0 ? (p + 1) % rows.length : (p === 0 ? rows.length - 1 : p - 1)));
+      setI((p) => (dx > 0 ? (p + 1) % rows.length : p === 0 ? rows.length - 1 : p - 1));
     }
     startTimer();
   };
@@ -137,20 +143,12 @@ function ReviewsCarousel() {
               <div className="mt-1 font-semibold text-[var(--hx-ink)]">
                 {rows[i].offer_title ?? 'An exchange'}
               </div>
-              <p className="mt-2 text-[var(--hx-ink)]">
-                {rows[i].message ?? '—'}
-              </p>
+              <p className="mt-2 text-[var(--hx-ink)]">{rows[i].message ?? '—'}</p>
 
               <div className="mt-4 flex items-center gap-3">
                 {(() => {
-                  const name =
-                    rows[i].receiver_name ??
-                    rows[i].owner_name ??
-                    'Community member';
-                  const avatar =
-                    rows[i].receiver_avatar_url ??
-                    rows[i].owner_avatar_url ??
-                    null;
+                  const name = rows[i].receiver_name ?? rows[i].owner_name ?? 'Community member';
+                  const avatar = rows[i].receiver_avatar_url ?? rows[i].owner_avatar_url ?? null;
 
                   return (
                     <>
@@ -208,17 +206,24 @@ export default function HomePage() {
 
       <section className="hx-cta-strip">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-3 px-4 py-6">
-          <Link href="/browse" className="hx-btn hx-btn--primary">Explore Offerings</Link>
+          <Link href="/browse" className="hx-btn hx-btn--primary">
+            Explore Offerings
+          </Link>
           {loading ? (
             <span className="hx-btn hx-btn--outline-primary">Checking…</span>
           ) : signedIn ? (
-            <>
-            </>
+            <></>
           ) : (
-            <Link href="/sign-in" className="hx-btn hx-btn--outline-primary">Join the Community</Link>
+            <Link href="/sign-in" className="hx-btn hx-btn--outline-primary">
+              Join the Community
+            </Link>
           )}
-          <Link href="#about" className="hx-btn hx-btn--secondary">About</Link>
-          <Link href="#guidelines" className="hx-btn hx-btn--secondary">Community Guidelines</Link>
+          <Link href="#about" className="hx-btn hx-btn--secondary">
+            About
+          </Link>
+          <Link href="#guidelines" className="hx-btn hx-btn--secondary">
+            Community Guidelines
+          </Link>
         </div>
       </section>
 
@@ -230,18 +235,21 @@ export default function HomePage() {
               Welcome to Harmonic Exchange: the Flow Economy Experiment
             </h2>
             <p className="mx-auto mt-2 max-w-2xl text-[var(--hx-muted)]">
-              Harmonic Exchange is a post-currency, gift-first way of sharing
-              value. People offer <strong> time</strong>, <strong> products</strong>,
-              <strong> services</strong>, <strong> education</strong>,
-              <strong> coaching</strong>, <strong> presence</strong>, and
-              <strong> creativity</strong>. Everything is given freely and
-              received with dignity.
+              Harmonic Exchange is a post-currency, gift-first way of sharing value. People offer{' '}
+              <strong> time</strong>, <strong> products</strong>, <strong> services</strong>,{' '}
+              <strong> education</strong>, <strong> coaching</strong>, <strong> presence</strong>,
+              and <strong> creativity</strong>. Everything is given freely and received with dignity.
             </p>
           </div>
         </div>
       </section>
 
+      {/* wave between Welcome and Reviews */}
+      <WaveDivider />
+
       <ReviewsCarousel />
+
+      {/* NEW wave directly under Reviews (above About) */}
       <WaveDivider />
 
       {/* About */}
@@ -249,13 +257,15 @@ export default function HomePage() {
         <div className="mx-auto max-w-6xl px-4 pt-8 pb-10 sm:pt-10 sm:pb-12">
           <h3 className="text-center text-2xl font-bold">About the Movement</h3>
           <p className="mx-auto mt-3 max-w-3xl text-center text-[var(--hx-muted)]">
-            Harmonic Exchange explores a world where human value flows
-            freely—guided by resonance, trust, and mutual care. We’re
-            prototyping a community-led, post-currency practice where people
-            connect, offer, and receive without obligation or tallying.
+            Harmonic Exchange explores a world where human value flows freely—guided by resonance,
+            trust, and mutual care. We’re prototyping a community-led, post-currency practice where
+            people connect, offer, and receive without obligation or tallying.
           </p>
         </div>
       </section>
+
+      {/* wave directly under About */}
+      <WaveDivider />
 
       {/* Why */}
       <section style={{ background: 'var(--hx-cream)' }}>
@@ -275,9 +285,8 @@ export default function HomePage() {
             <h3 className="hx-heading-title text-2xl font-bold">Why Harmonic Exchange is different</h3>
             <div className="hx-heading-accent" />
             <p className="mt-4 mx-auto max-w-prose text-center font-semibold text-[var(--hx-muted)]">
-              This isn’t bartering or transactional. It’s a flow economy where
-              value is shared—not counted—and guided by resonance, trust, and
-              intuitive reciprocity.
+              This isn’t bartering or transactional. It’s a flow economy where value is shared—not
+              counted—and guided by resonance, trust, and intuitive reciprocity.
             </p>
 
             <div className="mt-6 space-y-4">
@@ -298,6 +307,7 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* existing wave kept after 'Why' */}
       <WaveDivider />
 
       {/* How it works */}
@@ -324,8 +334,12 @@ export default function HomePage() {
           </div>
 
           <div className="mt-8 flex justify-center gap-3">
-            <Link href={signedIn ? '/offers/new' : '/sign-in'} className="hx-btn hx-btn--primary">Share My Value</Link>
-            <Link href="/browse" className="hx-btn hx-btn--outline-primary">See Offerings</Link>
+            <Link href={signedIn ? '/offers/new' : '/sign-in'} className="hx-btn hx-btn--primary">
+              Share My Value
+            </Link>
+            <Link href="/browse" className="hx-btn hx-btn--outline-primary">
+              See Offerings
+            </Link>
           </div>
         </div>
       </section>
@@ -342,9 +356,8 @@ export default function HomePage() {
             <li>Celebrate completion—share gratitude if you wish.</li>
           </ul>
           <p className="mx-auto mt-6 max-w-3xl text-center text-white/85">
-            This is a living experiment. We learn by doing. Local and global
-            chapters welcome you to participate, share updates, and help evolve
-            the practice.
+            This is a living experiment. We learn by doing. Local and global chapters welcome you to
+            participate, share updates, and help evolve the practice.
           </p>
           <div className="mt-6 text-center">
             <Link href="/community-guidelines" className="hx-btn hx-btn--secondary">
@@ -359,13 +372,25 @@ export default function HomePage() {
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-6 text-sm text-[var(--hx-muted)]">
           <span>© {new Date().getFullYear()} Harmonic Exchange</span>
           <div className="flex flex-wrap items-center gap-4">
-            <Link href="/browse" className="hx-link">Offerings</Link>
-            <Link href="/offers/new" className="hx-link">Share My Value</Link>
-            <Link href="/profile" className="hx-link">Create Space</Link>
+            <Link href="/browse" className="hx-link">
+              Offerings
+            </Link>
+            <Link href="/offers/new" className="hx-link">
+              Share My Value
+            </Link>
+            <Link href="/profile" className="hx-link">
+              Create Space
+            </Link>
             <span className="opacity-40">•</span>
-            <Link href="/community-guidelines" className="hx-link">Community Guidelines</Link>
-            <Link href="/terms" className="hx-link">Terms</Link>
-            <Link href="/privacy" className="hx-link">Privacy</Link>
+            <Link href="/community-guidelines" className="hx-link">
+              Community Guidelines
+            </Link>
+            <Link href="/terms" className="hx-link">
+              Terms
+            </Link>
+            <Link href="/privacy" className="hx-link">
+              Privacy
+            </Link>
           </div>
         </div>
       </footer>
@@ -387,7 +412,8 @@ function WaveDivider() {
         </defs>
         <path
           d="M0,80 C200,30 360,130 600,80 C840,30 1000,130 1200,80 L1200,140 L0,140 Z"
-          fill="url(#g)" opacity="0.85"
+          fill="url(#g)"
+          opacity="0.85"
         />
       </svg>
     </div>
