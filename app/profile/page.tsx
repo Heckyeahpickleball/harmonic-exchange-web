@@ -389,63 +389,63 @@ export default function ProfilePage() {
 
         {/* Header content */}
         <div className="relative px-4 pt-1 pb-2 md:px-6">
-          {/* MOBILE */}
-          <div className="md:hidden relative">
-            {/* Avatar — nudged a tad left */}
-            <div className="absolute -top-12 left-0.5 h-24 w-24 rounded-full border-4 border-white overflow-hidden bg-slate-100">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={form.avatar_url || '/images/placeholder-avatar.png'}
-                alt="Avatar"
-                className="h-full w-full object-cover"
-              />
-            </div>
+{/* MOBILE */}
+<div className="md:hidden relative">
+  {/* Avatar — absolute over the cover */}
+  <div className="absolute -top-12 left-1.5 h-24 w-24 rounded-full border-4 border-white overflow-hidden bg-slate-100">
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    <img
+      src={form.avatar_url || '/images/placeholder-avatar.png'}
+      alt="Avatar"
+      className="h-full w-full object-cover"
+    />
+  </div>
 
-            {/* Name row — tiny gap under cover */}
-            <div className="pl?[123px] mt-0">
-              <div className="flex items-end gap-2">
-                <h1 className="truncate text-[25px] leading-[1.1] font-bold">
-                  {form.display_name || 'Unnamed'}
-                </h1>
-                {profile?.role && (
-                  <span className="mb-[2px] rounded-full border px-2 py-0.5 text-[10px] capitalize text-gray-700">
-                    {profile.role}
-                  </span>
-                )}
-              </div>
-            </div>
+  {/* Name + role — to the RIGHT of the avatar on the same line */}
+  <div className="pl-[116px] pt-1">
+    <div className="flex items-end gap-2">
+      <h1 className="truncate text-[25px] leading-[1.1] font-bold">
+        {form.display_name || 'Unnamed'}
+      </h1>
+      {profile?.role && (
+        <span className="mb-[2px] rounded-full border px-2 py-0.5 text-[10px] capitalize text-gray-700">
+          {profile.role}
+        </span>
+      )}
+    </div>
 
-            {/* Location + Member since */}
-            <div className="pl-[116px] mt-0.5 text-[12px] text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis">
-              {form.area_city || form.area_country
-                ? [form.area_city, form.area_country].filter(Boolean).join(', ')
-                : '—'}
-              {memberSince && ` • Member since ${memberSince}`}
-            </div>
+    {/* Location + Member since (stays under the name, still aligned right of avatar) */}
+    <div className="mt-0.5 text-[12px] text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis">
+      {form.area_city || form.area_country
+        ? [form.area_city, form.area_country].filter(Boolean).join(', ')
+        : '—'}
+      {memberSince && ` • Member since ${memberSince}`}
+    </div>
+  </div>
 
-            {/* Badges — centered line */}
-            {!!clusterBadges.length && (
-              <div className="mt-1 flex justify-center">
-                <BadgeCluster badges={clusterBadges.slice(0, 3)} size={48} className="gap-1.5" href="/profile/badges" />
-              </div>
-            )}
-            {!clusterBadges.length && badgesMsg && (
-              <p className="text-xs text-amber-700 mt-1 text-center">{badgesMsg}</p>
-            )}
+  {/* Badges — centered line */}
+  {!!clusterBadges.length && (
+    <div className="mt-1 flex justify-center">
+      <BadgeCluster badges={clusterBadges.slice(0, 3)} size={48} className="gap-1.5" href="/profile/badges" />
+    </div>
+  )}
+  {!clusterBadges.length && badgesMsg && (
+    <p className="text-xs text-amber-700 mt-1 text-center">{badgesMsg}</p>
+  )}
 
-            {/* Mobile actions */}
-            {!isMe && profile?.id && (
-              <div className="mt-2 flex justify-center">
-                <Link
-                  href={`/messages?thread=${profile.id}`}
-                  className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
-                  title="Send a message"
-                >
-                  Message
-                </Link>
-              </div>
-            )}
-          </div>
+  {/* Mobile actions */}
+  {!isMe && profile?.id && (
+    <div className="mt-2 flex justify-center">
+      <Link
+        href={`/messages?thread=${profile.id}`}
+        className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
+        title="Send a message"
+      >
+        Message
+      </Link>
+    </div>
+  )}
+</div>
 
           {/* DESKTOP/TABLET */}
           <div className="hidden md:grid md:grid-cols-12 md:items-start">
