@@ -1,4 +1,4 @@
-// components/MessageButton.tsx
+// /components/MessageButton.tsx
 'use client';
 
 import { useState } from 'react';
@@ -20,7 +20,7 @@ export default function MessageButton({ toId, className = '', children }: Props)
     if (!toId) return;
     setBusy(true);
     try {
-      // auth
+      // --- 1. Get current user ---
       const { data: auth } = await supabase.auth.getUser();
       const me = auth?.user?.id ?? null;
       if (!me) {
@@ -29,45 +29,61 @@ export default function MessageButton({ toId, className = '', children }: Props)
       }
       if (me === toId) return;
 
-      // find existing request in either direction
+      // --- 2. Try to find existing request ---
       const { data: existing } = await supabase
         .from('requests')
-        .select('id, offers!inner(owner_id)')
+        .select('id, offers!left(owner_id)')
         .or(
           `and(offers.owner_id.eq.${toId},requester_profile_id.eq.${me}),and(offers.owner_id.eq.${me},requester_profile_id.eq.${toId})`
         )
         .order('created_at', { ascending: false })
         .limit(1);
 
-      if (existing && existing.length > 0) {
-        const req = existing[0] as any;
-        // ✅ Always route to /messages now
-        router.push(`/messages?thread=${req.id}`);
-        return;
+      // --- 3. If none exists, create a minimal one safely ---
+      if (!existing || existing.length === 0) {
+        // Try to anchor to peer’s most recent offer
+        const { data: peerOffers } = await supabase
+          .from('offers')
+          .select('id')
+          .eq('owner_id', toId)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        const offerId = peerOffers?.[0]?.id ?? null;
+
+        // If peer has no offers, create a placeholder "Direct message" offer owned by me
+        let finalOfferId = offerId;
+        if (!finalOfferId) {
+          const { data: createdOffer, error: offerError } = await supabase
+            .from('offers')
+            .insert([
+              {
+                owner_id: me,
+                title: 'Direct message',
+                offer_type: 'dm',
+                is_online: true,
+                status: 'archived', // safe fallback
+              },
+            ])
+            .select('id')
+            .single();
+          if (offerError) console.warn('Offer insert failed:', offerError);
+          finalOfferId = createdOffer?.id ?? null;
+        }
+
+        // Create the request — include a minimal note to satisfy NOT NULL
+        if (finalOfferId) {
+          const { error: reqError } = await supabase
+            .from('requests')
+            .insert([{ offer_id: finalOfferId, requester_profile_id: me, note: '' }]);
+          if (reqError) console.warn('Request insert failed:', reqError);
+        }
       }
 
-      // else create anchored to most-recent active offer, if any
-      const { data: peerOffers } = await supabase
-        .from('offers')
-        .select('id')
-        .eq('owner_id', toId)
-        .eq('status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      const offerId = peerOffers?.[0]?.id as string | undefined;
-      if (!offerId) {
-        router.push('/messages');
-        return;
-      }
-
-      const { data: newReq } = await supabase
-        .from('requests')
-        .insert([{ offer_id: offerId, requester_profile_id: me }])
-        .select('id')
-        .single();
-
-      router.push(`/messages?thread=${newReq?.id}`);
+      // --- 4. Navigate to chat ---
+      router.push(`/messages?thread=${toId}`);
+    } catch (err) {
+      console.error('Failed to start chat:', err);
     } finally {
       setBusy(false);
     }

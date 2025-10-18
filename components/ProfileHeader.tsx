@@ -20,7 +20,7 @@ type Profile = {
 };
 
 type ExpandedBadge = {
-  profile_id: string;
+  profile_id: string | null;
   badge_code: string | null;
   label: string | null;
   track: 'give' | 'receive' | 'streak' | 'milestone' | null;

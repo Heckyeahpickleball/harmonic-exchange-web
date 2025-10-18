@@ -18,20 +18,13 @@ export const dynamic = 'force-dynamic';
 type ChatMsg = { id: string; created_at: string; text: string; sender_id: string };
 
 type Thread = {
-  // person-to-person thread (merged across requests with this peer)
   peer_id: string;
   peer_name?: string;
   peer_avatar?: string | null;
-
-  // all underlying requests with this peer (newest first)
   request_ids: string[];
   offer_ids: string[];
-
-  // display helpers taken from the newest underlying request
   offer_id: string;
   offer_title?: string;
-
-  // last activity/preview across all requests
   last_text?: string;
   last_at: string;
   unread: number;
@@ -62,7 +55,7 @@ function Avatar({
   size?: number;
   alt?: string;
 }) {
-  const s = size + 'px';
+  const s = `${size}px`;
   return url ? (
     <Image
       src={url}
@@ -103,9 +96,7 @@ const ThreadsList = memo(function ThreadsList({
 
       <ul className="divide-y rounded border md:border-0">
         {threads.length === 0 && (
-          <li className="px-3 py-3 text-sm text-gray-600">
-            No conversations yet.
-          </li>
+          <li className="px-3 py-3 text-sm text-gray-600">No conversations yet.</li>
         )}
 
         {threads.map((t) => {
@@ -113,7 +104,10 @@ const ThreadsList = memo(function ThreadsList({
           return (
             <li
               key={t.peer_id}
-              className={['cursor-pointer px-3 py-3 hover:bg-gray-50', active ? 'bg-gray-100' : ''].join(' ')}
+              className={[
+                'cursor-pointer px-3 py-3 hover:bg-gray-50',
+                active ? 'bg-gray-100' : '',
+              ].join(' ')}
               onClick={() => onSelect(t)}
             >
               <div className="flex items-center gap-3">
@@ -121,15 +115,11 @@ const ThreadsList = memo(function ThreadsList({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="truncate font-semibold">
-                        {t.peer_name || 'Someone'}
-                      </div>
+                      <div className="truncate font-semibold">{t.peer_name || 'Someone'}</div>
                       <div className="truncate text-gray-700 text-[13px]">
                         {t.offer_title || '—'}
                       </div>
-                      <div className="truncate text-xs text-gray-500">
-                        {t.last_text || ''}
-                      </div>
+                      <div className="truncate text-xs text-gray-500">{t.last_text || ''}</div>
                     </div>
                     <div className="shrink-0 text-right">
                       <div className="text-[11px] text-gray-500">
@@ -175,66 +165,152 @@ function ChatPane({
   const [shared, setShared] = useState<SharedOffer[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // NEW: messages container ref for auto-scroll
   const messagesRef = useRef<HTMLDivElement>(null);
   const lastThreadRef = useRef<string | undefined>(undefined);
 
   const scrollToBottom = useCallback((smooth = true) => {
     const el = messagesRef.current;
     if (!el) return;
-    const behavior = smooth ? 'smooth' : 'auto';
-    el.scrollTo({ top: el.scrollHeight, behavior });
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
   }, []);
 
-  // Reset messages when thread changes
+  // Reset messages & draft on thread change
   useEffect(() => {
     setMsgs(initialMsgs ?? []);
+    setDraft('');
+    setErr(null);
   }, [thread?.peer_id, initialMsgs]);
 
-  // On thread open/switch, jump to bottom once
+  // Jump to bottom on open/switch
   useEffect(() => {
     if (!thread) return;
     if (lastThreadRef.current !== thread.peer_id) {
       lastThreadRef.current = thread.peer_id;
-      // wait a frame so DOM has rendered messages
       requestAnimationFrame(() => scrollToBottom(false));
     }
   }, [thread, scrollToBottom]);
 
-  // When new messages arrive, keep pinned to bottom if already near bottom
+  // Keep pinned if near bottom on new msgs
   useEffect(() => {
     const el = messagesRef.current;
     if (!el) return;
-    const threshold = 120; // px from bottom considered "near bottom"
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distanceFromBottom <= threshold) {
-      scrollToBottom(true);
-    }
+    const threshold = 120;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distance <= threshold) scrollToBottom(true);
   }, [msgs, scrollToBottom]);
 
-  const canSend = useMemo(
-    () => !!thread && !!draft.trim() && !!me && !!thread.peer_id && thread.request_ids.length > 0,
-    [thread, draft, me]
+  // We allow send even if no request exists yet; we'll create one on the fly.
+  const canSend = useMemo(() => !!thread && !!draft.trim() && !!me, [thread, draft, me]);
+
+  // ---- Helpers to ensure a request exists (no offer required) ----
+  const createPlaceholderOfferOwnedByMe = useCallback(
+    async (): Promise<string | null> => {
+      // (Kept for compatibility, no longer used by default path)
+      const { data, error } = await supabase
+        .from('offers')
+        .insert([
+          {
+            owner_id: me,
+            title: 'Direct message',
+            offer_type: 'dm',
+            is_online: true,
+            city: null,
+            country: null,
+            images: [],
+            status: 'archived',
+          },
+        ])
+        .select('id')
+        .single();
+      if (error) return null;
+      return (data as any)?.id ?? null;
+    },
+    [me]
   );
 
-  // Load/mark messages across ALL request_ids in this peer thread
+  // RLS-friendly: look up existing requests both directions; if none, anchor to a peer-owned offer with me as requester.
+  const ensureRequestForThread = useCallback(
+    async (peerId: string): Promise<{ request_id: string; offer_id: string | null } | null> => {
+      // A) me -> peer
+      {
+        const { data, error } = await supabase
+          .from('requests')
+          .select('id, offer_id, offers!inner(id, owner_id)')
+          .eq('requester_profile_id', me)
+          .eq('offers.owner_id', peerId)
+          .order('created_at', { ascending: false })
+          .maybeSingle();
+
+        if (!error && data?.id) {
+          return { request_id: (data as any).id, offer_id: (data as any).offer_id ?? null };
+        }
+      }
+
+      // B) peer -> me
+      {
+        const { data, error } = await supabase
+          .from('requests')
+          .select('id, offer_id, offers!inner(id, owner_id)')
+          .eq('requester_profile_id', peerId)
+          .eq('offers.owner_id', me)
+          .order('created_at', { ascending: false })
+          .maybeSingle();
+
+        if (!error && data?.id) {
+          return { request_id: (data as any).id, offer_id: (data as any).offer_id ?? null };
+        }
+      }
+
+      // C) Anchor to peer's latest visible offer (any status); requester = me
+      const { data: peerOffer } = await supabase
+        .from('offers')
+        .select('id')
+        .eq('owner_id', peerId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!peerOffer?.id) return null;
+
+      const { data: inserted, error: insErr } = await supabase
+        .from('requests')
+        .insert([{ offer_id: peerOffer.id, requester_profile_id: me }])
+        .select('id, offer_id')
+        .single();
+
+      if (insErr || !inserted?.id) return null;
+      return { request_id: inserted.id, offer_id: inserted.offer_id ?? null };
+    },
+    [me]
+  );
+  // ----------------------------------------------------------------
+
+  // Load/mark messages across all request_ids
   const reqCounter = useRef(0);
   const loadThread = useCallback(async () => {
     if (!thread) return;
     setErr(null);
-    const myTurn = ++reqCounter.current;
+    const turn = ++reqCounter.current;
 
-    // Pull all notifications for any of the request_ids
+    if (!thread.request_ids.length) {
+      setMsgs([]);
+      onCache(thread.peer_id, []);
+      return;
+    }
+
     const { data, error } = await supabase
       .from('notifications')
       .select('id, created_at, type, data, read_at')
       .eq('profile_id', me)
       .or('type.eq.message,type.eq.message_received')
-      .in('data->>request_id', thread.request_ids) // key change: merge across requests
+      .in('data->>request_id', thread.request_ids)
       .order('created_at', { ascending: true });
 
-    if (reqCounter.current !== myTurn) return;
-    if (error) return setErr(error.message);
+    if (reqCounter.current !== turn) return;
+    if (error) {
+      setErr(error.message);
+      return;
+    }
 
     const mapped: ChatMsg[] = (data || []).map((row: any) => ({
       id: row.id,
@@ -246,7 +322,6 @@ function ChatPane({
     setMsgs(mapped);
     onCache(thread.peer_id, mapped);
 
-    // mark all unread from this peer (across request_ids)
     await supabase
       .from('notifications')
       .update({ read_at: new Date().toISOString() })
@@ -255,33 +330,26 @@ function ChatPane({
       .is('read_at', null)
       .in('data->>request_id', thread.request_ids);
 
-    // ensure we’re at bottom after load
     requestAnimationFrame(() => scrollToBottom(false));
   }, [me, thread, onCache, scrollToBottom]);
 
-  // shared offers strip between the two users
+  // Shared offers between the two users
   const loadSharedOffers = useCallback(async () => {
     if (!thread) return;
     try {
       const ids = [me, thread.peer_id];
-
       const { data, error } = await supabase
         .from('requests')
         .select(`
           id,
           offer_id,
-          offers!inner (
-            id,
-            title,
-            owner_id
-          )
+          offers!inner ( id, title, owner_id )
         `)
-        // either I own the offer OR I'm the requester
         .or(`offers.owner_id.in.(${ids.join(',')}),requester_profile_id.in.(${ids.join(',')})`)
         .order('created_at', { ascending: false })
         .limit(50);
-
       if (error) throw error;
+
       const uniq = new Map<string, SharedOffer>();
       for (const r of (data || []) as any[]) {
         if (r.offers?.id) uniq.set(r.offers.id, { id: r.offers.id, title: r.offers.title });
@@ -297,9 +365,9 @@ function ChatPane({
     void loadSharedOffers();
   }, [loadThread, loadSharedOffers]);
 
-  // realtime across all request_ids (filter by profile_id; guard in handler)
+  // Realtime across all request_ids (guard inside handler)
   useEffect(() => {
-    if (!thread) return;
+    if (!thread || !thread.request_ids.length) return;
     const ch = supabase
       .channel(`realtime:messages:peer:${thread.peer_id}:${me}`)
       .on(
@@ -336,30 +404,45 @@ function ChatPane({
     };
   }, [me, thread, onCache]);
 
-  // Send on the newest underlying request so new requests don't fork a new chat
+  // Send (creates/anchors request if needed)
   const handleSend = useCallback(async () => {
-    if (!thread || !draft.trim() || thread.request_ids.length === 0) return;
+    if (!thread) return;
+    const text = draft.trim();
+    if (!text) return;
+
     setErr(null);
     setSending(true);
 
-    const text = draft.trim();
-    const optimistic: ChatMsg = {
-      id: `tmp-${Math.random().toString(36).slice(2)}`,
-      created_at: new Date().toISOString(),
-      text,
-      sender_id: me,
-    };
-    setMsgs((m) => [...m, optimistic]);
-    onCache(thread.peer_id, (prev) => [...(prev || []), optimistic]);
-    setDraft('');
-    // keep pinned when you send
-    requestAnimationFrame(() => scrollToBottom(true));
-
     try {
-      const canonicalRequestId = thread.request_ids[0]; // newest
-      const canonicalOfferId = thread.offer_id;
+      // Ensure anchor request exists with RLS-safe strategy
+      let canonicalRequestId = thread.request_ids[0];
+      let canonicalOfferId: string | null = thread.offer_id || null;
 
-      const payload = { request_id: canonicalRequestId, offer_id: canonicalOfferId, sender_id: me, text };
+      if (!canonicalRequestId) {
+        const ensured = await ensureRequestForThread(thread.peer_id);
+        if (!ensured) {
+          setErr("We couldn't create a new chat yet. Try again in a moment.");
+          setSending(false);
+          return;
+        }
+        canonicalRequestId = ensured.request_id;
+        canonicalOfferId = ensured.offer_id;
+      }
+
+      const optimistic: ChatMsg = {
+        id: `tmp-${Math.random().toString(36).slice(2)}`,
+        created_at: new Date().toISOString(),
+        text,
+        sender_id: me,
+      };
+      setMsgs((m) => [...m, optimistic]);
+      onCache(thread.peer_id, (prev) => [...(prev || []), optimistic]);
+      setDraft('');
+      requestAnimationFrame(() => scrollToBottom(true));
+
+      const payload: any = { request_id: canonicalRequestId, sender_id: me, text };
+      if (canonicalOfferId) payload.offer_id = canonicalOfferId;
+
       const now = new Date().toISOString();
       const { error } = await supabase.from('notifications').insert([
         { profile_id: me, type: 'message', data: payload, read_at: now },
@@ -368,14 +451,11 @@ function ChatPane({
       if (error) throw error;
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to send message.');
-      setMsgs((m) => m.filter((x) => x.id !== optimistic.id));
-      onCache(thread.peer_id, (prev) => (prev || []).filter((x) => x.id !== optimistic.id));
-      setDraft(text);
     } finally {
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [draft, me, thread, onCache, scrollToBottom]);
+  }, [draft, me, thread, onCache, scrollToBottom, ensureRequestForThread]);
 
   if (!thread) {
     return (
@@ -390,7 +470,7 @@ function ChatPane({
   return (
     <div className="flex-1">
       <div className="rounded border">
-        {/* Header: Back (mobile) + peer + shared offers */}
+        {/* Header */}
         <div className="border-b">
           <div className="flex items-center justify-between px-3 py-2">
             <div className="flex items-center gap-2 min-w-0">
@@ -409,9 +489,7 @@ function ChatPane({
                 <div className="truncate text-sm text-gray-600">
                   Chat with {thread.peer_name || 'Someone'}
                 </div>
-                <div className="truncate font-semibold">
-                  {thread.offer_title || '—'}
-                </div>
+                <div className="truncate font-semibold">{thread.offer_title || '—'}</div>
               </div>
             </div>
 
@@ -423,7 +501,6 @@ function ChatPane({
               <a className="rounded border px-2 py-1 text-xs hover:bg-gray-50" href={`/offers/${thread.offer_id}`}>
                 View offer
               </a>
-              {/* Leave chat (desktop) */}
               <button
                 type="button"
                 className="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
@@ -436,7 +513,7 @@ function ChatPane({
             </div>
           </div>
 
-          {/* Mobile actions: profile + leave */}
+          {/* Mobile actions */}
           <div className="flex justify-end gap-2 px-3 pb-2 md:hidden">
             <a className="rounded border px-2 py-1 text-xs hover:bg-gray-50" href={`/u/${thread.peer_id}`}>
               View profile
@@ -469,10 +546,7 @@ function ChatPane({
         </div>
 
         {/* Messages */}
-        <div
-          ref={messagesRef}
-          className="max-h-[55vh] min-h-[45vh] overflow-auto p-3"
-        >
+        <div ref={messagesRef} className="max-h-[55vh] min-h-[45vh] overflow-auto p-3">
           {msgs.map((m) => {
             const mine = m.sender_id === me;
             return (
@@ -540,22 +614,23 @@ function MessagesContent() {
   const [selected, setSelected] = useState<Thread | undefined>(undefined);
   const [msgCache, setMsgCache] = useState<Record<string, ChatMsg[]>>({});
 
-  // purely for mobile show/hide of the list; CSS handles desktop
   const [showListOnMobile, setShowListOnMobile] = useState(true);
-
-  // locally hidden (left) peers per user
   const [leftPeers, setLeftPeers] = useState<Set<string>>(new Set());
+  const [desiredPeer, setDesiredPeer] = useState<string | undefined>(undefined);
 
-  // Read ?thread (peer id) once on mount
+  // Read ?thread on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const sp = new URLSearchParams(window.location.search);
-      const pid = sp.get('thread');
-      if (pid) setShowListOnMobile(false);
+      const pid = sp.get('thread') || undefined;
+      if (pid) {
+        setDesiredPeer(pid);
+        setShowListOnMobile(false);
+      }
     }
   }, []);
 
-  // Load hidden/left peers from localStorage for this user
+  // Load hidden peers
   useEffect(() => {
     if (!me || typeof window === 'undefined') return;
     try {
@@ -580,9 +655,10 @@ function MessagesContent() {
   const handleLeaveChat = useCallback(
     (peerId: string) => {
       if (!peerId) return;
-      const ok = typeof window !== 'undefined'
-        ? window.confirm('Leave this chat? You will no longer see it in Messages on this device.')
-        : true;
+      const ok =
+        typeof window !== 'undefined'
+          ? window.confirm('Leave this chat? You will no longer see it in Messages on this device.')
+          : true;
       if (!ok) return;
 
       setLeftPeers((prev) => {
@@ -592,7 +668,6 @@ function MessagesContent() {
         return next;
       });
 
-      // If current selection is the one left, go back to the list
       if (selected?.peer_id === peerId) {
         setSelected(undefined);
         setShowListOnMobile(true);
@@ -604,7 +679,6 @@ function MessagesContent() {
         }
       }
 
-      // Also remove it visually from threads immediately
       setThreads((prev) => prev.filter((t) => t.peer_id !== peerId));
     },
     [saveLeftPeers, selected]
@@ -621,10 +695,97 @@ function MessagesContent() {
     []
   );
 
-  // Build peer-grouped threads
+  // (Kept for parity with earlier version; not used by default path)
+  const createPlaceholderOfferOwnedByMe = useCallback(
+    async (): Promise<string | null> => {
+      const { data, error } = await supabase
+        .from('offers')
+        .insert([
+          {
+            owner_id: me,
+            title: 'Direct message',
+            offer_type: 'dm',
+            is_online: true,
+            city: null,
+            country: null,
+            images: [],
+            status: 'archived',
+          },
+        ])
+        .select('id')
+        .single();
+      if (error) return null;
+      return (data as any)?.id ?? null;
+    },
+    [me]
+  );
+
+  // RLS-friendly counterpart used for deep-link synth
+  const ensureRequestWithPeer = useCallback(
+    async (
+      uid: string,
+      peerId: string
+    ): Promise<{ request_id: string | null; offer_id: string | null; offer_title?: string } | null> => {
+      // A) uid -> peer
+      {
+        const { data } = await supabase
+          .from('requests')
+          .select('id, offer_id, offers!inner(id, title, owner_id)')
+          .eq('requester_profile_id', uid)
+          .eq('offers.owner_id', peerId)
+          .order('created_at', { ascending: false })
+          .maybeSingle();
+
+        if (data?.id) {
+          const row: any = data;
+          return { request_id: row.id, offer_id: row.offer_id ?? null, offer_title: row.offers?.title };
+        }
+      }
+
+      // B) peer -> uid
+      {
+        const { data } = await supabase
+          .from('requests')
+          .select('id, offer_id, offers!inner(id, title, owner_id)')
+          .eq('requester_profile_id', peerId)
+          .eq('offers.owner_id', uid)
+          .order('created_at', { ascending: false })
+          .maybeSingle();
+
+        if (data?.id) {
+          const row: any = data;
+          return { request_id: row.id, offer_id: row.offer_id ?? null, offer_title: row.offers?.title };
+        }
+      }
+
+      // C) Anchor to peer's latest visible offer; requester = uid
+      const { data: peerOffer } = await supabase
+        .from('offers')
+        .select('id, title')
+        .eq('owner_id', peerId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!peerOffer?.id) return { request_id: null, offer_id: null, offer_title: undefined };
+
+      const { data: inserted, error: insErr } = await supabase
+        .from('requests')
+        .insert([{ offer_id: peerOffer.id, requester_profile_id: uid }])
+        .select('id')
+        .single();
+
+      if (!insErr && inserted?.id) {
+        return { request_id: inserted.id, offer_id: peerOffer.id, offer_title: (peerOffer as any).title };
+      }
+      return { request_id: null, offer_id: peerOffer.id, offer_title: (peerOffer as any).title };
+    },
+    []
+  );
+
+  // Build threads grouped by peer
   const buildThreads = useCallback(
     async (uid: string) => {
-      // 1) pull all message notifications for me
       const { data, error } = await supabase
         .from('notifications')
         .select('id, created_at, type, read_at, data')
@@ -634,7 +795,6 @@ function MessagesContent() {
         .limit(800);
       if (error) throw error;
 
-      // Aggregate by request first (to compute per-request last activity/unread)
       type Agg = { last_at: string; last_text?: string; offer_id?: string; unread: number };
       const byReq = new Map<string, Agg>();
 
@@ -660,42 +820,39 @@ function MessagesContent() {
       }
 
       const reqIds = Array.from(byReq.keys());
-      if (reqIds.length === 0) {
-        setThreads([]);
-        setSelected(undefined);
-        setShowListOnMobile(true);
-        return;
-      }
 
-      // 2) join requests to learn each request's owner/requester and offer title
-      const { data: reqRows } = await supabase
-        .from('requests')
-        .select(`id, offer_id, requester_profile_id, offers!inner ( id, title, owner_id )`)
-        .in('id', reqIds);
+      let reqRows: any[] = [];
+      if (reqIds.length > 0) {
+        const { data: reqRowsData } = await supabase
+          .from('requests')
+          .select(`id, offer_id, requester_profile_id, offers!left ( id, title, owner_id )`)
+          .in('id', reqIds);
+        reqRows = (reqRowsData || []) as any[];
+      }
 
       type PartialReq = {
         id: string;
-        offer_id: string;
-        owner_id: string;
+        offer_id: string | null;
+        owner_id: string | null;
         requester_id: string;
         title?: string;
       };
 
       const reqList: PartialReq[] = [];
-      for (const r of (reqRows || []) as any[]) {
+      for (const r of reqRows) {
         reqList.push({
           id: r.id,
-          offer_id: r.offer_id,
-          owner_id: r.offers?.owner_id,
+          offer_id: r.offer_id ?? null,
+          owner_id: r.offers?.owner_id ?? null,
           requester_id: r.requester_profile_id,
           title: r.offers?.title,
         });
       }
 
-      // 3) group requests by peer (other person)
       const byPeer = new Map<string, Thread>();
 
       for (const r of reqList) {
+        if (!r.owner_id) continue;
         const peer_id = uid === r.owner_id ? r.requester_id : r.owner_id;
         const agg = byReq.get(r.id)!;
 
@@ -704,29 +861,26 @@ function MessagesContent() {
           byPeer.set(peer_id, {
             peer_id,
             request_ids: [r.id],
-            offer_ids: [r.offer_id],
-            offer_id: r.offer_id,
+            offer_ids: r.offer_id ? [r.offer_id] : [],
+            offer_id: r.offer_id || '',
             offer_title: r.title,
             last_text: agg.last_text,
             last_at: agg.last_at,
             unread: agg.unread,
           });
         } else {
-          // push and keep newest-first ordering of request_ids
           existing.request_ids.push(r.id);
-          existing.offer_ids.push(r.offer_id);
-          // Update "display" fields if this request is newer
+          if (r.offer_id) existing.offer_ids.push(r.offer_id);
           if (agg.last_at > existing.last_at) {
             existing.last_at = agg.last_at;
             existing.last_text = agg.last_text;
-            existing.offer_id = r.offer_id;
+            if (r.offer_id) existing.offer_id = r.offer_id;
             existing.offer_title = r.title;
           }
           existing.unread += agg.unread;
         }
       }
 
-      // 4) hydrate peer names/avatars
       const peers = Array.from(byPeer.keys());
       if (peers.length > 0) {
         const { data: profiles } = await supabase
@@ -745,7 +899,6 @@ function MessagesContent() {
             t.peer_name = info.name;
             t.peer_avatar = info.avatar;
           }
-          // newest-first for request_ids
           t.request_ids.sort((a, b) => {
             const aa = byReq.get(a)!.last_at;
             const bb = byReq.get(b)!.last_at;
@@ -754,26 +907,67 @@ function MessagesContent() {
         }
       }
 
-      const sorted = Array.from(byPeer.values()).sort((a, b) => (a.last_at < b.last_at ? 1 : -1));
+      let sorted = Array.from(byPeer.values()).sort((a, b) => (a.last_at < b.last_at ? 1 : -1));
+      let filtered = sorted.filter((t) => !leftPeers.has(t.peer_id));
 
-      // filter out "left" peers
-      const filtered = sorted.filter((t) => !leftPeers.has(t.peer_id));
+      // Deep-link synth if none exists yet
+      if (desiredPeer && !filtered.some((t) => t.peer_id === desiredPeer)) {
+        const ensured = await ensureRequestWithPeer(uid, desiredPeer);
+        const { data: peerProfile } = await supabase
+          .from('profiles')
+          .select('id, display_name, avatar_url')
+          .eq('id', desiredPeer)
+          .limit(1)
+          .maybeSingle();
+
+        const peer_name = (peerProfile as any)?.display_name || 'Someone';
+        const peer_avatar = (peerProfile as any)?.avatar_url ?? null;
+
+        const now = new Date().toISOString();
+        const newThread: Thread = {
+          peer_id: desiredPeer,
+          peer_name,
+          peer_avatar,
+          request_ids: ensured?.request_id ? [ensured.request_id] : [],
+          offer_ids: ensured?.offer_id ? [ensured.offer_id] : [],
+          offer_id: ensured?.offer_id || '',
+          offer_title: ensured?.offer_title,
+          last_text: '',
+          last_at: now,
+          unread: 0,
+        };
+        filtered = [newThread, ...filtered];
+      }
 
       setThreads(filtered);
 
-      // Desktop: auto-select first thread if none picked (after filter)
-      if (!selected && filtered.length > 0) {
-        setSelected(filtered[0]);
-      } else if (selected && leftPeers.has(selected.peer_id)) {
-        // If the selected one was left, clear selection
+      // Selection preference: URL peer
+      if (!selected) {
+        if (desiredPeer) {
+          const match = filtered.find((t) => t.peer_id === desiredPeer);
+          if (match) {
+            setSelected(match);
+            setShowListOnMobile(false);
+            if (typeof window !== 'undefined') {
+              const url = new URL(window.location.href);
+              url.searchParams.set('thread', desiredPeer);
+              window.history.replaceState({}, '', url.toString());
+            }
+          } else if (filtered.length > 0) {
+            setSelected(filtered[0]);
+          }
+        } else if (filtered.length > 0) {
+          setSelected(filtered[0]);
+        }
+      } else if (!filtered.some((t) => t.peer_id === selected.peer_id)) {
         setSelected(undefined);
         setShowListOnMobile(true);
       }
 
-      // Prefetch first few peer threads into cache
+      // Prefetch a few
       const toPrefetch = filtered.slice(0, 3);
       for (const t of toPrefetch) {
-        if (msgCache[t.peer_id]) continue;
+        if (msgCache[t.peer_id] || t.request_ids.length === 0) continue;
         const { data: m } = await supabase
           .from('notifications')
           .select('id, created_at, type, data')
@@ -790,7 +984,7 @@ function MessagesContent() {
         setMsgCache((prev) => ({ ...prev, [t.peer_id]: mapped }));
       }
     },
-    [msgCache, selected, leftPeers]
+    [msgCache, selected, leftPeers, desiredPeer, ensureRequestWithPeer]
   );
 
   useEffect(() => {
@@ -803,7 +997,7 @@ function MessagesContent() {
     setShowListOnMobile(false);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
-      url.searchParams.set('thread', t.peer_id); // store peer_id in URL
+      url.searchParams.set('thread', t.peer_id);
       window.history.replaceState({}, '', url.toString());
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -826,11 +1020,7 @@ function MessagesContent() {
   return (
     <section className="md:flex md:gap-4">
       <div className={leftClasses}>
-        <ThreadsList
-          threads={threads}
-          selectedPeer={selected?.peer_id}
-          onSelect={selectThread}
-        />
+        <ThreadsList threads={threads} selectedPeer={selected?.peer_id} onSelect={selectThread} />
       </div>
 
       <div className={rightClasses}>

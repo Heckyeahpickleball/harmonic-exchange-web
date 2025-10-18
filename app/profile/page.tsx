@@ -154,6 +154,12 @@ export default function ProfilePage() {
     };
   }, []);
 
+  // Am I viewing my own profile? (This page is “My Profile”, but keep logic future-proof.)
+  const isMe = useMemo(() => {
+    if (!userId || !profile?.id) return true;
+    return userId === profile.id;
+  }, [userId, profile?.id]);
+
   // Load my active offers
   useEffect(() => {
     if (!userId) return;
@@ -365,18 +371,20 @@ export default function ProfilePage() {
           )}
 
           {/* Mobile edit button on cover (pencil) */}
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="md:hidden absolute bottom-2 right-2 grid h-9 w-9 place-items-center rounded-full bg-white/95 shadow border"
-            aria-label="Edit profile"
-            title="Edit profile"
-          >
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" />
-              <path d="M14.06 4.94l3.75 3.75" />
-            </svg>
-          </button>
+          {isMe && (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="md:hidden absolute bottom-2 right-2 grid h-9 w-9 place-items-center rounded-full bg-white/95 shadow border"
+              aria-label="Edit profile"
+              title="Edit profile"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" />
+                <path d="M14.06 4.94l3.75 3.75" />
+              </svg>
+            </button>
+          )}
         </div>
 
         {/* Header content */}
@@ -394,7 +402,7 @@ export default function ProfilePage() {
             </div>
 
             {/* Name row — tiny gap under cover */}
-            <div className="pl-[123px] mt-0">
+            <div className="pl?[123px] mt-0">
               <div className="flex items-end gap-2">
                 <h1 className="truncate text-[25px] leading-[1.1] font-bold">
                   {form.display_name || 'Unnamed'}
@@ -423,6 +431,19 @@ export default function ProfilePage() {
             )}
             {!clusterBadges.length && badgesMsg && (
               <p className="text-xs text-amber-700 mt-1 text-center">{badgesMsg}</p>
+            )}
+
+            {/* Mobile actions */}
+            {!isMe && profile?.id && (
+              <div className="mt-2 flex justify-center">
+                <Link
+                  href={`/messages?thread=${profile.id}`}
+                  className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
+                  title="Send a message"
+                >
+                  Message
+                </Link>
+              </div>
             )}
           </div>
 
@@ -462,22 +483,36 @@ export default function ProfilePage() {
               </div>
 
               <div className="mt-3 flex items-center gap-2">
-                <button
-                  onClick={() => setEditing(true)}
-                  className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
-                >
-                  Edit Profile
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await supabase.auth.signOut();
-                    location.href = '/';
-                  }}
-                  className="rounded border px-3 py-1.5 text-sm"
-                >
-                  Sign Out
-                </button>
+                {isMe ? (
+                  <>
+                    <button
+                      onClick={() => setEditing(true)}
+                      className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
+                    >
+                      Edit Profile
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await supabase.auth.signOut();
+                        location.href = '/';
+                      }}
+                      className="rounded border px-3 py-1.5 text-sm"
+                    >
+                      Sign Out
+                    </button>
+                  </>
+                ) : (
+                  profile?.id && (
+                    <Link
+                      href={`/messages?thread=${profile.id}`}
+                      className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
+                      title="Send a message"
+                    >
+                      Message
+                    </Link>
+                  )
+                )}
               </div>
             </div>
 
