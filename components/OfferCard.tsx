@@ -197,6 +197,17 @@ export default function OfferCard({
             </Link>
           )}
 
+          {/* Owner: Edit */}
+          {mine && (
+            <Link
+              href={`/offers/${offer.id}/edit`}
+              className="hx-btn hx-btn--primary text-sm"
+              title="Edit this offer"
+            >
+              Edit
+            </Link>
+          )}
+
           {/* Admin: Approve pending */}
           {isAdmin && status === 'pending' && (
             <button
