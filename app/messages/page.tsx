@@ -202,24 +202,21 @@ function ChatPane({
   // We allow send even if no request exists yet; we'll create one on the fly.
   const canSend = useMemo(() => !!thread && !!draft.trim() && !!me, [thread, draft, me]);
 
-  // ---- Helpers to ensure a request exists (no offer required) ----
+  // ---- Helpers to ensure a request exists (now with valid placeholder offer) ----
   const createPlaceholderOfferOwnedByMe = useCallback(
     async (): Promise<string | null> => {
-      // (Kept for compatibility, no longer used by default path)
       const { data, error } = await supabase
         .from('offers')
-        .insert([
-          {
-            owner_id: me,
-            title: 'Direct message',
-            offer_type: 'dm',
-            is_online: true,
-            city: null,
-            country: null,
-            images: [],
-            status: 'archived',
-          },
-        ])
+        .insert([{
+          owner_id: me,
+          title: 'Direct message',
+          offer_type: 'service', // <-- valid value for your CHECK constraint
+          is_online: true,
+          city: null,
+          country: null,
+          images: [],
+          status: 'archived',
+        }])
         .select('id')
         .single();
       if (error) return null;
@@ -228,40 +225,35 @@ function ChatPane({
     [me]
   );
 
-  // RLS-friendly: look up existing requests both directions; if none, anchor to a peer-owned offer with me as requester.
   const ensureRequestForThread = useCallback(
     async (peerId: string): Promise<{ request_id: string; offer_id: string | null } | null> => {
       // A) me -> peer
       {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from('requests')
-          .select('id, offer_id, offers!inner(id, owner_id)')
+          .select('id, offer_id, offers!inner ( id, owner_id )')
           .eq('requester_profile_id', me)
           .eq('offers.owner_id', peerId)
           .order('created_at', { ascending: false })
           .maybeSingle();
 
-        if (!error && data?.id) {
-          return { request_id: (data as any).id, offer_id: (data as any).offer_id ?? null };
-        }
+        if (data?.id) return { request_id: (data as any).id, offer_id: (data as any).offer_id ?? null };
       }
 
       // B) peer -> me
       {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from('requests')
-          .select('id, offer_id, offers!inner(id, owner_id)')
+          .select('id, offer_id, offers!inner ( id, owner_id )')
           .eq('requester_profile_id', peerId)
           .eq('offers.owner_id', me)
           .order('created_at', { ascending: false })
           .maybeSingle();
 
-        if (!error && data?.id) {
-          return { request_id: (data as any).id, offer_id: (data as any).offer_id ?? null };
-        }
+        if (data?.id) return { request_id: (data as any).id, offer_id: (data as any).offer_id ?? null };
       }
 
-      // C) Anchor to peer's latest visible offer (any status); requester = me
+      // C) If peer has any offer, anchor to it (requester = me)
       const { data: peerOffer } = await supabase
         .from('offers')
         .select('id')
@@ -270,18 +262,32 @@ function ChatPane({
         .limit(1)
         .maybeSingle();
 
-      if (!peerOffer?.id) return null;
+      if (peerOffer?.id) {
+        const { data: inserted } = await supabase
+          .from('requests')
+          .insert([{ offer_id: peerOffer.id, requester_profile_id: me, note: '' } as any])
+          .select('id, offer_id')
+          .single();
 
-      const { data: inserted, error: insErr } = await supabase
+        if (inserted?.id) {
+          return { request_id: inserted.id, offer_id: inserted.offer_id ?? null };
+        }
+      }
+
+      // D) Peer has no offer → create my placeholder offer, then request with PEER as requester.
+      const myDmOfferId = await createPlaceholderOfferOwnedByMe();
+      if (!myDmOfferId) return null;
+
+      const { data: created } = await supabase
         .from('requests')
-        .insert([{ offer_id: peerOffer.id, requester_profile_id: me }])
+        .insert([{ offer_id: myDmOfferId, requester_profile_id: peerId, note: '' } as any])
         .select('id, offer_id')
         .single();
 
-      if (insErr || !inserted?.id) return null;
-      return { request_id: inserted.id, offer_id: inserted.offer_id ?? null };
+      if (!created?.id) return null;
+      return { request_id: created.id, offer_id: created.offer_id ?? null };
     },
-    [me]
+    [me, createPlaceholderOfferOwnedByMe]
   );
   // ----------------------------------------------------------------
 
@@ -704,7 +710,7 @@ function MessagesContent() {
           {
             owner_id: me,
             title: 'Direct message',
-            offer_type: 'dm',
+            offer_type: 'service',
             is_online: true,
             city: null,
             country: null,
@@ -730,7 +736,7 @@ function MessagesContent() {
       {
         const { data } = await supabase
           .from('requests')
-          .select('id, offer_id, offers!inner(id, title, owner_id)')
+          .select('id, offer_id, offers!inner ( id, title, owner_id )')
           .eq('requester_profile_id', uid)
           .eq('offers.owner_id', peerId)
           .order('created_at', { ascending: false })
@@ -746,7 +752,7 @@ function MessagesContent() {
       {
         const { data } = await supabase
           .from('requests')
-          .select('id, offer_id, offers!inner(id, title, owner_id)')
+          .select('id, offer_id, offers!inner ( id, title, owner_id )')
           .eq('requester_profile_id', peerId)
           .eq('offers.owner_id', uid)
           .order('created_at', { ascending: false })
@@ -771,7 +777,7 @@ function MessagesContent() {
 
       const { data: inserted, error: insErr } = await supabase
         .from('requests')
-        .insert([{ offer_id: peerOffer.id, requester_profile_id: uid }])
+        .insert([{ offer_id: peerOffer.id, requester_profile_id: uid, note: '' } as any])
         .select('id')
         .single();
 

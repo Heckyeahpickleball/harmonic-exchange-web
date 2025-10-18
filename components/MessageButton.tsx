@@ -49,10 +49,9 @@ export default function MessageButton({ toId, className = '', children }: Props)
           .order('created_at', { ascending: false })
           .limit(1);
 
-        const offerId = peerOffers?.[0]?.id ?? null;
+        let finalOfferId = peerOffers?.[0]?.id ?? null;
 
-        // If peer has no offers, create a placeholder "Direct message" offer owned by me
-        let finalOfferId = offerId;
+        // If peer has no offers, create a placeholder offer owned by me
         if (!finalOfferId) {
           const { data: createdOffer, error: offerError } = await supabase
             .from('offers')
@@ -60,9 +59,15 @@ export default function MessageButton({ toId, className = '', children }: Props)
               {
                 owner_id: me,
                 title: 'Direct message',
-                offer_type: 'dm',
+                // IMPORTANT: offer_type must satisfy your CHECK constraint:
+                // use a valid type like 'service'
+                offer_type: 'service',
                 is_online: true,
                 status: 'archived', // safe fallback
+                // the rest are nullable in your schema
+                city: null,
+                country: null,
+                images: [],
               },
             ])
             .select('id')
@@ -71,7 +76,7 @@ export default function MessageButton({ toId, className = '', children }: Props)
           finalOfferId = createdOffer?.id ?? null;
         }
 
-        // Create the request — include a minimal note to satisfy NOT NULL
+        // Create the request — include note to be safe
         if (finalOfferId) {
           const { error: reqError } = await supabase
             .from('requests')
