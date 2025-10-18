@@ -1,10 +1,15 @@
 // components/PostItem.tsx
 'use client';
 
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import {
+  notifyOnNewComment,
+  notifyOnHeartPost,
+  notifyOnHeartComment,
+} from '@/lib/notify';
 
 type ProfileLite = {
   display_name: string | null;
@@ -438,6 +443,16 @@ export default function PostItem({
       previews.forEach((u) => URL.revokeObjectURL(u));
       setFiles([]);
       setPreviews([]);
+
+      // 🔔 Notify the post author about the new comment
+      const myName =
+        (normalized?.profiles?.display_name as string | null) ?? null; // best available
+      await notifyOnNewComment({
+        postId: post.id,
+        postAuthorId: post.profile_id,
+        commenterName: myName ?? undefined,
+        commentText: body || undefined,
+      });
     } catch (e: any) {
       setErr(e?.message ?? 'Could not comment.');
     } finally {
@@ -465,10 +480,34 @@ export default function PostItem({
 
   async function onToggleHeartPost() {
     try {
-      const res = await toggleHeart('post', post.id, me);
-      setIHeartedPost(res.action === 'heart');
+      const res = await supabase.auth.getUser();
+      const meId = res.data.user?.id ?? null;
+
+      const result = await toggleHeart('post', post.id, meId);
+      setIHeartedPost(result.action === 'heart');
       // Optimistic count adjustment (realtime will correct if needed)
-      setPostHearts((n) => n + (res.action === 'heart' ? 1 : -1));
+      setPostHearts((n) => n + (result.action === 'heart' ? 1 : -1));
+
+      // 🔔 Notify post author when hearted
+      if (result.action === 'heart') {
+        // (Optional) fetch my display name for nicer copy — non-blocking
+        let likerName: string | null = null;
+        try {
+          if (meId) {
+            const { data: meProf } = await supabase
+              .from('profiles')
+              .select('display_name')
+              .eq('id', meId)
+              .maybeSingle();
+            likerName = meProf?.display_name ?? null;
+          }
+        } catch {}
+        await notifyOnHeartPost({
+          postId: post.id,
+          postAuthorId: post.profile_id,
+          likerName: likerName ?? undefined,
+        });
+      }
     } catch (e: any) {
       if (String(e?.message) === 'NOT_SIGNED_IN') {
         router.push('/signin');
@@ -665,9 +704,33 @@ function CommentItem({
 
   async function onToggleHeartComment() {
     try {
-      const res = await toggleHeart('comment', comment.id, me);
-      setIHearted(res.action === 'heart');
-      setHearts((n) => n + (res.action === 'heart' ? 1 : -1));
+      const res = await supabase.auth.getUser();
+      const meId = res.data.user?.id ?? null;
+
+      const result = await toggleHeart('comment', comment.id, meId);
+      setIHearted(result.action === 'heart');
+      setHearts((n) => n + (result.action === 'heart' ? 1 : -1));
+
+      // 🔔 Notify comment author when hearted
+      if (result.action === 'heart') {
+        let likerName: string | null = null;
+        try {
+          if (meId) {
+            const { data: meProf } = await supabase
+              .from('profiles')
+              .select('display_name')
+              .eq('id', meId)
+              .maybeSingle();
+            likerName = meProf?.display_name ?? null;
+          }
+        } catch {}
+        await notifyOnHeartComment({
+          commentId: comment.id,
+          commentAuthorId: comment.profile_id,
+          postId: comment.post_id,
+          likerName: likerName ?? undefined,
+        });
+      }
     } catch (e: any) {
       if (String(e?.message) === 'NOT_SIGNED_IN') {
         router.push('/signin');
@@ -676,6 +739,15 @@ function CommentItem({
       console.error(e);
     }
   }
+
+  // Decide grid columns for comment images:
+  const cImgCount = comment.images?.length ?? 0;
+  const commentGridCols =
+    cImgCount <= 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';
+
+  const commenterName = comment.profiles?.display_name ?? 'Someone';
+  const commenterAvatar = comment.profiles?.avatar_url ?? null;
+  const commenterHref = `/u/${comment.profile_id}`;
 
   async function reallyDelete() {
     try {
@@ -691,15 +763,6 @@ function CommentItem({
       setMenuOpen(false);
     }
   }
-
-  // Decide grid columns for comment images:
-  const cImgCount = comment.images?.length ?? 0;
-  const commentGridCols =
-    cImgCount <= 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';
-
-  const commenterName = comment.profiles?.display_name ?? 'Someone';
-  const commenterAvatar = comment.profiles?.avatar_url ?? null;
-  const commenterHref = `/u/${comment.profile_id}`;
 
   return (
     <div className="relative rounded border p-2">

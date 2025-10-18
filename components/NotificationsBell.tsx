@@ -159,115 +159,138 @@ export default function NotificationsBell() {
     );
   }
 
-  function label(n: Notif): { text: string; href?: string } {
-    const offerId = getOfferId(n);
-    const offerTitle =
-      (n.data?.offer_title as string | undefined) ||
-      (offerId ? titleCache.current.get(offerId) : undefined);
-    const body = (n.data?.text ?? n.data?.message) as string | undefined;
-    const reqId = getReqId(n);
+function label(n: Notif): { text: string; href?: string } {
+  const offerId = getOfferId(n);
+  const offerTitle =
+    (n.data?.offer_title as string | undefined) ||
+    (offerId ? titleCache.current.get(offerId) : undefined);
+  const body = (n.data?.text ?? n.data?.message) as string | undefined;
+  const reqId = getReqId(n);
 
-    switch (n.type) {
-      case 'offer_pending': {
-        const href = offerId
-          ? `/admin?tab=offers&pending=1&offer=${offerId}`
-          : '/admin?tab=offers&pending=1';
-        return {
-          text: `New offer pending${offerTitle ? `: “${offerTitle}”` : ''}`,
-          href,
-        };
-      }
-      case 'request_received':
-        return {
-          text: `New request${
-            offerTitle ? ` for “${offerTitle}”` : ''
-          }${n.data?.requester_name ? ` from ${n.data.requester_name}` : ''}`,
-          href: '/exchanges?tab=received',
-        };
-      case 'request_accepted':
-        return {
-          text: `Your request was accepted${
-            offerTitle ? ` — “${offerTitle}”` : ''
-          }`,
-          href: '/exchanges?tab=sent',
-        };
-      case 'request_declined':
-        return {
-          text: `Your request was declined${
-            offerTitle ? ` — “${offerTitle}”` : ''
-          }`,
-          href: '/exchanges?tab=sent',
-        };
-      case 'request_fulfilled':
-        return {
-          text: `Request marked fulfilled${
-            offerTitle ? ` — “${offerTitle}”` : ''
-          }`,
-          href: '/exchanges?tab=fulfilled',
-        };
+  // Prefer sending users to the Global feed for content activity
+  const GLOBAL_HREF = '/global';
 
-      case 'gratitude_prompt': {
-        const text = `Say thanks${offerTitle ? ` for “${offerTitle}”` : ''}`;
-        const href = reqId
-          ? `/reviews/new?request_id=${encodeURIComponent(reqId)}`
-          : '/reviews/new';
-        return { text, href };
-      }
-      case 'review_prompt': {
-        const text = `Please leave a review${
+  switch (n.type) {
+    /* ---------- existing cases (kept as-is) ---------- */
+    case 'offer_pending': {
+      const href = offerId
+        ? `/admin?tab=offers&pending=1&offer=${offerId}`
+        : '/admin?tab=offers&pending=1';
+      return {
+        text: `New offer pending${offerTitle ? `: “${offerTitle}”` : ''}`,
+        href,
+      };
+    }
+    case 'request_received':
+      return {
+        text: `New request${
           offerTitle ? ` for “${offerTitle}”` : ''
-        }`;
-        const href = reqId
-          ? `/gratitude/write?request_id=${encodeURIComponent(reqId)}`
-          : '/reviews/new';
-        return { text, href };
-      }
+        }${n.data?.requester_name ? ` from ${n.data.requester_name}` : ''}`,
+        href: '/exchanges?tab=received',
+      };
+    case 'request_accepted':
+      return {
+        text: `Your request was accepted${
+          offerTitle ? ` — “${offerTitle}”` : ''
+        }`,
+        href: '/exchanges?tab=sent',
+      };
+    case 'request_declined':
+      return {
+        text: `Your request was declined${
+          offerTitle ? ` — “${offerTitle}”` : ''
+        }`,
+        href: '/exchanges?tab=sent',
+      };
+    case 'request_fulfilled':
+      return {
+        text: `Request marked fulfilled${
+          offerTitle ? ` — “${offerTitle}”` : ''
+        }`,
+        href: '/exchanges?tab=fulfilled',
+      };
 
-      case 'badge_earned': {
-        const track = n.data?.track as string | undefined;
-        const tier = n.data?.tier as number | undefined;
-        const niceTrack =
-          track === 'give'
-            ? 'Giver'
-            : track === 'receive'
-            ? 'Receiver'
-            : track === 'streak'
-            ? 'Streak'
-            : track === 'completed_exchange'
-            ? 'Completed Exchanges'
-            : track === 'requests_made'
-            ? 'Requests Made'
-            : track === 'shared_offers'
-            ? 'Offers Shared'
-            : track ?? 'Badge';
-        const text = `🎉 New badge earned — ${niceTrack}${
-          tier != null ? ` (Tier ${tier})` : ''
-        }`;
-        return { text, href: '/profile#badges' };
-      }
+    case 'gratitude_prompt': {
+      const text = `Say thanks${offerTitle ? ` for “${offerTitle}”` : ''}`;
+      const href = reqId
+        ? `/reviews/new?request_id=${encodeURIComponent(reqId)}`
+        : '/reviews/new';
+      return { text, href };
+    }
+    case 'review_prompt': {
+      const text = `Please leave a review${
+        offerTitle ? ` for “${offerTitle}”` : ''
+      }`;
+      const href = reqId
+        ? `/gratitude/write?request_id=${encodeURIComponent(reqId)}`
+        : '/reviews/new';
+      return { text, href };
+    }
 
-      case 'message':
-      case 'message_received': {
-        const snip = body ? `: ${body.slice(0, 80)}` : '';
-        const on = offerTitle ? ` on “${offerTitle}”` : '';
-        return {
-          text: `New message${on}${snip}`,
-          href: reqId ? `/messages?thread=${reqId}` : '/messages',
-        };
-      }
+    case 'badge_earned': {
+      const track = n.data?.track as string | undefined;
+      const tier = n.data?.tier as number | undefined;
+      const niceTrack =
+        track === 'give'
+          ? 'Giver'
+          : track === 'receive'
+          ? 'Receiver'
+          : track === 'streak'
+          ? 'Streak'
+          : track === 'completed_exchange'
+          ? 'Completed Exchanges'
+          : track === 'requests_made'
+          ? 'Requests Made'
+          : track === 'shared_offers'
+          ? 'Offers Shared'
+          : track ?? 'Badge';
+      const text = `🎉 New badge earned — ${niceTrack}${
+        tier != null ? ` (Tier ${tier})` : ''
+      }`;
+      return { text, href: '/profile#badges' };
+    }
 
-      case 'fulfillment_reminder': {
-        const t = offerTitle ? ` “${offerTitle}”` : '';
-        const href = reqId ? `/exchanges?focus=${reqId}` : '/exchanges';
-        return { text: `Has your offer been fulfilled?${t}`, href };
-      }
+    case 'message':
+    case 'message_received': {
+      const snip = body ? `: ${body.slice(0, 80)}` : '';
+      const on = offerTitle ? ` on “${offerTitle}”` : '';
+      return {
+        text: `New message${on}${snip}`,
+        href: reqId ? `/messages?thread=${reqId}` : '/messages',
+      };
+    }
 
-      default: {
-        const text = n.data?.message || n.data?.text || 'Update';
-        return { text, href: '/exchanges' };
-      }
+    case 'fulfillment_reminder': {
+      const t = offerTitle ? ` “${offerTitle}”` : '';
+      const href = reqId ? `/exchanges?focus=${reqId}` : '/exchanges';
+      return { text: `Has your offer been fulfilled?${t}`, href };
+    }
+
+    /* ---------- NEW cases for hearts & comments ---------- */
+    case 'heart_on_post': {
+      const liker = (n.data?.liker_name as string | undefined) ?? 'Someone';
+      return { text: `${liker} liked your post`, href: GLOBAL_HREF };
+    }
+    case 'heart_on_comment': {
+      const liker = (n.data?.liker_name as string | undefined) ?? 'Someone';
+      return { text: `${liker} liked your comment`, href: GLOBAL_HREF };
+    }
+    case 'comment_on_post': {
+      const who = (n.data?.commenter_name as string | undefined) ?? 'Someone';
+      const snip = n.data?.text ? `: ${String(n.data.text).slice(0, 80)}` : '';
+      return { text: `${who} commented on your post${snip}`, href: GLOBAL_HREF };
+    }
+
+    /* ---------- fallback ---------- */
+    default: {
+      const text =
+        (n.data?.message as string | undefined) ||
+        (n.data?.text as string | undefined) ||
+        'Update';
+      return { text, href: GLOBAL_HREF };
     }
   }
+}
 
   async function markAllRead() {
     if (!uid) return;
