@@ -513,8 +513,9 @@ export default function ChapterPage() {
   }
   async function leaveChapter() {
     if (!group || !meId) return;
-    setMsg('');
-    if (!confirm('Leave this chapter?')) return;
+setMsg('');
+if (!confirm('Leave this chapter? You won’t see member-only posts anymore. You can rejoin anytime.')) return;
+
     try {
       const { error } = await supabase
         .from('group_members')
@@ -697,7 +698,12 @@ export default function ChapterPage() {
 
   async function deleteEvent(id: string) {
     if (!group) return;
-    if (!confirm('Delete this event?')) return;
+if (
+  !confirm(
+    'Delete this event?\n\nThis will remove the event for everyone and can’t be undone.'
+  )
+)
+  return;
     setMsg('');
     try {
       await supabase.from('group_events').delete().eq('id', id).eq('group_id', group.id);

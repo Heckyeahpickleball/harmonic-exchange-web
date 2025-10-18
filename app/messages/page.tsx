@@ -658,37 +658,36 @@ function MessagesContent() {
     [me]
   );
 
-  const handleLeaveChat = useCallback(
-    (peerId: string) => {
-      if (!peerId) return;
-      const ok =
-        typeof window !== 'undefined'
-          ? window.confirm('Leave this chat? You will no longer see it in Messages on this device.')
-          : true;
-      if (!ok) return;
+const handleLeaveChat = useCallback(
+  async (peerId: string) => {
+    if (!peerId) return;
+    const ok = window.confirm(
+      'Leave this chat?\n\nYou won’t see this conversation in Messages on this device.'
+    );
+    if (!ok) return;
 
-      setLeftPeers((prev) => {
-        const next = new Set(prev);
-        next.add(peerId);
-        saveLeftPeers(next);
-        return next;
-      });
+    setLeftPeers((prev) => {
+      const next = new Set(prev);
+      next.add(peerId);
+      saveLeftPeers(next);
+      return next;
+    });
 
-      if (selected?.peer_id === peerId) {
-        setSelected(undefined);
-        setShowListOnMobile(true);
-        if (typeof window !== 'undefined') {
-          const url = new URL(window.location.href);
-          url.searchParams.delete('thread');
-          window.history.replaceState({}, '', url.toString());
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
+    if (selected?.peer_id === peerId) {
+      setSelected(undefined);
+      setShowListOnMobile(true);
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('thread');
+        window.history.replaceState({}, '', url.toString());
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
+    }
 
-      setThreads((prev) => prev.filter((t) => t.peer_id !== peerId));
-    },
-    [saveLeftPeers, selected]
-  );
+    setThreads((prev) => prev.filter((t) => t.peer_id !== peerId));
+  },
+  [saveLeftPeers, selected]
+);
 
   const setCache = useCallback(
     (peerId: string, next: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])) => {

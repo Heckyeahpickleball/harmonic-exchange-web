@@ -374,8 +374,12 @@ export default function PostItem({
     }
   }
 
-  async function deletePost() {
-    if (!confirm('Delete this post?')) return;
+async function deletePost() {
+  if (
+    !confirm(
+      'Delete this post?\n\nThis will remove it from the feed and can’t be undone.'
+    )
+  ) return;
     const { error } = await supabase.from('posts').delete().eq('id', post.id);
     if (!error) onDeleted();
   }

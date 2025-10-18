@@ -61,14 +61,14 @@ export default function LeaveChatButton({ threadId, onLeft, className }: Props) 
 
   async function handleLeave() {
     if (!threadId) return;
-    if (!uid) {
-      alert('Please sign in to leave this chat.');
-      return;
-    }
-    const ok = confirm('Leave this chat? You will no longer see it in Messages.');
-    if (!ok) return;
+if (!uid) {
+  alert('Please sign in to leave this chat.');
+  return;
+}
+// Use the built-in confirm which accepts a string message
+if (!window.confirm('Leave this chat?\n\nYou can start a new conversation anytime.')) return;
 
-    setBusy(true);
+setBusy(true);
 
     // Try thread_participants first
     let res = await leaveVia('thread_participants');
