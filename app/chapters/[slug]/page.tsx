@@ -60,13 +60,18 @@ type FeedPost = {
   profile_id: string;
   body: string | null;
   created_at: string;
+  group_id?: string | null;
   images?: string[] | null;
   profiles?: { display_name: string | null } | null;
+  like_count?: number | null;      // optional; not selected
+  comments_count?: number | null;  // optional; not selected
 };
 
 type RSVPStatus = 'going' | 'interested' | 'cant_go';
 type RSVPRow = { event_id: string; profile_id: string; status: RSVPStatus };
 type ProfileMini = { id: string; display_name: string | null; avatar_url: string | null };
+
+type SortMode = 'recent' | 'popular';
 
 export default function ChapterPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -85,6 +90,7 @@ export default function ChapterPage() {
   const [offers, setOffers] = useState<OfferPreview[]>([]);
   const [cityOffers, setCityOffers] = useState<CityOffer[] | null>(null);
 
+  // Posts (raw from DB)
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [postText, setPostText] = useState('');
   const [postFiles, setPostFiles] = useState<File[]>([]);
@@ -92,9 +98,14 @@ export default function ChapterPage() {
   const [posting, setPosting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Posts filter/sort UI
+  const [postMenuOpen, setPostMenuOpen] = useState(false);
+  const [postSort, setPostSort] = useState<SortMode>('recent');
+  const [postSearch, setPostSearch] = useState(''); // NEW
+
   const [editingAbout, setEditingAbout] = useState(false);
   const [aboutDraft, setAboutDraft] = useState('');
-  const [aboutExpandedMobile, setAboutExpandedMobile] = useState(false); // NEW
+  const [aboutExpandedMobile, setAboutExpandedMobile] = useState(false);
 
   // ====== Events state ======
   const [showEventForm, setShowEventForm] = useState(false);
@@ -134,9 +145,7 @@ export default function ChapterPage() {
   // Members dialog
   const [membersOpen, setMembersOpen] = useState(false);
 
-  const offerTrackRef = useRef<HTMLDivElement | null>(null);
-
-  // === NEW: Events carousel track + scroll helper
+  // Events carousel track
   const eventsTrackRef = useRef<HTMLDivElement | null>(null);
   function scrollEvents(dir: 1 | -1) {
     const el = eventsTrackRef.current;
@@ -170,7 +179,6 @@ export default function ChapterPage() {
     if (!candidate) return null;
     return isStoragePath(candidate) ? publicUrlForPath(String(candidate)) : String(candidate);
   }
-  // Normalize profile.avatar_url → public URL
   function toPublicAvatar(urlOrPath: string | null | undefined): string | null {
     if (!urlOrPath) return null;
     if (/^https?:\/\//i.test(urlOrPath)) return urlOrPath;
@@ -327,25 +335,23 @@ export default function ChapterPage() {
         }
         if (!cancelled) setEvents(eList);
 
-        // 4) Posts
+        // 4) Posts (chapter-scoped)
         const { data: pRows, error: pErr } = await supabase
           .from('posts')
-          .select('id,profile_id,body,created_at,images,group_id,profiles(display_name,avatar_url)')
+          .select('id,profile_id,body,created_at,images,group_id,profiles(display_name)')
           .eq('group_id', gRow.id)
           .order('created_at', { ascending: false })
-          .limit(50);
+          .limit(100);
         if (pErr) throw pErr;
         const pList: FeedPost[] = (pRows || []).map((row: any) =>
           normalizeProfile({
             ...row,
-            images: normalizeImageList(row.images).map((u: string) =>
-              isStoragePath(u) ? publicUrlForPath(u) : u
-            ),
+            images: normalizeImageList(row.images).map((u: string) => (isStoragePath(u) ? publicUrlForPath(u) : u)),
           })
         );
         if (!cancelled) setPosts(pList);
 
-        // 5) Offers attached to this group (not rendered here)
+        // 5) Offers attached to this group
         const { data: oRows } = await supabase
           .from('offers')
           .select('id,title,status,created_at,owner_id,images')
@@ -367,82 +373,63 @@ export default function ChapterPage() {
         }
         if (!cancelled) setOffers(oList);
 
-        // 6) Local (city+country) OR Online offers for the carousel
-        {
-          const hasCity = (gRow.city || '').trim().length > 0;
-          const hasCountry = (gRow.country || '').trim().length > 0;
+// 6) Local offers only (do NOT merge online)
+{
+  const hasCity = (gRow.city || '').trim().length > 0;
+  const hasCountry = (gRow.country || '').trim().length > 0;
 
-          let localRows: any[] = [];
-          if (hasCity && hasCountry) {
-            const { data, error } = await supabase
-              .from('offers')
-              .select('id,title,images,owner_id,created_at,city,country,status')
-              .eq('status', 'active')
-              .ilike('city', (gRow.city || '').trim())
-              .ilike('country', (gRow.country || '').trim())
-              .limit(50);
-            if (!error) localRows = data || [];
-          }
+  let localRows: any[] = [];
+  if (hasCity && hasCountry) {
+    const { data, error } = await supabase
+      .from('offers')
+      .select('id,title,images,owner_id,created_at,city,country,status')
+      .eq('status', 'active')
+      .ilike('city', (gRow.city || '').trim())
+      .ilike('country', (gRow.country || '').trim())
+      .limit(50);
+    if (!error) localRows = data || [];
+  }
 
-          let onlineRows: any[] = [];
-          {
-            const baseSelect = 'id,title,images,owner_id,created_at,city,country,status';
-            const tryOnline = await supabase
-              .from('offers')
-              .select(baseSelect)
-              .eq('status', 'active')
-              // @ts-ignore
-              .eq('online', true)
-              .limit(50);
-            if (!tryOnline.error) {
-              onlineRows = tryOnline.data || [];
-            } else {
-              const tryIsOnline = await supabase
-                .from('offers')
-                .select(baseSelect)
-                .eq('status', 'active')
-                // @ts-ignore
-                .eq('is_online', true)
-                .limit(50);
-              if (!tryIsOnline.error) onlineRows = tryIsOnline.data || [];
-            }
-          }
+  // 🚫 IMPORTANT: do NOT fetch or merge onlineRows here anymore
+  const allRows = localRows;
 
-          const allRows = [...localRows, ...onlineRows];
+  // De-dupe by id, newest first
+  const byId = new Map<string, any>();
+  for (const row of allRows) {
+    const prev = byId.get(row.id);
+    if (!prev || +new Date(row.created_at) > +new Date(prev.created_at)) byId.set(row.id, row);
+  }
+  const merged = Array.from(byId.values())
+    .sort((a: any, b: any) => +new Date(b.created_at) - +new Date(a.created_at))
+    .slice(0, 24);
 
-          const byId = new Map<string, any>();
-          for (const row of allRows) {
-            const prev = byId.get(row.id);
-            if (!prev || +new Date(row.created_at) > +new Date(prev.created_at)) byId.set(row.id, row);
-          }
-          const merged = Array.from(byId.values())
-            .sort((a: any, b: any) => +new Date(b.created_at) - +new Date(a.created_at))
-            .slice(0, 24);
+  // Owner names
+  const ownerIds = Array.from(new Set(merged.map((r: any) => r.owner_id)));
+  const { data: owners } =
+    ownerIds.length
+      ? await supabase.from('profiles').select('id,display_name').in('id', ownerIds)
+      : { data: [] as any[] };
+  const nameById = new Map<string, string | null>();
+  for (const p of (owners || []) as any[]) nameById.set(p.id, p.display_name ?? null);
 
-          const ownerIds = Array.from(new Set(merged.map((r: any) => r.owner_id)));
-          const { data: owners } =
-            ownerIds.length
-              ? await supabase.from('profiles').select('id,display_name').in('id', ownerIds)
-              : { data: [] as any[] };
-          const nameById = new Map<string, string | null>();
-          for (const p of (owners || []) as any[]) nameById.set(p.id, p.display_name ?? null);
+  const cityList: CityOffer[] = merged.map((row: any) => {
+    const imgs = Array.isArray(row.images) ? row.images : [];
+    const first = imgs.length ? imgs[0] : null;
+    const thumb_url = first ? (isStoragePath(first) ? publicUrlForPath(first) : String(first)) : null;
+    return {
+      id: row.id,
+      title: row.title ?? 'Untitled offer',
+      owner_display_name: nameById.get(row.owner_id) ?? null,
+      thumb_url,
+      // (optional) keep these if your rail uses them later
+      area_city: row.city ?? null,
+      area_country: row.country ?? null,
+    } as CityOffer;
+  });
 
-          const cityList: CityOffer[] = merged.map((row: any) => {
-            const imgs = Array.isArray(row.images) ? row.images : [];
-            const first = imgs.length ? imgs[0] : null;
-            const thumb_url = first ? (isStoragePath(first) ? publicUrlForPath(first) : String(first)) : null;
-            return {
-              id: row.id,
-              title: row.title ?? 'Untitled offer',
-              owner_display_name: nameById.get(row.owner_id) ?? null,
-              thumb_url,
-            } as CityOffer;
-          });
-
-          if (!cancelled) setCityOffers(cityList);
-        }
+  if (!cancelled) setCityOffers(cityList);
+}
       } catch (e: any) {
-        console.error(e);
         if (!cancelled) setMsg(e?.message ?? 'Failed to load chapter.');
       } finally {
         if (!cancelled) setLoading(false);
@@ -513,9 +500,8 @@ export default function ChapterPage() {
   }
   async function leaveChapter() {
     if (!group || !meId) return;
-setMsg('');
-if (!confirm('Leave this chapter? You won’t see member-only posts anymore. You can rejoin anytime.')) return;
-
+    setMsg('');
+    if (!confirm('Leave this chapter?')) return;
     try {
       const { error } = await supabase
         .from('group_members')
@@ -602,7 +588,7 @@ if (!confirm('Leave this chapter? You won’t see member-only posts anymore. You
 
       const { data: full } = await supabase
         .from('posts')
-        .select('id,profile_id,body,created_at,images,group_id,profiles(display_name,avatar_url)')
+        .select('id,profile_id,body,created_at,images,group_id,profiles(display_name)')
         .eq('id', inserted!.id)
         .maybeSingle();
 
@@ -698,12 +684,7 @@ if (!confirm('Leave this chapter? You won’t see member-only posts anymore. You
 
   async function deleteEvent(id: string) {
     if (!group) return;
-if (
-  !confirm(
-    'Delete this event?\n\nThis will remove the event for everyone and can’t be undone.'
-  )
-)
-  return;
+    if (!confirm('Delete this event?')) return;
     setMsg('');
     try {
       await supabase.from('group_events').delete().eq('id', id).eq('group_id', group.id);
@@ -788,9 +769,7 @@ if (
       const del = await supabase.from('event_rsvps').delete().eq('event_id', eventId).eq('profile_id', auth.user.id);
       if (del.error) console.error('RSVP delete error:', del.error.message || del.error);
 
-      const ins = await supabase
-        .from('event_rsvps')
-        .insert({ event_id: eventId, profile_id: auth.user.id, status });
+      const ins = await supabase.from('event_rsvps').insert({ event_id: eventId, profile_id: auth.user.id, status });
       if (ins.error) {
         console.error('RSVP insert error:', ins.error.message || ins.error);
         throw ins.error;
@@ -804,7 +783,6 @@ if (
       const nextCount = buckets.going.length + buckets.interested.length + buckets.cant_go.length;
       setEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, rsvp_count: nextCount } : e)));
     } catch (e: any) {
-      console.error('RSVP error:', e?.message || e);
       setMsg(e?.message ?? 'Could not RSVP.');
       setMyRsvp((prev) => ({ ...prev, [eventId]: prev[eventId] ?? null }));
     }
@@ -845,6 +823,44 @@ if (
       </div>
     );
   }
+
+  // --- Popularity heuristic for posts (fallback-safe without like/comment cols) ---
+  function popularityScore(p: FeedPost): number {
+    const likes = (p as any).like_count ?? 0;
+    const comments = (p as any).comments_count ?? 0;
+    const imgs = p.images?.length ?? 0;
+    const words = (p.body || '').trim().split(/\s+/).filter(Boolean).length;
+    return likes * 5 + comments * 3 + imgs * 2 + words / 40;
+  }
+
+  // NEW — score relevance of a post for the query
+  function searchScore(p: FeedPost, query: string): number {
+    const q = query.trim().toLowerCase();
+    if (!q) return 0;
+    const hay = (p.body || '').toLowerCase();
+    if (!hay) return 0;
+    // occurrences + word-start matches get extra weight
+    const occurrences = hay.split(q).length - 1;
+    const starts = hay.split(/\b/).filter((w) => w.startsWith(q)).length;
+    return occurrences * 2 + starts;
+  }
+
+  const derivedPosts = useMemo(() => {
+    // base sort first
+    const base =
+      postSort === 'recent'
+        ? [...posts].sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+        : [...posts].sort((a, b) => popularityScore(b) - popularityScore(a));
+
+    // if searching, bubble relevant ones to the top (most relevant first), then the rest in their base order
+    const q = postSearch.trim();
+    if (!q) return base;
+
+    const scored = base.map((p) => ({ p, s: searchScore(p, q) }));
+    const hits = scored.filter((x) => x.s > 0).sort((a, b) => b.s - a.s).map((x) => x.p);
+    const rest = scored.filter((x) => x.s === 0).map((x) => x.p);
+    return [...hits, ...rest];
+  }, [posts, postSort, postSearch]);
 
   if (loading) return <div className="max-w-5xl p-3 sm:p-4 text-sm text-gray-600">Loading chapter…</div>;
   if (!group) {
@@ -984,7 +1000,7 @@ if (
         {cityOffers && cityOffers.length > 0 && (
           <CityOffersRail
             offers={cityOffers}
-            title={`Local & online offerings${group.city ? ` in ${group.city}` : ''}`}
+            title={`Local offerings${group.city ? ` in ${group.city}` : ''}`}
             seeAllHref={`/browse?city=${encodeURIComponent(group.city || '')}&country=${encodeURIComponent(
               group.country || ''
             )}&online=true`}
@@ -993,19 +1009,23 @@ if (
       </section>
 
       {/* Events */}
-      <section className="hx-card p-3 sm:p-6">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Upcoming events</h2>
-        </div>
+<section className="hx-card p-3 sm:p-6">
+  <div className="mb-3 flex items-center justify-between">
+    <h2 className="text-lg font-semibold">Upcoming events</h2>
+    {isAnchor && (
+      <button
+        onClick={() => setShowEventForm((s) => !s)}
+        className="hx-btn hx-btn--primary"
+      >
+        {showEventForm ? 'Close' : 'Create event'}
+      </button>
+    )}
+  </div>
 
-        {/* Create */}
-        {isAnchor && (
-          <div className="mb-4 space-y-3 rounded border p-3">
-            <div className="flex items-center justify-between">
-              <button onClick={() => setShowEventForm((s) => !s)} className="hx-btn hx-btn--outline-primary">
-                {showEventForm ? 'Close' : 'Create event'}
-              </button>
-            </div>
+{/* Create (form only — button moved to header) */}
+{isAnchor && showEventForm && (
+  <div className="mb-4 space-y-3 p-3">
+    {/* keep your existing event form fields here (title, date/time, etc.) */}
 
             {showEventForm && (
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1517,11 +1537,73 @@ if (
           </div>
         )}
 
+        {/* Thin line button & dropdown — now includes Search */}
+        <div className="relative mb-3">
+          <button
+            type="button"
+            className="w-full text-left text-xs text-gray-600 hover:text-gray-800 border-b pb-1"
+            onClick={() => setPostMenuOpen((s) => !s)}
+            aria-expanded={postMenuOpen}
+          >
+            Filter & Sort
+          </button>
+
+          {postMenuOpen && (
+            <div className="absolute z-10 mt-1 w-full rounded border bg-white p-2 shadow">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Sort */}
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-xs text-gray-600">Sort:</span>
+                  <button
+                    type="button"
+                    className={`rounded border px-2 py-1 text-xs ${
+                      postSort === 'recent' ? 'bg-gray-800 text-white' : 'bg-white'
+                    }`}
+                    onClick={() => setPostSort('recent')}
+                  >
+                    Most Recent
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded border px-2 py-1 text-xs ${
+                      postSort === 'popular' ? 'bg-gray-800 text-white' : 'bg-white'
+                    }`}
+                    onClick={() => setPostSort('popular')}
+                  >
+                    Most Popular
+                  </button>
+                </div>
+
+                {/* Search */}
+                <div className="flex-1 min-w-[160px]">
+                  <input
+                    className="w-full rounded border px-2 py-1 text-sm"
+                    placeholder="Search posts…"
+                    value={postSearch}
+                    onChange={(e) => setPostSearch(e.target.value)}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  className="ml-auto rounded border px-2 py-1 text-xs"
+                  onClick={() => {
+                    setPostSearch('');
+                    setPostSort('recent');
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="space-y-3">
-          {posts.length === 0 ? (
+          {derivedPosts.length === 0 ? (
             <p className="text-sm text-gray-600">No posts yet.</p>
           ) : (
-            posts.map((p) => (
+            derivedPosts.map((p) => (
               <PostItem
                 key={p.id}
                 post={{ ...p, body: p.body ?? '', images: p.images ?? [] }}

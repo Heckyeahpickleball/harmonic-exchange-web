@@ -1,23 +1,36 @@
+// /components/CityOffersRail.tsx
 'use client';
 
 import Link from 'next/link';
-import { useRef } from 'react';
+import { useMemo, useRef } from 'react';
 
 export type CityOffer = {
   id: string;
   title: string;
   owner_display_name: string | null;
   thumb_url: string | null;
+
+  // May be present if your query selected location columns
+  area_city?: string | null;
+  area_country?: string | null;
 };
 
 export default function CityOffersRail({
   offers,
-  title = 'Local & online offerings',
+  title = 'Local offerings',
   seeAllHref,
+  // When provided, we strictly filter by city (and optionally country)
+  city,
+  country,
+  // Allow “Online/Virtual/Remote” items only if explicitly requested
+  includeOnline = false,
 }: {
   offers: CityOffer[];
   title?: string;
   seeAllHref?: string;
+  city?: string;
+  country?: string;
+  includeOnline?: boolean;
 }) {
   const trackRef = useRef<HTMLDivElement | null>(null);
 
@@ -28,6 +41,91 @@ export default function CityOffersRail({
   };
 
   const STEP = 260;
+
+  // ---- helpers --------------------------------------------------------------
+  const normalize = (s?: string | null) => (s ?? '').trim().toLowerCase();
+  const isOnlineLabel = (s?: string | null) => {
+    const v = normalize(s);
+    return v === '' || v === 'online' || v === 'virtual' || v === 'remote';
+  };
+
+  // If no explicit city is passed, try to infer one from the data.
+  // We ignore online/blank and pick the most frequent non-online city,country pair.
+  const inferred = useMemo(() => {
+    if (!offers?.length) return { city: '', country: '', confidence: 0 };
+
+    const counts = new Map<string, number>(); // key: "city||country"
+    for (const o of offers) {
+      const oc = normalize(o.area_city);
+      const oco = normalize(o.area_country);
+      if (isOnlineLabel(oc)) continue;
+      if (!oc) continue; // skip blanks
+      const key = `${oc}||${oco}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+
+    if (!counts.size) return { city: '', country: '', confidence: 0 };
+
+    // find the dominant pair
+    let topKey = '';
+    let topCount = 0;
+    let total = 0;
+    for (const [k, v] of counts) {
+      total += v;
+      if (v > topCount) {
+        topCount = v;
+        topKey = k;
+      }
+    }
+    const [cCity, cCountry] = topKey.split('||');
+    const confidence = total > 0 ? topCount / total : 0;
+
+    return { city: cCity, country: cCountry, confidence };
+  }, [offers]);
+
+  // Decide the effective city/country for filtering:
+  // 1) If props provided, use them.
+  // 2) Otherwise, if we can infer a dominant city (>=60% of non-online items), use that.
+  // 3) Otherwise, no city-level filtering is applied (backward compatible).
+  const effectiveCity = useMemo(() => {
+    const explicit = normalize(city);
+    if (explicit) return explicit;
+    if (inferred.confidence >= 0.6 && inferred.city) return inferred.city;
+    return '';
+  }, [city, inferred]);
+
+  const effectiveCountry = useMemo(() => {
+    const explicit = normalize(country);
+    if (explicit) return explicit;
+    if (inferred.confidence >= 0.6) return inferred.country;
+    return '';
+  }, [country, inferred]);
+
+  // ---- filtering logic (safe + backward compatible) -------------------------
+  const filtered = useMemo(() => {
+    const cCity = effectiveCity;
+    const cCountry = effectiveCountry;
+
+    // If we still have no effective city, keep previous behavior:
+    // return as-is (but let callers set city/includeOnline to tighten).
+    if (!cCity) return offers;
+
+    return offers.filter((o) => {
+      const oc = normalize(o.area_city);
+      const oco = normalize(o.area_country);
+
+      // Exclude online/blank unless explicitly allowed
+      if (!includeOnline && isOnlineLabel(oc)) return false;
+
+      // Must match city
+      if (oc !== cCity) return false;
+
+      // If a country is available, it must also match (when present)
+      if (cCountry && oco !== cCountry) return false;
+
+      return true;
+    });
+  }, [offers, effectiveCity, effectiveCountry, includeOnline]);
 
   return (
     <div className="mt-1">
@@ -61,7 +159,7 @@ export default function CityOffersRail({
           className="no-scrollbar flex gap-3 overflow-x-auto scroll-smooth pr-6"
           style={{ scrollSnapType: 'x mandatory' }}
         >
-          {offers.map((o) => {
+          {filtered.map((o) => {
             const img = o.thumb_url;
             return (
               <Link
@@ -80,6 +178,7 @@ export default function CityOffersRail({
                     "
                   >
                     {img ? (
+                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={img}
                         alt=""

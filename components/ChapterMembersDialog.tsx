@@ -240,7 +240,8 @@ export default function ChapterPage() {
         }
         if (!cancelled) setOffers(oList);
 
-        // 6) Local (city+country) OR Online offers for the carousel
+// 6) Local offers only (exclude online)
+// ...same as the AFTER block in 1A...
         {
           const hasCity = (gRow.city || '').trim().length > 0;
           const hasCountry = (gRow.country || '').trim().length > 0;
