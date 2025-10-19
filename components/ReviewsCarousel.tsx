@@ -5,78 +5,48 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
-type Row = {
+type FeedRow = {
   id: string;
-  request_id: string | null;
-  offer_id: string | null;
-  owner_profile_id: string | null;     // provider
-  receiver_profile_id: string | null;  // receiver (author)
-  message: string | null;              // actual text field you write
   created_at: string;
+  message: string | null;
+  offer_id: string;
+  offer_title: string | null;
+  owner_id: string | null;
+  owner_name: string | null;
+  receiver_id: string | null;
+  receiver_name: string | null;
 };
-
-type OfferRow = { id: string; title: string | null };
-type ProfileRow = { id: string; display_name: string | null };
 
 const INTERVAL_MS = 2500;
 
 export default function ReviewsCarousel() {
-  const [rows, setRows] = useState<Row[]>([]);
-  const [offers, setOffers] = useState<Record<string, OfferRow>>({});
-  const [profiles, setProfiles] = useState<Record<string, ProfileRow>>({});
+  const [rows, setRows] = useState<FeedRow[]>([]);
   const [i, setI] = useState(0);
   const timer = useRef<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Pull recent public gratitudes
-      const { data, error } = await supabase
-        .from('review_gratitudes')
-        .select('id,request_id,offer_id,owner_profile_id,receiver_profile_id,message,created_at')
-        .order('created_at', { ascending: false })
-        .limit(25);
-
+      setErr(null);
+      const { data, error } = await supabase.rpc('public_reviews_feed', { limit_n: 25 });
       if (cancelled) return;
-      if (!error && data) {
-        setRows(data as Row[]);
-
-        // hydrate labels
-        const offerIds = Array.from(new Set((data as Row[]).map(r => r.offer_id).filter(Boolean) as string[]));
-        if (offerIds.length) {
-          const { data: o } = await supabase
-            .from('offers')
-            .select('id,title')
-            .in('id', offerIds);
-          const map: Record<string, OfferRow> = {};
-          (o ?? []).forEach((row) => (map[row.id] = row));
-          setOffers(map);
-        }
-
-        const profIds = Array.from(new Set(
-          (data as Row[]).flatMap(r => [r.owner_profile_id, r.receiver_profile_id]).filter(Boolean) as string[]
-        ));
-        if (profIds.length) {
-          const { data: p } = await supabase
-            .from('profiles')
-            .select('id,display_name')
-            .in('id', profIds);
-          const map: Record<string, ProfileRow> = {};
-          (p ?? []).forEach((row) => (map[row.id] = row));
-          setProfiles(map);
-        }
+      if (error) {
+        console.error('reviews carousel error:', error);
+        setErr(error.message);
+        setRows([]);
+        return;
       }
+      setRows((data ?? []) as FeedRow[]);
     })();
     return () => { cancelled = true; };
   }, []);
 
   // auto-advance
   useEffect(() => {
-    if (rows.length === 0) return;
+    if (!rows.length) return;
     if (timer.current) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      setI((p) => (p + 1) % rows.length);
-    }, INTERVAL_MS);
+    timer.current = window.setTimeout(() => setI((p) => (p + 1) % rows.length), INTERVAL_MS);
     return () => { if (timer.current) window.clearTimeout(timer.current); };
   }, [i, rows.length]);
 
@@ -94,6 +64,17 @@ export default function ReviewsCarousel() {
       el.removeEventListener('mouseleave', onLeave);
     };
   }, [rows.length]);
+
+  if (err) {
+    return (
+      <section aria-label="Past Exchanges" className="mx-auto max-w-6xl px-4">
+        <div className="rounded-2xl border bg-white p-6">
+          <h3 className="text-lg font-semibold text-gray-800">Gratitude from Past Exchanges</h3>
+          <p className="mt-2 text-sm text-gray-600">Couldn’t load reviews.</p>
+        </div>
+      </section>
+    );
+  }
 
   if (rows.length === 0) {
     return (
@@ -113,9 +94,8 @@ export default function ReviewsCarousel() {
   }
 
   const cur = rows[i];
-  const offerTitle = (cur.offer_id && offers[cur.offer_id]?.title) || 'an offer';
-  const receiverName = (cur.receiver_profile_id && profiles[cur.receiver_profile_id]?.display_name) || 'Receiver';
-  const ownerName = (cur.owner_profile_id && profiles[cur.owner_profile_id]?.display_name) || 'Provider';
+  const offerHref = `/offers/${cur.offer_id}`;
+  const created = new Date(cur.created_at).toLocaleDateString();
 
   return (
     <section aria-label="Past Exchanges" className="mx-auto max-w-6xl px-4">
@@ -125,13 +105,15 @@ export default function ReviewsCarousel() {
       >
         {/* left: copy */}
         <div className="min-w-0 flex-1">
-          <div className="text-xs text-gray-500">{new Date(cur.created_at).toLocaleString()}</div>
+          <div className="text-xs text-gray-500">{created}</div>
           <div className="mt-1 text-sm">
-            <span className="font-medium">{receiverName}</span> on <span className="font-medium">{offerTitle}</span>
+            <span className="font-medium">{cur.receiver_name || 'Receiver'}</span> on{' '}
+            <Link href={offerHref} className="font-medium hx-link">
+              {cur.offer_title || 'an offer'}
+            </Link>{' '}
+            from <span className="font-medium">{cur.owner_name || 'Provider'}</span>
           </div>
-          <p className="mt-2 line-clamp-3 text-[15px] text-gray-800">
-            {cur.message}
-          </p>
+          <p className="mt-2 line-clamp-3 text-[15px] text-gray-800">{cur.message}</p>
 
           <div className="mt-3 flex items-center gap-2">
             <Link href="/reviews" className="hx-btn hx-btn--outline-primary text-xs px-2 py-1">
