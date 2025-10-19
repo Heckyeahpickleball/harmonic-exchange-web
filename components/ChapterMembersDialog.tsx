@@ -485,15 +485,16 @@ export default function ChapterPage() {
         setCreatingEvent(false);
         return;
       }
-      const eventData = {
-        group_id: group.id,
-        title: evTitle.trim(),
-        description: evDesc.trim() || null,
-        starts_at: toIsoLocal(evStart),
-        ends_at: evEnd ? toIsoLocal(evEnd) : null,
-        location: evOnline ? null : evLocation.trim() || null,
-        is_online: evOnline,
-      };
+const eventData = {
+  group_id: group.id,
+  title: evTitle.trim(),
+  description: evDesc.trim() || null,
+  starts_at: toIsoLocal(evStart),
+  ends_at: evEnd ? toIsoLocal(evEnd) : null,
+  location: evOnline ? null : evLocation.trim() || null,
+  is_online: evOnline,
+  created_by: auth.user.id,           // <-- add this
+};
       const { error } = await supabase.from('group_events').insert(eventData);
       if (error) throw error;
       setShowEventForm(false);
