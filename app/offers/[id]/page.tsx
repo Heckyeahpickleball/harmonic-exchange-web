@@ -89,39 +89,87 @@ export default function OfferDetailPage() {
 
     let requestId: string | null = null;
 
-    const { data: rpcData, error: rpcErr } = await supabase.rpc('create_request', {
+    // 1) Try the RPC
+    const rpc = await supabase.rpc('create_request', {
       p_offer: offer.id,
       p_note: note.trim() || '—',
     });
 
-    if (!rpcErr && rpcData) {
-      requestId = typeof rpcData === 'string' ? rpcData : (rpcData as any);
+    if (!rpc.error && rpc.data) {
+      requestId =
+        typeof rpc.data === 'string' ? rpc.data : (rpc.data as any);
     } else {
-      const { data: ins, error: insErr } = await supabase
-        .from('requests')
-        .insert({
-          offer_id: offer.id,
-          requester_profile_id: me,
-          note: note.trim() || '—',
-        })
-        .select('id')
-        .single();
-      if (insErr) throw insErr;
-      requestId = ins!.id as string;
+      // 2) Handle duplicate or fall back to direct insert
+      const errMsg = rpc.error?.message ?? '';
+      const duplicate = /duplicate key value|already exists|conflict/i.test(errMsg);
+
+      if (duplicate) {
+        const { data: existing, error: exErr } = await supabase
+          .from('requests')
+          .select('id')
+          .eq('offer_id', offer.id)
+          .eq('requester_profile_id', me)
+          .maybeSingle();
+        if (exErr) throw exErr;
+        requestId = existing?.id ?? null;
+      } else {
+        const ins = await supabase
+          .from('requests')
+          .insert({
+            offer_id: offer.id,
+            requester_profile_id: me,
+            note: note.trim() || '—',
+          })
+          .select('id')
+          .maybeSingle();
+
+        if (ins.error) {
+          const dupe2 = /duplicate key value|already exists|conflict/i.test(ins.error.message);
+          if (!dupe2) throw ins.error;
+
+          const { data: existing2, error: exErr2 } = await supabase
+            .from('requests')
+            .select('id')
+            .eq('offer_id', offer.id)
+            .eq('requester_profile_id', me)
+            .maybeSingle();
+          if (exErr2) throw exErr2;
+          requestId = existing2?.id ?? null;
+        } else {
+          requestId = ins.data?.id ?? null;
+        }
+      }
     }
 
-    // best-effort notifications
     if (requestId) {
-      const payload = { request_id: requestId, offer_id: offer.id, sender_id: me, text: note.trim() || '—' };
+      // 3) Write BOTH sides of the initial message into notifications
+      const payload = {
+        thread_id: requestId,        // used by deep-linking
+        request_id: requestId,
+        offer_id: offer.id,
+        sender_id: me,
+        text: note.trim() || '—',
+      };
+
       try {
+        const now = new Date().toISOString();
         await supabase.from('notifications').insert([
-          { profile_id: me, type: 'message', data: payload, read_at: new Date().toISOString() },
+          // Sender copy so you immediately see the message in your own thread
+          { profile_id: me, type: 'message', data: payload, read_at: now },
+          // Receiver copy so the owner is notified
           { profile_id: offer.owner_id, type: 'message_received', data: payload },
         ]);
-      } catch {}
+      } catch {
+        // non-fatal; chat will still open
+      }
     }
 
-    router.push(requestId ? `/messages?thread=${requestId}` : '/messages');
+    // 4) Navigate to the message thread
+    try {
+      router.push(requestId ? `/messages?request=${requestId}` : '/messages');
+    } catch {
+      // ignore
+    }
   }
 
   if (loading) return <section className="max-w-3xl"><p>Loading…</p></section>;
@@ -226,7 +274,7 @@ export default function OfferDetailPage() {
         </div>
       )}
 
-      {/* GRATITUDE: moved BELOW the Ask-to-Receive/owner block */}
+      {/* GRATITUDE */}
       <OfferGratitude offerId={offer.id} offerTitle={offer.title} limit={3} />
 
       {showModal && (
@@ -236,13 +284,13 @@ export default function OfferDetailPage() {
           submitLabel="Ask to Receive"
           onCancel={() => setShowModal(false)}
           onSubmit={async (note, setBusy, setError) => {
-            setBusy(true);
-            setError('');
+            if (setBusy) setBusy(true);
+            if (setError) setError('');
             try {
               await createRequest(note);
             } catch (e: any) {
-              setError(e?.message ?? 'Could not send your ask.');
-              setBusy(false);
+              if (setError) setError(e?.message ?? 'Could not send your ask.');
+              if (setBusy) setBusy(false);
               return;
             }
           }}
