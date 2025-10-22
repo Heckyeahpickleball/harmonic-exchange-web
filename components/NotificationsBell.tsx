@@ -15,8 +15,8 @@ type NotifType =
   | 'offer_pending'
   | 'fulfillment_reminder'
   | 'badge_earned'
-  | 'gratitude_prompt'    // important for “Say thanks”
-  | 'review_prompt'       // legacy alias
+  | 'gratitude_prompt'
+  | 'review_prompt'
   | 'system'
   | string;
 
@@ -27,8 +27,8 @@ type Notif = {
   created_at: string;
   read_at: string | null;
   profile_id: string;
-  request_id?: string | null; // ⬅ pulled from column
-  offer_id?: string | null;   // ⬅ pulled from column
+  request_id?: string | null;
+  offer_id?: string | null;
   _fresh?: boolean;
 };
 
@@ -39,7 +39,19 @@ export default function NotificationsBell() {
   const [rows, setRows] = useState<Notif[]>([]);
   const unread = useMemo(() => rows.filter((r) => !r.read_at).length, [rows]);
 
-  const [activeTab, setActiveTab] = useState<'notifications' | 'messages'>('notifications');
+  // Unread messages counter (for mobile Messages button badge)
+  const unreadMsgs = useMemo(
+    () =>
+      rows.filter(
+        (r) =>
+          !r.read_at &&
+          (r.type === 'message' || r.type === 'message_received'),
+      ).length,
+    [rows],
+  );
+
+  const [activeTab, setActiveTab] =
+    useState<'notifications' | 'messages'>('notifications');
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -61,7 +73,16 @@ export default function NotificationsBell() {
   const requesterCache = useRef(new Map<string, string>());
   const sigSeen = useRef<Set<string>>(new Set());
 
-  // Helper to read ids from either JSON or columns
+  // Track if we are on mobile to change close/scroll behavior
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639.95px)');
+    const set = () => setIsMobile(mq.matches);
+    set();
+    mq.addEventListener('change', set);
+    return () => mq.removeEventListener('change', set);
+  }, []);
+
   const getOfferId = (n: Notif) =>
     (n.data?.offer_id as string | undefined) || (n.offer_id || undefined);
   const getReqId = (n: Notif) =>
@@ -80,7 +101,10 @@ export default function NotificationsBell() {
     );
     if (!missing.length) return;
 
-    const { data } = await supabase.from('offers').select('id,title').in('id', missing);
+    const { data } = await supabase
+      .from('offers')
+      .select('id,title')
+      .in('id', missing);
     for (const row of (data || []) as { id: string; title: string }[]) {
       titleCache.current.set(row.id, row.title);
     }
@@ -88,7 +112,9 @@ export default function NotificationsBell() {
       prev.map((n) => {
         const oid = getOfferId(n);
         const t = oid ? titleCache.current.get(oid) : undefined;
-        return t ? { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } } : n;
+        return t
+          ? { ...n, data: { ...n.data, offer_title: n.data?.offer_title ?? t } }
+          : n;
       }),
     );
   }
@@ -97,7 +123,11 @@ export default function NotificationsBell() {
     const ids = Array.from(
       new Set(
         notifs
-          .map((n) => (n.type === 'request_received' && !n?.data?.requester_name ? getReqId(n) : null))
+          .map((n) =>
+            n.type === 'request_received' && !n?.data?.requester_name
+              ? getReqId(n)
+              : null,
+          )
           .filter((v): v is string => !!v && !requesterCache.current.has(v)),
       ),
     );
@@ -109,106 +139,169 @@ export default function NotificationsBell() {
       .in('id', ids);
 
     for (const r of (data || []) as any[]) {
-      requesterCache.current.set(r.id, r.requester?.display_name || 'Someone');
+      requesterCache.current.set(
+        r.id,
+        r.requester?.display_name || 'Someone',
+      );
     }
 
     setRows((prev) =>
       prev.map((n) => {
         const rid = getReqId(n);
         const name = rid ? requesterCache.current.get(rid) : undefined;
-        return name ? { ...n, data: { ...n.data, requester_name: n.data?.requester_name ?? name } } : n;
+        return name
+          ? {
+              ...n,
+              data: { ...n.data, requester_name: n.data?.requester_name ?? name },
+            }
+          : n;
       }),
     );
   }
 
-  function label(n: Notif): { text: string; href?: string } {
-    const offerId = getOfferId(n);
-    const offerTitle = (n.data?.offer_title as string | undefined) || (offerId ? titleCache.current.get(offerId) : undefined);
-    const body = (n.data?.text ?? n.data?.message) as string | undefined;
-    const reqId = getReqId(n);
+function label(n: Notif): { text: string; href?: string } {
+  const offerId = getOfferId(n);
+  const offerTitle =
+    (n.data?.offer_title as string | undefined) ||
+    (offerId ? titleCache.current.get(offerId) : undefined);
+  const body = (n.data?.text ?? n.data?.message) as string | undefined;
+  const reqId = getReqId(n);
 
-    switch (n.type) {
-      case 'offer_pending': {
-        const href = offerId ? `/admin?tab=offers&pending=1&offer=${offerId}` : '/admin?tab=offers&pending=1';
-        return { text: `New offer pending${offerTitle ? `: “${offerTitle}”` : ''}`, href };
-      }
-      case 'request_received':
-        return {
-          text: `New request${offerTitle ? ` for “${offerTitle}”` : ''}${
-            n.data?.requester_name ? ` from ${n.data.requester_name}` : ''
-          }`,
-          href: '/exchanges?tab=received',
-        };
-      case 'request_accepted':
-        return { text: `Your request was accepted${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
-      case 'request_declined':
-        return { text: `Your request was declined${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=sent' };
-      case 'request_fulfilled':
-        return { text: `Request marked fulfilled${offerTitle ? ` — “${offerTitle}”` : ''}`, href: '/exchanges?tab=fulfilled' };
+  // Prefer sending users to the Global feed for content activity
+  const GLOBAL_HREF = '/global';
 
-      // ✅ Explicit prompts after fulfillment
-      case 'gratitude_prompt': {
-        const text = `Say thanks${offerTitle ? ` for “${offerTitle}”` : ''}`;
-        const href = reqId
-          ? `/reviews/new?request_id=${encodeURIComponent(reqId)}`
-          : '/reviews/new';
-        return { text, href };
-      }
-      case 'review_prompt': {
-        const text = `Please leave a review${offerTitle ? ` for “${offerTitle}”` : ''}`;
-        const href = reqId
-          ? `/gratitude/write?request_id=${encodeURIComponent(reqId)}`
-          : '/reviews/new';
-        return { text, href };
-      }
+  switch (n.type) {
+    /* ---------- existing cases (kept as-is) ---------- */
+    case 'offer_pending': {
+      const href = offerId
+        ? `/admin?tab=offers&pending=1&offer=${offerId}`
+        : '/admin?tab=offers&pending=1';
+      return {
+        text: `New offer pending${offerTitle ? `: “${offerTitle}”` : ''}`,
+        href,
+      };
+    }
+    case 'request_received':
+      return {
+        text: `New request${
+          offerTitle ? ` for “${offerTitle}”` : ''
+        }${n.data?.requester_name ? ` from ${n.data.requester_name}` : ''}`,
+        href: '/exchanges?tab=received',
+      };
+    case 'request_accepted':
+      return {
+        text: `Your request was accepted${
+          offerTitle ? ` — “${offerTitle}”` : ''
+        }`,
+        href: '/exchanges?tab=sent',
+      };
+    case 'request_declined':
+      return {
+        text: `Your request was declined${
+          offerTitle ? ` — “${offerTitle}”` : ''
+        }`,
+        href: '/exchanges?tab=sent',
+      };
+    case 'request_fulfilled':
+      return {
+        text: `Request marked fulfilled${
+          offerTitle ? ` — “${offerTitle}”` : ''
+        }`,
+        href: '/exchanges?tab=fulfilled',
+      };
 
-      case 'badge_earned': {
-        const track = n.data?.track as string | undefined;
-        const tier = n.data?.tier as number | undefined;
-        const niceTrack =
-          track === 'give'
-            ? 'Giver'
-            : track === 'receive'
-            ? 'Receiver'
-            : track === 'streak'
-            ? 'Streak'
-            : track === 'completed_exchange'
-            ? 'Completed Exchanges'
-            : track === 'requests_made'
-            ? 'Requests Made'
-            : track === 'shared_offers'
-            ? 'Offers Shared'
-            : track ?? 'Badge';
-        const text = `🎉 New badge earned — ${niceTrack}${tier != null ? ` (Tier ${tier})` : ''}`;
-        return { text, href: '/profile#badges' };
-      }
+    case 'gratitude_prompt': {
+      const text = `Say thanks${offerTitle ? ` for “${offerTitle}”` : ''}`;
+      const href = reqId
+        ? `/reviews/new?request_id=${encodeURIComponent(reqId)}`
+        : '/reviews/new';
+      return { text, href };
+    }
+    case 'review_prompt': {
+      const text = `Please leave a review${
+        offerTitle ? ` for “${offerTitle}”` : ''
+      }`;
+      const href = reqId
+        ? `/gratitude/write?request_id=${encodeURIComponent(reqId)}`
+        : '/reviews/new';
+      return { text, href };
+    }
 
-      case 'message':
-      case 'message_received': {
-        const snip = body ? `: ${body.slice(0, 80)}` : '';
-        const on = offerTitle ? ` on “${offerTitle}”` : '';
-        return { text: `New message${on}${snip}`, href: reqId ? `/messages?thread=${reqId}` : '/messages' };
-      }
+    case 'badge_earned': {
+      const track = n.data?.track as string | undefined;
+      const tier = n.data?.tier as number | undefined;
+      const niceTrack =
+        track === 'give'
+          ? 'Giver'
+          : track === 'receive'
+          ? 'Receiver'
+          : track === 'streak'
+          ? 'Streak'
+          : track === 'completed_exchange'
+          ? 'Completed Exchanges'
+          : track === 'requests_made'
+          ? 'Requests Made'
+          : track === 'shared_offers'
+          ? 'Offers Shared'
+          : track ?? 'Badge';
+      const text = `🎉 New badge earned — ${niceTrack}${
+        tier != null ? ` (Tier ${tier})` : ''
+      }`;
+      return { text, href: '/profile#badges' };
+    }
 
-      case 'fulfillment_reminder': {
-        const t = offerTitle ? ` “${offerTitle}”` : '';
-        const href = reqId ? `/exchanges?focus=${reqId}` : '/exchanges';
-        return { text: `Has your offer been fulfilled?${t}`, href };
-      }
+    case 'message':
+    case 'message_received': {
+      const snip = body ? `: ${body.slice(0, 80)}` : '';
+      const on = offerTitle ? ` on “${offerTitle}”` : '';
+      return {
+        text: `New message${on}${snip}`,
+        href: reqId ? `/messages?thread=${reqId}` : '/messages',
+      };
+    }
 
-      default: {
-        const text = n.data?.message || n.data?.text || 'Update';
-        return { text, href: '/exchanges' };
-      }
+    case 'fulfillment_reminder': {
+      const t = offerTitle ? ` “${offerTitle}”` : '';
+      const href = reqId ? `/exchanges?focus=${reqId}` : '/exchanges';
+      return { text: `Has your offer been fulfilled?${t}`, href };
+    }
+
+    /* ---------- NEW cases for hearts & comments ---------- */
+    case 'heart_on_post': {
+      const liker = (n.data?.liker_name as string | undefined) ?? 'Someone';
+      return { text: `${liker} liked your post`, href: GLOBAL_HREF };
+    }
+    case 'heart_on_comment': {
+      const liker = (n.data?.liker_name as string | undefined) ?? 'Someone';
+      return { text: `${liker} liked your comment`, href: GLOBAL_HREF };
+    }
+    case 'comment_on_post': {
+      const who = (n.data?.commenter_name as string | undefined) ?? 'Someone';
+      const snip = n.data?.text ? `: ${String(n.data.text).slice(0, 80)}` : '';
+      return { text: `${who} commented on your post${snip}`, href: GLOBAL_HREF };
+    }
+
+    /* ---------- fallback ---------- */
+    default: {
+      const text =
+        (n.data?.message as string | undefined) ||
+        (n.data?.text as string | undefined) ||
+        'Update';
+      return { text, href: GLOBAL_HREF };
     }
   }
+}
 
   async function markAllRead() {
     if (!uid) return;
     const ids = rows.filter((r) => !r.read_at).map((r) => r.id);
     if (!ids.length) return;
     const now = new Date().toISOString();
-    setRows((prev) => prev.map((r) => (ids.includes(r.id) ? { ...r, read_at: now, _fresh: false } : r)));
+    setRows((prev) =>
+      prev.map((r) =>
+        ids.includes(r.id) ? { ...r, read_at: now, _fresh: false } : r,
+      ),
+    );
     await supabase.from('notifications').update({ read_at: now }).in('id', ids);
   }
 
@@ -216,14 +309,20 @@ export default function NotificationsBell() {
     const found = rows.find((r) => r.id === id);
     if (!found || found.read_at) return;
     const now = new Date().toISOString();
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, read_at: now, _fresh: false } : r)));
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === id ? { ...r, read_at: now, _fresh: false } : r,
+      ),
+    );
     await supabase.from('notifications').update({ read_at: now }).eq('id', id);
   }
 
   function sig(n: Notif) {
     const offerId = getOfferId(n) ?? '';
     const reqId = getReqId(n) ?? '';
-    return `${n.profile_id}|${n.type}|${offerId}|${reqId}|${n.data?.track ?? ''}|${n.data?.tier ?? ''}`;
+    return `${n.profile_id}|${n.type}|${offerId}|${reqId}|${
+      n.data?.track ?? ''
+    }|${n.data?.tier ?? ''}`;
   }
 
   useEffect(() => {
@@ -231,12 +330,13 @@ export default function NotificationsBell() {
       const { data } = await supabase.auth.getUser();
       const u = data?.user?.id ?? null;
       setUid(u);
-      if (!u) return;
+      if (!u) return; // logged out: skip loading notifications
 
-      // ⬇️ include request_id, offer_id columns
       const { data: list } = await supabase
         .from('notifications')
-        .select('id,type,data,created_at,read_at,profile_id,request_id,offer_id')
+        .select(
+          'id,type,data,created_at,read_at,profile_id,request_id,offer_id',
+        )
         .eq('profile_id', u)
         .order('created_at', { ascending: false })
         .limit(50);
@@ -253,13 +353,21 @@ export default function NotificationsBell() {
       sigSeen.current = seen;
       setRows(dedup);
 
-      void Promise.allSettled([enrichOfferTitles(dedup), enrichRequesterNames(dedup)]);
+      void Promise.allSettled([
+        enrichOfferTitles(dedup),
+        enrichRequesterNames(dedup),
+      ]);
 
       const chIns = supabase
         .channel('realtime:notifications:ins')
         .on(
           'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'notifications', filter: `profile_id=eq.${u}` },
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications',
+            filter: `profile_id=eq.${u}`,
+          },
           async (payload) => {
             const n = payload.new as Notif;
             const s = sig(n);
@@ -267,7 +375,10 @@ export default function NotificationsBell() {
             sigSeen.current.add(s);
             const fresh = { ...n, _fresh: true };
             setRows((prev) => [fresh, ...prev].slice(0, 50));
-            await Promise.allSettled([enrichOfferTitles([fresh]), enrichRequesterNames([fresh])]);
+            await Promise.allSettled([
+              enrichOfferTitles([fresh]),
+              enrichRequesterNames([fresh]),
+            ]);
           },
         )
         .subscribe();
@@ -276,10 +387,21 @@ export default function NotificationsBell() {
         .channel('realtime:notifications:upd')
         .on(
           'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `profile_id=eq.${u}` },
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'notifications',
+            filter: `profile_id=eq.${u}`,
+          },
           (payload) => {
             const upd = payload.new as Notif;
-            setRows((prev) => prev.map((r) => (r.id === upd.id ? { ...r, read_at: upd.read_at ?? null, _fresh: false } : r)));
+            setRows((prev) =>
+              prev.map((r) =>
+                r.id === upd.id
+                  ? { ...r, read_at: upd.read_at ?? null, _fresh: false }
+                  : r,
+              ),
+            );
           },
         )
         .subscribe();
@@ -291,6 +413,7 @@ export default function NotificationsBell() {
     })();
   }, []);
 
+  // Outside click / escape to close
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent | TouchEvent) => {
@@ -312,8 +435,8 @@ export default function NotificationsBell() {
     };
   }, [open]);
 
+  // Lock background scroll on mobile when panel is open
   useEffect(() => {
-    const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 639.95px)').matches;
     if (open && isMobile) {
       const prev = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
@@ -321,11 +444,28 @@ export default function NotificationsBell() {
         document.body.style.overflow = prev;
       };
     }
-  }, [open]);
+  }, [open, isMobile]);
 
-  const isNode = (v: any): v is Node => !!v && typeof v === 'object' && typeof (v as any).nodeType === 'number';
-  const handlePanelLeave = (evt: React.MouseEvent | React.PointerEvent) => {
-    const next = (evt as any).relatedTarget ?? (evt as any).toElement ?? null;
+  // Only schedule close on pointer/mouse leave for non-mobile (fixes mobile scrolling)
+  const isNode = (v: any): v is Node =>
+    !!v && typeof v === 'object' && typeof (v as any).nodeType === 'number';
+
+  const handlePanelLeave = (
+    evt: React.MouseEvent | React.PointerEvent,
+  ) => {
+    const anyEvt = evt as any;
+    const pointerType = anyEvt?.nativeEvent?.pointerType as
+      | 'mouse'
+      | 'pen'
+      | 'touch'
+      | undefined;
+
+    if (isMobile || (pointerType && pointerType !== 'mouse')) {
+      cancelScheduledClose();
+      return;
+    }
+
+    const next = (anyEvt.relatedTarget ?? anyEvt.toElement) ?? null;
     const root = rootRef.current;
     if (root && isNode(next) && root.contains(next)) {
       cancelScheduledClose();
@@ -334,8 +474,28 @@ export default function NotificationsBell() {
     scheduleClose(0);
   };
 
+  // Cancel any scheduled close while actively scrolling inside the list
+  const onScrollCapture = () => cancelScheduledClose();
+  const onWheelCapture = () => cancelScheduledClose();
+  const onTouchMoveCapture = () => cancelScheduledClose();
+
   const listClass =
-    'overflow-auto sm:max-h-[55vh] sm:rounded-b-xl max-h-[calc(85dvh-110px)] pb-[env(safe-area-inset-bottom)]';
+    'overflow-auto sm:max-h-[70vh] sm:rounded-b-xl max-h-[calc(85dvh-110px)] pb-[env(safe-area-inset-bottom)]';
+
+  // === Logged-out behavior: clicking the bell goes to /sign-in ===
+  if (!uid) {
+    return (
+      <button
+        className="hx-btn hx-btn--outline-primary text-sm px-3 py-2 relative"
+        onClick={() => router.push('/sign-in')}
+        title="Notifications"
+        aria-label="Open notifications"
+        type="button"
+      >
+        <span aria-hidden>🔔</span>
+      </button>
+    );
+  }
 
   return (
     <div ref={rootRef} className="relative" onMouseEnter={cancelScheduledClose}>
@@ -365,16 +525,19 @@ export default function NotificationsBell() {
           role="menu"
           aria-label="Notifications"
           onMouseEnter={cancelScheduledClose}
-          onMouseLeave={handlePanelLeave}
+          onMouseLeave={isMobile ? undefined : handlePanelLeave}
           onPointerEnter={cancelScheduledClose}
-          onPointerLeave={handlePanelLeave}
+          onPointerLeave={isMobile ? undefined : handlePanelLeave}
           className={[
-            'hx-card z-50 p-0',
+            // Desktop (>= sm): anchor to bell, fixed width and max height
             'sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:w-[360px] sm:max-w-[92vw] sm:mx-0 sm:inset-auto',
+            // Mobile (< sm): full-width sheet
             'fixed inset-x-2 top-2 mx-auto w-[calc(100vw-1rem)] max-w-[560px]',
-            'max-h-[85dvh] rounded-xl overflow-hidden',
+            // Shared
+            'hx-card z-50 max-h-[85dvh] rounded-xl overflow-hidden p-0 shadow-xl',
           ].join(' ')}
         >
+          {/* Mobile header with Messages button + badge */}
           <div className="block sm:hidden p-2 border-b">
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -391,13 +554,19 @@ export default function NotificationsBell() {
                   setOpen(false);
                   router.push('/messages');
                 }}
-                className="hx-btn hx-btn--primary text-sm w-full"
+                className="hx-btn hx-btn--primary text-sm w-full relative"
               >
-                Messages
+                <span>Messages</span>
+                {unreadMsgs > 0 && (
+                  <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-[var(--hx-brand)] px-1 text-[11px] font-bold text-white">
+                    {unreadMsgs > 99 ? '99+' : unreadMsgs}
+                  </span>
+                )}
               </button>
             </div>
           </div>
 
+          {/* Desktop header */}
           <div className="hidden sm:flex items-center justify-between border-b px-3 py-2">
             <strong className="text-sm">Notifications</strong>
             <div className="flex items-center gap-2">
@@ -407,7 +576,7 @@ export default function NotificationsBell() {
                   setOpen(false);
                   router.push('/messages');
                 }}
-                className="hx-btn hx-btn--primary text-xs px-2 py-1"
+                className="hx-btn hx-btn--primary text-xs px-2 py-1 relative"
                 title="Go to Messages"
                 aria-label="Go to Messages"
               >
@@ -425,58 +594,68 @@ export default function NotificationsBell() {
             </div>
           </div>
 
-          {activeTab === 'notifications' && (
-            <ul className={listClass}>
-              {rows.length === 0 && (
-                <li className="px-3 py-3 text-sm text-[var(--hx-muted)]">No notifications.</li>
-              )}
-              {rows.map((n) => {
-                const { text, href } = label(n);
-                const ts = new Date(n.created_at).toLocaleString();
-                const isUnread = !n.read_at;
-                return (
-                  <li
-                    key={n.id}
-                    className={['border-b px-3 py-2 text-sm transition-colors', isUnread ? 'bg-teal-50/50' : ''].join(' ')}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          {isUnread && (
-                            <span
-                              className={[
-                                'mt-1 inline-block h-2 w-2 rounded-full bg-[var(--hx-brand)]',
-                                n._fresh ? 'animate-pulse' : '',
-                              ].join(' ')}
-                              aria-hidden
-                            />
-                          )}
-                          <div className="text-[11px] text-[var(--hx-muted)]">{ts}</div>
+          <ul
+            className={listClass}
+            onScrollCapture={onScrollCapture}
+            onWheelCapture={onWheelCapture}
+            onTouchMoveCapture={onTouchMoveCapture}
+          >
+            {rows.length === 0 && (
+              <li className="px-3 py-3 text-sm text-[var(--hx-muted)]">
+                No notifications.
+              </li>
+            )}
+            {rows.map((n) => {
+              const { text, href } = label(n);
+              const ts = new Date(n.created_at).toLocaleString();
+              const isUnread = !n.read_at;
+              return (
+                <li
+                  key={n.id}
+                  className={[
+                    'border-b px-3 py-2 text-sm transition-colors',
+                    isUnread ? 'bg-teal-50/50' : '',
+                  ].join(' ')}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        {isUnread && (
+                          <span
+                            className={[
+                              'mt-1 inline-block h-2 w-2 rounded-full bg-[var(--hx-brand)]',
+                              n._fresh ? 'animate-pulse' : '',
+                            ].join(' ')}
+                            aria-hidden
+                          />
+                        )}
+                        <div className="text-[11px] text-[var(--hx-muted)]">
+                          {ts}
                         </div>
-                        <div className="mt-0.5 break-words">{text}</div>
                       </div>
-
-                      {href && (
-                        <button
-                          type="button"
-                          className="hx-btn hx-btn--outline-primary text-xs px-2 py-1 shrink-0"
-                          onClick={async () => {
-                            await markOneRead(n.id);
-                            setOpen(false);
-                            router.push(href);
-                          }}
-                          aria-label="View"
-                          title="View"
-                        >
-                          View
-                        </button>
-                      )}
+                      <div className="mt-0.5 break-words">{text}</div>
                     </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+
+                    {href && (
+                      <button
+                        type="button"
+                        className="hx-btn hx-btn--outline-primary text-xs px-2 py-1 shrink-0"
+                        onClick={async () => {
+                          await markOneRead(n.id);
+                          setOpen(false);
+                          router.push(href);
+                        }}
+                        aria-label="View"
+                        title="View"
+                      >
+                        View
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
     </div>

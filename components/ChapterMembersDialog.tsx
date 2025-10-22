@@ -200,7 +200,7 @@ export default function ChapterPage() {
         // 4) Posts
         const { data: pRows, error: pErr } = await supabase
           .from('posts')
-          .select('id,profile_id,body,created_at,images,group_id,profiles(display_name)')
+          .select('id,profile_id,body,created_at,images,group_id,profiles(display_name,avatar_url)')
           .eq('group_id', gRow.id)
           .order('created_at', { ascending: false })
           .limit(50);
@@ -240,7 +240,8 @@ export default function ChapterPage() {
         }
         if (!cancelled) setOffers(oList);
 
-        // 6) Local (city+country) OR Online offers for the carousel
+// 6) Local offers only (exclude online)
+// ...same as the AFTER block in 1A...
         {
           const hasCity = (gRow.city || '').trim().length > 0;
           const hasCountry = (gRow.country || '').trim().length > 0;
@@ -448,7 +449,7 @@ export default function ChapterPage() {
 
       const { data: full } = await supabase
         .from('posts')
-        .select('id,profile_id,body,created_at,images,group_id,profiles(display_name)')
+        .select('id,profile_id,body,created_at,images,group_id,profiles(display_name,avatar_url)')
         .eq('id', inserted!.id)
         .maybeSingle();
 
@@ -484,15 +485,16 @@ export default function ChapterPage() {
         setCreatingEvent(false);
         return;
       }
-      const eventData = {
-        group_id: group.id,
-        title: evTitle.trim(),
-        description: evDesc.trim() || null,
-        starts_at: toIsoLocal(evStart),
-        ends_at: evEnd ? toIsoLocal(evEnd) : null,
-        location: evOnline ? null : evLocation.trim() || null,
-        is_online: evOnline,
-      };
+const eventData = {
+  group_id: group.id,
+  title: evTitle.trim(),
+  description: evDesc.trim() || null,
+  starts_at: toIsoLocal(evStart),
+  ends_at: evEnd ? toIsoLocal(evEnd) : null,
+  location: evOnline ? null : evLocation.trim() || null,
+  is_online: evOnline,
+  created_by: auth.user.id,           // <-- add this
+};
       const { error } = await supabase.from('group_events').insert(eventData);
       if (error) throw error;
       setShowEventForm(false);

@@ -188,8 +188,8 @@ export default function AdminUsers() {
   async function onDelete(userId: string) {
     setOpError('');
     setOpNotice('');
-    const reason = prompt('Delete user — optional reason (for audit):') || null;
-    if (!confirm('Are you sure you want to delete this account? This cannot be undone.')) return;
+const reason = prompt('Delete user — optional reason (for audit):') || null;
+if (!(await confirm('Delete this user?\n\nThis is a permanent admin action and cannot be undone.'))) return;
     try {
       const ok = await deleteUserAction(userId, reason);
       if (ok) {

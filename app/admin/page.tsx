@@ -6,8 +6,8 @@
    - Preserves all RPC fallbacks and permissions logic.
 
    Notes:
-   - New "Reviews" tab lists reviews from `reviews` table; if not found, falls back to `gratitudes`.
-   - Admin-only hard delete for reviews with RPC-first, then direct delete fallback, plus audit log.
+   - New "Reviews" tab lists reviews via API that prefers `review_gratitudes` view, then `reviews`, then `gratitudes`.
+   - Admin-only hard delete for reviews with server route (placeholder), plus audit log.
 */
 
 'use client';
@@ -64,7 +64,7 @@ type GroupRow = {
 
 type EmailRow = { id: string; email: string | null; display_name?: string };
 
-/** Minimal, resilient review row shape that can map from either `reviews` or `gratitudes`. */
+/** Minimal, resilient review row shape for Admin UI. */
 type ReviewRow = {
   id: string;
   quote?: string | null;
@@ -162,7 +162,7 @@ function AdminContent() {
 
   // Reviews state
   const [reviews, setReviews] = useState<ReviewRow[]>([]);
-  const [reviewsSource, setReviewsSource] = useState<'reviews' | 'gratitudes' | null>(null);
+  const [reviewsSource, setReviewsSource] = useState<'review_gratitudes' | 'reviews' | 'gratitudes' | null>(null);
   const [reviewQ, setReviewQ] = useState('');
 
   function showError(e: any, fallback = 'Something went wrong.') {
@@ -283,75 +283,59 @@ function AdminContent() {
         }
 
         if (tab === 'reviews') {
-          // Try canonical `reviews` table first
-          let loaded: ReviewRow[] = [];
-          let source: 'reviews' | 'gratitudes' | null = null;
+          // Fetch via server route so we can bypass RLS safely
+          const { data: { session } } = await supabase.auth.getSession();
+          const token = session?.access_token;
 
-          const attemptReviews = await supabase
-            .from('reviews')
-            .select('id, quote, rating, author_id, subject_id, offer_id, request_id, created_at')
-            .order('created_at', { ascending: false })
-            .limit(500);
+          const res = await fetch('/api/admin/reviews', {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            cache: 'no-store',
+          });
 
-          if (!attemptReviews.error && Array.isArray(attemptReviews.data)) {
-            loaded = (attemptReviews.data as any[]).map((r) => ({
-              id: r.id,
-              quote: r.quote ?? null,
-              rating: (typeof r.rating === 'number' ? r.rating : null),
-              author_id: r.author_id ?? null,
-              subject_id: r.subject_id ?? null,
-              offer_id: r.offer_id ?? null,
-              request_id: r.request_id ?? null,
-              created_at: r.created_at,
-            }));
-            source = 'reviews';
-          } else {
-            // Fallback to existing gratitude-style data (select '*' to avoid unknown column errors)
-            const attemptGratitudes = await supabase
-              .from('gratitudes')
-              .select('*')
-              .order('created_at', { ascending: false })
-              .limit(500);
-
-            if (attemptGratitudes.error) throw attemptGratitudes.error;
-
-            loaded = (attemptGratitudes.data || []).map((g: any) => ({
-              id: g.id,
-              // pick the first available text-like field
-              quote: g.quote ?? g.message ?? g.text ?? g.content ?? g.body ?? null,
-              rating: null,
-              author_id: g.from_profile ?? g.from_profile_id ?? null,
-              subject_id: g.to_profile ?? g.to_profile_id ?? null,
-              offer_id: g.offer_id ?? null,
-              request_id: g.request_id ?? null,
-              created_at: g.created_at,
-            }));
-            source = 'gratitudes';
+          if (!res.ok) {
+            const j = await res.json().catch(() => ({}));
+            throw new Error(j?.error || 'Failed to load reviews');
           }
 
-          // Best-effort enrich names for author/subject (optional)
-          const profileIds = Array.from(
-            new Set(
-              loaded.flatMap((r) => [r.author_id, r.subject_id].filter(Boolean) as string[])
-            )
-          );
-          let nameMap = new Map<string, string>();
+          const j = await res.json() as {
+            source: 'review_gratitudes' | 'reviews' | 'gratitudes',
+            items: Array<{
+              id: string;
+              created_at: string;
+              quote: string | null;
+              rating: number | null;
+              author_id: string | null;
+              subject_id: string | null;
+              author_name?: string | null;
+              subject_name?: string | null;
+              offer_id: string | null;
+              request_id: string | null;
+            }>;
+          };
+
+          const loaded = j.items || [];
+
+          // Optional: enrich names when IDs are present
+          const profileIds = Array.from(new Set(
+            loaded.flatMap((r) => [r.author_id, r.subject_id].filter(Boolean) as string[])
+          ));
+          const nameMap = new Map<string, string>();
           if (profileIds.length) {
             const { data: profs } = await supabase
               .from('profiles')
               .select('id,display_name')
               .in('id', profileIds);
-            for (const p of (profs || []) as Profile[]) nameMap.set(p.id, p.display_name);
+            for (const p of (profs || []) as any[]) nameMap.set(p.id, p.display_name);
           }
 
           setReviews(
             loaded.map((r) => ({
               ...r,
-              author_name: r.author_id ? (nameMap.get(r.author_id) || r.author_id) : null,
-              subject_name: r.subject_id ? (nameMap.get(r.subject_id) || r.subject_id) : null,
+              author_name: r.author_name ?? (r.author_id ? (nameMap.get(r.author_id) || r.author_id) : null),
+              subject_name: r.subject_name ?? (r.subject_id ? (nameMap.get(r.subject_id) || r.subject_id) : null),
             }))
           );
-          setReviewsSource(source);
+          setReviewsSource(j.source || null);
         }
 
         if (tab === 'audit') {
@@ -447,20 +431,27 @@ function AdminContent() {
     })();
   }, [canViewAdmin, tab, isAdmin]);
 
-  // helper — best-effort email RPC
+  // helper — fetch emails via view (no RPC; avoids 404s)
   async function fetchEmails(ids: string[]) {
     try {
-      let res = await supabase.rpc('admin_get_profile_emails', { p_profile_ids: ids });
-      if (res.error) res = await supabase.rpc('admin_get_profile_emails', { ids });
-      if (res.error) res = await supabase.rpc('admin_get_profile_emails', { p_ids: ids });
-      if (res.error) throw res.error;
+      if (!ids?.length) return {};
+      const { data, error } = await supabase
+        .from('profiles_with_email')
+        .select('id,email')
+        .in('id', ids);
 
-      const rows = (res.data || []) as EmailRow[];
+      if (error) throw error;
+
+      const rows = (data || []) as EmailRow[];
       const map: Record<string, string | null> = {};
       for (const r of rows) map[r.id] = r.email ?? null;
+
+      // ensure all ids exist in map (fill missing as null)
+      for (const id of ids) if (!(id in map)) map[id] = null;
+
       return map;
     } catch (err) {
-      console.warn('email RPC failed (showing blanks):', err);
+      console.warn('email fetch (profiles_with_email) failed (showing blanks):', err);
       return {} as Record<string, string | null>;
     }
   }
@@ -595,7 +586,8 @@ function AdminContent() {
           'content-type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ profile_id: id, reason }),
+        // FIX: send `id`, not `profile_id`
+        body: JSON.stringify({ id, reason }),
       });
 
       if (!res.ok) {
@@ -827,55 +819,36 @@ function AdminContent() {
 
   // ===== Reviews actions (admin-only hard delete) =====
   async function deleteReview(id: string) {
-    if (!isAdmin) {
-      setMsg('Only admins can delete reviews.');
-      return;
-    }
+    if (!isAdmin) { setMsg('Only admins can delete reviews.'); return; }
     const confirmed = confirm('PERMANENTLY delete this review? This cannot be undone.');
     if (!confirmed) return;
 
     const reason = prompt('Reason (optional):') || null;
 
-    const source = reviewsSource; // 'reviews' or 'gratitudes'
-    if (!source) { setMsg('No review source detected.'); return; }
-
     try {
-      // Try RPC first (works for canonical `reviews`; harmless if function missing)
-      const rpc = await supabase.rpc('admin_review_delete', {
-        p_review_id: id,
-        p_reason: reason,
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      // Server route performs the actual delete (reviews or gratitudes) with elevated privileges.
+      const res = await fetch('/admin/reviews/delete', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ id, reason }),
       });
 
-      if (rpc.error && !/function .* does not exist/i.test(rpc.error.message || '')) {
-        // If the RPC exists but failed for other reasons, throw
-        throw rpc.error;
-      }
-
-      if (rpc.error) {
-        // Fallback: direct delete from whichever source we loaded
-        const table = source === 'reviews' ? 'reviews' : 'gratitudes';
-        const { error: delErr } = await supabase.from(table).delete().eq('id', id);
-        if (delErr) {
-          if (/permission denied|row-level security/i.test(delErr.message)) {
-            throw new Error(
-              `RLS blocked this delete. Your admin policy for '${table}' is missing or too strict.`
-            );
-          }
-          throw delErr;
-        }
-
-        // Best-effort audit log
+      if (!res.ok) {
+        let msg = 'Failed to delete review';
         try {
-          await supabase.from('admin_actions').insert({
-            admin_profile_id: me?.id,
-            action: `${table}.delete`,
-            target_type: 'review',
-            target_id: id,
-            reason,
-          });
-        } catch { /* non-blocking */ }
+          const j = await res.json();
+          if (j?.error) msg = `${msg}: ${j.error}`;
+        } catch {}
+        throw new Error(msg);
       }
 
+      // Update UI
       setReviews((prev) => prev.filter((r) => r.id !== id));
     } catch (e: any) {
       showError(e, 'Failed to delete review');
@@ -960,7 +933,12 @@ function AdminContent() {
                 <li key={u.id} className="rounded border p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="font-medium text-sm truncate">{u.display_name}</div>
+                    <div className="font-medium text-sm truncate">
+                     <a href={`/u/${u.id}`} className="underline">
+                      {u.display_name}
+                    </a>
+                  </div>
+
                       <div className="text-xs text-gray-600 truncate">{userEmails[u.id] ?? '—'}</div>
                       <div className="mt-1 flex flex-wrap gap-2 text-xs text-gray-700">
                         <span className="rounded bg-gray-100 px-2 py-0.5">role: {u.role}</span>
@@ -1056,7 +1034,12 @@ function AdminContent() {
 
                   return (
                     <tr key={u.id} className="border-t">
-                      <td className="px-3 py-2">{u.display_name}</td>
+<td className="px-3 py-2">
+  <a href={`/u/${u.id}`} className="underline">
+    {u.display_name}
+  </a>
+</td>
+
                       <td className="px-3 py-2">{userEmails[u.id] ?? '—'}</td>
                       <td className="px-3 py-2">{u.role}</td>
                       <td className="px-3 py-2">{u.status}</td>
@@ -1778,7 +1761,7 @@ function AdminContent() {
 
           {reviewsSource && (
             <p className="text-xs text-gray-500">
-              Loaded from <span className="font-mono">{reviewsSource}</span> table.
+              Loaded from <span className="font-mono">{reviewsSource}</span>.
             </p>
           )}
         </div>

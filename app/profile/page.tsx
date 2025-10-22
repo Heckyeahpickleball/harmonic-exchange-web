@@ -71,6 +71,7 @@ export default function ProfilePage() {
   const [badges, setBadges] = useState<ExpandedBadge[] | null>(null);
   const [badgesMsg, setBadgesMsg] = useState<string>('');
 
+  // Properly typed input refs (no TS errors)
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
 
@@ -152,6 +153,12 @@ export default function ProfilePage() {
       cancelled = true;
     };
   }, []);
+
+  // Am I viewing my own profile? (This page is “My Profile”, but keep logic future-proof.)
+  const isMe = useMemo(() => {
+    if (!userId || !profile?.id) return true;
+    return userId === profile.id;
+  }, [userId, profile?.id]);
 
   // Load my active offers
   useEffect(() => {
@@ -319,9 +326,22 @@ export default function ProfilePage() {
     }
   }
 
-  // Carousel helpers (mobile)
-  const railRef = useRef<HTMLDivElement | null>(null);
-  const scrollBy = (dx: number) => railRef.current?.scrollBy({ left: dx, behavior: 'smooth' });
+  // ===== Mobile "Active Offers" carousel (ARROWS ONLY; no drag/scroll) =====
+  const [carouselIndex, setCarouselIndex] = useState(0);
+  const SLIDE_W = 260; // px
+  const GAP = 12;      // Tailwind gap-3 = 12px
+  const STEP = SLIDE_W + GAP;
+  const canPrev = carouselIndex > 0;
+  const canNext = carouselIndex < Math.max(0, offers.length - 1);
+  const trackTranslate = `translateX(-${carouselIndex * STEP}px)`;
+
+  const prev = () => setCarouselIndex((i) => Math.max(0, i - 1));
+  const next = () => setCarouselIndex((i) => Math.min(offers.length - 1, i + 1));
+
+  // Clamp index when offers change
+  useEffect(() => {
+    setCarouselIndex((i) => Math.min(i, Math.max(0, offers.length - 1)));
+  }, [offers.length]);
 
   if (loading) return <p className="p-4">Loading...</p>;
 
@@ -351,66 +371,81 @@ export default function ProfilePage() {
           )}
 
           {/* Mobile edit button on cover (pencil) */}
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="md:hidden absolute bottom-2 right-2 grid h-9 w-9 place-items-center rounded-full bg-white/95 shadow border"
-            aria-label="Edit profile"
-            title="Edit profile"
-          >
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" />
-              <path d="M14.06 4.94l3.75 3.75" />
-            </svg>
-          </button>
+          {isMe && (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="md:hidden absolute bottom-2 right-2 grid h-9 w-9 place-items-center rounded-full bg-white/95 shadow border"
+              aria-label="Edit profile"
+              title="Edit profile"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" />
+                <path d="M14.06 4.94l3.75 3.75" />
+              </svg>
+            </button>
+          )}
         </div>
 
         {/* Header content */}
         <div className="relative px-4 pt-1 pb-2 md:px-6">
-          {/* MOBILE */}
-          <div className="md:hidden relative">
-            {/* Avatar — nudged a tad left */}
-            <div className="absolute -top-12 left-0.5 h-24 w-24 rounded-full border-4 border-white overflow-hidden bg-slate-100">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={form.avatar_url || '/images/placeholder-avatar.png'}
-                alt="Avatar"
-                className="h-full w-full object-cover"
-              />
-            </div>
+{/* MOBILE */}
+<div className="md:hidden relative">
+  {/* Avatar — absolute over the cover */}
+  <div className="absolute -top-12 left-1.5 h-24 w-24 rounded-full border-4 border-white overflow-hidden bg-slate-100">
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    <img
+      src={form.avatar_url || '/images/placeholder-avatar.png'}
+      alt="Avatar"
+      className="h-full w-full object-cover"
+    />
+  </div>
 
-            {/* Name row — tiny gap under cover */}
-            <div className="pl-[123px] mt-0">
-              <div className="flex items-end gap-2">
-                <h1 className="truncate text-[25px] leading-[1.1] font-bold">
-                  {form.display_name || 'Unnamed'}
-                </h1>
-                {profile?.role && (
-                  <span className="mb-[2px] rounded-full border px-2 py-0.5 text-[10px] capitalize text-gray-700">
-                    {profile.role}
-                  </span>
-                )}
-              </div>
-            </div>
+  {/* Name + role — to the RIGHT of the avatar on the same line */}
+  <div className="pl-[116px] pt-1">
+    <div className="flex items-end gap-2">
+      <h1 className="truncate text-[25px] leading-[1.1] font-bold">
+        {form.display_name || 'Unnamed'}
+      </h1>
+      {profile?.role && (
+        <span className="mb-[2px] rounded-full border px-2 py-0.5 text-[10px] capitalize text-gray-700">
+          {profile.role}
+        </span>
+      )}
+    </div>
 
-            {/* Location + Member since */}
-            <div className="pl-[116px] mt-0.5 text-[12px] text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis">
-              {form.area_city || form.area_country
-                ? [form.area_city, form.area_country].filter(Boolean).join(', ')
-                : '—'}
-              {memberSince && ` • Member since ${memberSince}`}
-            </div>
+    {/* Location + Member since (stays under the name, still aligned right of avatar) */}
+    <div className="mt-0.5 text-[12px] text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis">
+      {form.area_city || form.area_country
+        ? [form.area_city, form.area_country].filter(Boolean).join(', ')
+        : '—'}
+      {memberSince && ` • Member since ${memberSince}`}
+    </div>
+  </div>
 
-            {/* Badges — centered line */}
-            {!!clusterBadges.length && (
-              <div className="mt-1 flex justify-center">
-                <BadgeCluster badges={clusterBadges.slice(0, 3)} size={48} className="gap-1.5" href="/profile/badges" />
-              </div>
-            )}
-            {!clusterBadges.length && badgesMsg && (
-              <p className="text-xs text-amber-700 mt-1 text-center">{badgesMsg}</p>
-            )}
-          </div>
+  {/* Badges — centered line */}
+  {!!clusterBadges.length && (
+    <div className="mt-1 flex justify-center">
+      <BadgeCluster badges={clusterBadges.slice(0, 3)} size={48} className="gap-1.5" href="/profile/badges" />
+    </div>
+  )}
+  {!clusterBadges.length && badgesMsg && (
+    <p className="text-xs text-amber-700 mt-1 text-center">{badgesMsg}</p>
+  )}
+
+  {/* Mobile actions */}
+  {!isMe && profile?.id && (
+    <div className="mt-2 flex justify-center">
+      <Link
+        href={`/messages?thread=${profile.id}`}
+        className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
+        title="Send a message"
+      >
+        Message
+      </Link>
+    </div>
+  )}
+</div>
 
           {/* DESKTOP/TABLET */}
           <div className="hidden md:grid md:grid-cols-12 md:items-start">
@@ -448,22 +483,36 @@ export default function ProfilePage() {
               </div>
 
               <div className="mt-3 flex items-center gap-2">
-                <button
-                  onClick={() => setEditing(true)}
-                  className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
-                >
-                  Edit Profile
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await supabase.auth.signOut();
-                    location.href = '/';
-                  }}
-                  className="rounded border px-3 py-1.5 text-sm"
-                >
-                  Sign Out
-                </button>
+                {isMe ? (
+                  <>
+                    <button
+                      onClick={() => setEditing(true)}
+                      className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
+                    >
+                      Edit Profile
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await supabase.auth.signOut();
+                        location.href = '/';
+                      }}
+                      className="rounded border px-3 py-1.5 text-sm"
+                    >
+                      Sign Out
+                    </button>
+                  </>
+                ) : (
+                  profile?.id && (
+                    <Link
+                      href={`/messages?thread=${profile.id}`}
+                      className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50"
+                      title="Send a message"
+                    >
+                      Message
+                    </Link>
+                  )
+                )}
               </div>
             </div>
 
@@ -534,7 +583,7 @@ export default function ProfilePage() {
             )}
             {skillsList.length > 0 && (
               <div className="mt-3">
-                <h3 className="mb-1 text-sm font-semibold">Skills</h3>
+                <h3 className="mb-1 text sm font-semibold">Skills</h3>
                 <div className="flex flex-wrap gap-2">
                   {skillsList.map((s, i) => (
                     <span key={i} className="rounded-full border px-2 py-1 text-xs">
@@ -567,44 +616,67 @@ export default function ProfilePage() {
             <p className="text-sm text-gray-600">No active offers yet.</p>
           )}
 
-          {/* Mobile carousel */}
+          {/* Mobile carousel — ARROWS ONLY (no drag/scroll) */}
           <div className="md:hidden">
             {offers.length > 0 && (
               <div className="relative">
-                <div className="absolute left-1 top-1/2 z-10 hidden xs:flex -translate-y-1/2">
+                {/* Left / Right buttons */}
+                <div className="absolute left-0 top-1/2 z-10 -translate-y-1/2">
                   <button
                     type="button"
-                    onClick={() => scrollBy(-280)}
-                    className="rounded-full bg-white/90 px-2 py-1 shadow hover:bg-white"
-                    aria-label="Scroll left"
+                    onClick={prev}
+                    disabled={!canPrev}
+                    className="rounded-full bg-white/90 px-4 py-2 shadow hover:bg-white disabled:opacity-50"
+                    aria-label="Previous offer"
                   >
                     ‹
                   </button>
                 </div>
-                <div className="absolute right-1 top-1/2 z-10 hidden xs:flex -translate-y-1/2">
+                <div className="absolute right-0 top-1/2 z-10 -translate-y-1/2">
                   <button
                     type="button"
-                    onClick={() => scrollBy(280)}
-                    className="rounded-full bg-white/90 px-2 py-1 shadow hover:bg-white"
-                    aria-label="Scroll right"
+                    onClick={next}
+                    disabled={!canNext}
+                    className="rounded-full bg-white/90 px-4 py-2 shadow hover:bg-white disabled:opacity-50"
+                    aria-label="Next offer"
                   >
                     ›
                   </button>
                 </div>
 
-                <div
-                  ref={railRef}
-                  className="-mx-2 flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-contain px-2 py-1 scrollbar-thin"
-                  aria-label="Your offers carousel"
-                >
-                  {offers.map((o) => (
-                    <div key={o.id} className="min-w-[260px] max-w-[280px] snap-start">
-                      <OfferCard
-                        offer={o}
-                        mine
-                        onDeleted={(id) => setOffers((prev) => prev.filter((x) => x.id !== id))}
-                      />
-                    </div>
+                {/* Track: overflow-hidden so no horizontal scrolling/drag at all */}
+                <div className="-mx-2 overflow-hidden px-2 py-1 select-none" aria-label="Your offers carousel">
+                  <div
+                    className="flex gap-3 transition-transform duration-300 ease-out will-change-transform"
+                    style={{ transform: trackTranslate, touchAction: 'auto' }}
+                    onTouchMove={() => { /* allow vertical scroll */ }}
+                    onWheel={() => { /* bubble to page */ }}
+                  >
+                    {offers.map((o) => (
+                      <div key={o.id} className="w-[260px] flex-shrink-0">
+                        <OfferCard
+                          offer={o}
+                          mine
+                          onDeleted={(id) => {
+                            setOffers((prev) => {
+                              const nextList = prev.filter((x) => x.id !== id);
+                              setCarouselIndex((i) => Math.min(i, Math.max(0, nextList.length - 1)));
+                              return nextList;
+                            });
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Position indicator */}
+                <div className="mt-1 flex justify-center gap-1">
+                  {offers.map((_, idx) => (
+                    <span
+                      key={idx}
+                      className={['h-1.5 w-1.5 rounded-full', idx === carouselIndex ? 'bg-gray-800' : 'bg-gray-300'].join(' ')}
+                    />
                   ))}
                 </div>
               </div>

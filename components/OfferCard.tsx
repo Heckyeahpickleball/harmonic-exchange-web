@@ -68,7 +68,7 @@ export default function OfferCard({
 
   async function handleDelete() {
     setErr(null);
-    if (!confirm('Delete this offering permanently? This cannot be undone.')) return;
+if (!(await confirm('Delete this offer?\n\nHeads up — this deletes the offer and you can’t undo it.'))) return;
     try {
       setDeleting(true);
       const { error } = await supabase.from('offers').delete().eq('id', offer.id);
@@ -186,12 +186,6 @@ export default function OfferCard({
             View
           </Link>
 
-          {!mine && (
-            <Link href={href} className="hx-btn hx-btn--primary text-sm">
-              Ask to Receive
-            </Link>
-          )}
-
           {/* View Provider */}
           {offer.owner_id && (
             <Link
@@ -200,6 +194,17 @@ export default function OfferCard({
               title="View provider profile"
             >
               View Provider
+            </Link>
+          )}
+
+          {/* Owner: Edit */}
+          {mine && (
+            <Link
+              href={`/offers/${offer.id}/edit`}
+              className="hx-btn hx-btn--primary text-sm"
+              title="Edit this offer"
+            >
+              Edit
             </Link>
           )}
 

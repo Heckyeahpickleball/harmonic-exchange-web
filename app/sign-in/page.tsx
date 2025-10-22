@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import Link from 'next/link'
+import { getAuthCallbackUrl, getResetCallbackUrl } from '@/lib/url'
 
 type Mode = 'signin' | 'signup'
 
@@ -18,6 +19,7 @@ export default function SignInPage() {
   // email+password
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false) // ← NEW
 
   // NAME (separate first/last) for signup
   const [firstName, setFirstName] = useState('')
@@ -55,7 +57,7 @@ export default function SignInPage() {
       email,
       password,
       options: {
-        emailRedirectTo: `${location.origin}/auth/callback`,
+        emailRedirectTo: getAuthCallbackUrl(),
         data: {
           first_name: firstName.trim(),
           last_name: lastName.trim(),
@@ -75,11 +77,29 @@ export default function SignInPage() {
     setBusy(true)
     setStatus('Sending password reset link…')
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${location.origin}/auth/callback?type=recovery`,
+      redirectTo: getResetCallbackUrl(),
     })
     setBusy(false)
     setStatus(error ? `Error: ${error.message}` : 'Check your email for a reset link.')
   }
+
+  function Eye({ open }: { open: boolean }) {
+    return open ? (
+      // Eye (open)
+      <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden>
+        <path stroke="currentColor" strokeWidth="1.5" d="M12 5c5.2 0 8.7 3.6 10 6.5-.9 2-4 7-10 7s-9.1-5-10-7C3.3 8.6 6.8 5 12 5Z"/>
+        <circle cx="12" cy="12" r="3.25" stroke="currentColor" strokeWidth="1.5" />
+      </svg>
+    ) : (
+      // Eye (off)
+      <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden>
+        <path stroke="currentColor" strokeWidth="1.5" d="M3 3l18 18M9.9 9.9A3.5 3.5 0 0012 15.5c1 0 1.9-.4 2.6-1.1M7.2 7.9C5 9.1 3.6 10.8 3 11.5c.9 2 4 7 10 7 2.1 0 3.9-.6 5.5-1.6M16 8.1C14.7 7.4 13.4 7 12 7c-1.2 0-2.3.2-3.3.6" />
+      </svg>
+    )
+  }
+
+  const passwordInputClasses =
+    "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-sm outline-none ring-teal-500/30 transition focus:border-teal-600 focus:ring"
 
   return (
     <div className="min-h-[calc(100vh-4rem)] sm:min-h-screen bg-gradient-to-b from-white via-teal-50/60 to-white">
@@ -101,7 +121,7 @@ export default function SignInPage() {
             {/* Already signed in notice */}
             {alreadySignedIn && (
               <div className="mb-4 rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
-                You’re already signed in.{' '}
+                You’re already signed in.{` `}
                 <Link href="/profile" className="underline">Go to Profile</Link>
                 <button
                   className="ml-2 rounded border border-teal-300 px-2 py-1 text-xs text-teal-800 hover:bg-teal-50"
@@ -130,15 +150,27 @@ export default function SignInPage() {
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-medium text-gray-700">Password</label>
-                    <input
-                      type="password"
-                      required
-                      placeholder="Your password"
-                      value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      autoComplete="current-password"
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none ring-teal-500/30 transition focus:border-teal-600 focus:ring"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        placeholder="Your password"
+                        value={password}
+                        onChange={e => setPassword(e.target.value)}
+                        autoComplete="current-password"
+                        className={passwordInputClasses}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(v => !v)}
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        aria-pressed={showPassword}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:text-gray-700 focus:outline-none focus:ring"
+                        title={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        <Eye open={showPassword} />
+                      </button>
+                    </div>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
@@ -212,15 +244,27 @@ export default function SignInPage() {
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-medium text-gray-700">Password</label>
-                    <input
-                      type="password"
-                      required
-                      placeholder="Create a password"
-                      value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      autoComplete="new-password"
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none ring-teal-500/30 transition focus:border-teal-600 focus:ring"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        placeholder="Create a password"
+                        value={password}
+                        onChange={e => setPassword(e.target.value)}
+                        autoComplete="new-password"
+                        className={passwordInputClasses}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(v => !v)}
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        aria-pressed={showPassword}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:text-gray-700 focus:outline-none focus:ring"
+                        title={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        <Eye open={showPassword} />
+                      </button>
+                    </div>
                     <p className="mt-1 text-xs text-gray-500">Use at least 8 characters for a strong password.</p>
                   </div>
 
@@ -267,7 +311,7 @@ export default function SignInPage() {
             </div>
           </div>
 
-          {/* Right: brand / art panel — centered better & larger copy */}
+          {/* Right art panel */}
           <div className="relative hidden overflow-hidden rounded-2xl border border-teal-100 bg-gradient-to-br from-teal-600 via-teal-500 to-teal-400 p-8 text-teal-50 shadow-sm sm:flex">
             <div className="relative z-10 m-auto w-full max-w-md text-left">
               <h2 className="text-center text-2xl font-semibold tracking-tight sm:text-3xl">The Flow Economy</h2>

@@ -2,8 +2,9 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import NotificationsBell from '@/components/NotificationsBell';
 import MessagesUnreadBadge from '@/components/MessagesUnreadBadge';
@@ -85,10 +86,12 @@ function NavIcon({
 }
 
 export default function ClientHeaderNav() {
+  const router = useRouter();
   const pathname = usePathname() || '/';
   const [uid, setUid] = useState<string | null>(null);
   const [role, setRole] = useState<Role>('user');
   const [busy, setBusy] = useState(false);
+  const signedIn = !!uid;
 
   // desktop dropdowns
   const [openExchange, setOpenExchange] = useState(false);
@@ -120,22 +123,30 @@ export default function ClientHeaderNav() {
   const showAdmin = role === 'admin' || role === 'moderator';
   const is = (p: string) => pathname === p || pathname.startsWith(p + '/');
 
+  // treat offers/exchange/browse as the same “Exchange” bucket for active state
+  const isExchangeBucket = is('/offers') || is('/exchange') || is('/browse');
+
   return (
     <header className="w-full border-b bg-white">
-      {/* ===== Desktop / tablet (unchanged) ===== */}
+      {/* ===== Desktop / tablet ===== */}
       <nav className="hidden md:flex items-center justify-between gap-3 py-2 max-w-6xl mx-auto px-4">
         {/* LEFT: brand + primary links */}
         <div className="flex flex-wrap items-center gap-3">
           <Link href="/" className="underline-offset-4 hover:underline">Home</Link>
 
-          <Link href="/global" className="hx-btn hx-btn--secondary text-sm px-3 py-2">
-            Global Exchange
+          {/* Global now gated when logged out */}
+          <Link
+            href={signedIn ? '/global' : '/sign-in'}
+            className="hx-btn hx-btn--secondary text-sm px-3 py-2"
+          >
+            Global Feed
           </Link>
 
           <div className="relative">
             <button
               className="hx-btn hx-btn--secondary text-sm px-3 py-2"
               onClick={() => {
+                // Exchange dropdown is fine to open for everyone
                 setOpenExchange(v => !v);
                 setOpenChapters(false);
                 setOpenProfile(false);
@@ -147,10 +158,15 @@ export default function ClientHeaderNav() {
             </button>
             {openExchange && (
               <div className="absolute z-50 mt-2 w-56 hx-card p-2" role="menu" onMouseLeave={() => setOpenExchange(false)}>
-                <Link href="/browse" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                {/* Browse & New Offer in dropdown */}
+                <Link href="/offers" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
                   Browse Offers
                 </Link>
-                <Link href="/offers/new" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                <Link
+                  href={signedIn ? '/offers/new' : '/sign-in'}
+                  className="block rounded px-3 py-2 hover:bg-gray-50"
+                  role="menuitem"
+                >
                   New Offer
                 </Link>
                 <Link href="/exchanges" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
@@ -164,6 +180,10 @@ export default function ClientHeaderNav() {
             <button
               className="hx-btn hx-btn--secondary text-sm px-3 py-2"
               onClick={() => {
+                if (!signedIn) {
+                  router.push('/sign-in');
+                  return;
+                }
                 setOpenChapters(v => !v);
                 setOpenExchange(false);
                 setOpenProfile(false);
@@ -173,7 +193,7 @@ export default function ClientHeaderNav() {
             >
               Local Chapters
             </button>
-            {openChapters && (
+            {openChapters && signedIn && (
               <div className="absolute z-50 mt-2 w-60 hx-card p-2" role="menu" onMouseLeave={() => setOpenChapters(false)}>
                 <Link href="/chapters" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
                   Explore Chapters
@@ -189,6 +209,10 @@ export default function ClientHeaderNav() {
             <button
               className="hx-btn hx-btn--secondary text-sm px-3 py-2"
               onClick={() => {
+                if (!signedIn) {
+                  router.push('/sign-in');
+                  return;
+                }
                 setOpenProfile(v => !v);
                 setOpenExchange(false);
                 setOpenChapters(false);
@@ -198,12 +222,16 @@ export default function ClientHeaderNav() {
             >
               Profile
             </button>
-            {openProfile && (
+            {openProfile && signedIn && (
               <div className="absolute z-50 mt-2 w-56 hx-card p-2" role="menu" onMouseLeave={() => setOpenProfile(false)}>
                 <Link href="/profile" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
                   My Profile
                 </Link>
-                <Link href="/messages" className="block rounded px-3 py-2 hover:bg-gray-50" role="menuitem">
+                <Link
+                  href={signedIn ? '/messages' : '/sign-in'}
+                  className="block rounded px-3 py-2 hover:bg-gray-50"
+                  role="menuitem"
+                >
                   Messages <span className="ml-1 align-middle"><MessagesUnreadBadge /></span>
                 </Link>
               </div>
@@ -215,10 +243,30 @@ export default function ClientHeaderNav() {
           )}
         </div>
 
-        {/* RIGHT: bell + auth */}
+        {/* RIGHT: Facebook -> bell -> auth */}
         <div className="flex items-center gap-2">
+          {/* Facebook group button (borderless icon) */}
+          <Link
+            href="https://www.facebook.com/groups/harmonicexchangeglobal"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Harmonic Exchange Facebook Group"
+            title="Harmonic Exchange Facebook Group"
+            className="inline-flex items-center focus:outline-none hover:opacity-90 active:opacity-80"
+          >
+            <Image
+              src="/Facebook-Round-Icon.jpg"
+              alt="Facebook"
+              width={40}
+              height={40}
+              className="block"
+              priority={false}
+            />
+          </Link>
+
           <NotificationsBell />
-          {!uid ? (
+
+          {!signedIn ? (
             <Link href="/sign-in" className="hx-btn hx-btn--outline-primary text-sm px-3 py-2">
               Sign in
             </Link>
@@ -235,7 +283,7 @@ export default function ClientHeaderNav() {
         </div>
       </nav>
 
-      {/* ===== Mobile: add Admin button on the same line as bell/sign-out ===== */}
+      {/* ===== Mobile ===== */}
       <div className="md:hidden px-3 pt-2 pb-1">
         <div className="flex items-center justify-between">
           {/* Left slot: Admin (mods/admins only) */}
@@ -250,10 +298,29 @@ export default function ClientHeaderNav() {
             )}
           </div>
 
-          {/* Right slot: bell + sign in/out */}
+          {/* Right slot: Facebook -> bell -> sign in/out */}
           <div className="flex items-center gap-2">
+            <Link
+              href="https://www.facebook.com/groups/harmonicexchangeglobal"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Harmonic Exchange Facebook Group"
+              title="Harmonic Exchange Facebook Group"
+              className="inline-flex items-center focus:outline-none hover:opacity-90 active:opacity-80"
+            >
+              <Image
+                src="/Facebook-Round-Icon.jpg"
+                alt="Facebook"
+                width={40}
+                height={40}
+                className="block"
+                priority={false}
+              />
+            </Link>
+
             <NotificationsBell />
-            {!uid ? (
+
+            {!signedIn ? (
               <Link
                 href="/sign-in"
                 className="inline-flex items-center rounded-full border border-[var(--hx-brand)] text-[var(--hx-brand)] px-3 py-1.5 text-sm font-medium hover:bg-emerald-50"
@@ -272,13 +339,13 @@ export default function ClientHeaderNav() {
           </div>
         </div>
 
-        {/* Your existing mobile icon row remains unchanged */}
+        {/* Mobile icon row */}
         <nav className="mt-2 flex items-center justify-between gap-1 rounded-xl border bg-white px-2 py-1.5" aria-label="Primary">
-          <NavIcon href="/"        icon={<Icon name="home" />}  label="Home"     active={is('/')} />
-          <NavIcon href="/global"  icon={<Icon name="globe" />} label="Global"   active={is('/global')} />
-          <NavIcon href="/exchange"icon={<Icon name="swap" />}  label="Exchange" active={is('/exchange')} />
-          <NavIcon href="/chapters"icon={<Icon name="map" />}   label="Chapters" active={is('/chapters')} />
-          <NavIcon href="/profile" icon={<Icon name="user" />}  label="Profile"  active={is('/profile')} />
+          <NavIcon href="/"                                        icon={<Icon name="home" />}  label="Home"     active={is('/')} />
+          <NavIcon href={signedIn ? '/global' : '/sign-in'}        icon={<Icon name="globe" />} label="Global"   active={is('/global')} />
+          <NavIcon href="/offers"                                  icon={<Icon name="swap" />}  label="Exchange" active={isExchangeBucket} />
+          <NavIcon href={signedIn ? '/chapters' : '/sign-in'}      icon={<Icon name="map" />}   label="Chapters" active={is('/chapters')} />
+          <NavIcon href="/profile"                                 icon={<Icon name="user" />}  label="Profile"  active={is('/profile')} />
         </nav>
       </div>
     </header>

@@ -10,14 +10,14 @@ type Props = {
   onPost?: (row: PostRow) => void; // let parent optimistically add
   limit?: number; // default 600
   /** Optional: when provided, the post will be scoped to a chapter */
-  groupId?: string | null; // <-- NEW (pass null on Global page)
+  groupId?: string | null; // <-- pass null on Global page
 };
 
 export type PostRow = {
   id: string;
   profile_id: string;
   body: string | null;
-  images: string[] | null;
+  images: string[]; // never null in UI layer
   created_at: string;
   profiles?: { display_name: string | null } | null;
 };
@@ -34,7 +34,11 @@ function normalizePostRow(data: any): PostRow {
     id: String(data.id),
     profile_id: String(data.profile_id),
     body: data.body ?? null,
-    images: Array.isArray(data.images) ? data.images : data.images ? [data.images] : null,
+    images: Array.isArray(data.images)
+      ? (data.images as string[])
+      : data.images
+      ? [String(data.images)]
+      : [], // coerce to empty array instead of null
     created_at: data.created_at ?? new Date().toISOString(),
     profiles,
   };
@@ -56,10 +60,13 @@ export default function PostComposer({ profileId, onPost, limit = 600, groupId =
     if (!uid) throw new Error('Not signed in');
 
     const path = `${uid}/${Date.now()}_${file.name}`;
-    const { error } = await supabase
-      .storage
+    const { error } = await supabase.storage
       .from('post-media')
-      .upload(path, file, { cacheControl: '3600', upsert: true, contentType: file.type });
+      .upload(path, file, {
+        cacheControl: '3600',
+        upsert: true,
+        contentType: file.type,
+      });
     if (error) throw error;
 
     return supabase.storage.from('post-media').getPublicUrl(path).data.publicUrl;
@@ -89,11 +96,11 @@ export default function PostComposer({ profileId, onPost, limit = 600, groupId =
     try {
       const payload: any = {
         profile_id: profileId,
-        body: text.trim() || null,        // allow empty when images exist
-        images: images.length ? images : null,
+        // allow empty body when images exist; DB can still accept null body
+        body: text.trim() || null,
+        images, // ALWAYS an array (possibly empty)
+        group_id: groupId ?? null, // scope: null for global page, or specific chapter elsewhere
       };
-      // scope: null for global page, or specific chapter elsewhere
-      payload.group_id = groupId ?? null;
 
       const { data, error } = await supabase
         .from('posts')
@@ -103,7 +110,7 @@ export default function PostComposer({ profileId, onPost, limit = 600, groupId =
 
       if (error) throw error;
 
-      if (data && onPost) onPost(normalizePostRow(data)); // optimistic
+      if (data && onPost) onPost(normalizePostRow(data)); // optimistic add
       setText('');
       setImages([]);
     } catch (e: any) {

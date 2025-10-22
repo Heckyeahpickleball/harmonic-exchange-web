@@ -2,6 +2,7 @@
 'use client';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import OfferCard, { type OfferRow } from '@/components/OfferCard';
@@ -22,6 +23,27 @@ export default function Page() {
 function BrowseOffersPage() {
   const sp = useSearchParams();
   const router = useRouter();
+
+  // --- auth (for New Offer button behavior)
+  const [signedIn, setSignedIn] = useState<boolean>(false);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (!mounted) return;
+        setSignedIn(!!data.user);
+      } finally {
+        if (mounted) setAuthLoading(false);
+      }
+    })();
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      setSignedIn(!!session?.user);
+    });
+    return () => sub?.subscription?.unsubscribe();
+  }, []);
 
   // --- UI state (from URL on first render)
   const [qInput, setQInput] = useState(sp.get('q') ?? '');
@@ -104,7 +126,7 @@ function BrowseOffersPage() {
           'status',
           'created_at',
           'owner_id',
-        ].join(',')
+        ].join(','),
       )
       .eq('status', 'active')
       .order('created_at', { ascending: false })
@@ -132,7 +154,7 @@ function BrowseOffersPage() {
 
       // Count tags per offer_id and require all selected ids to be present
       const byOffer = new Map<string, Set<number>>();
-      for (const row of data || []) {
+      for (const row of (data || []) as any[]) {
         const k = row.offer_id as string;
         const t = row.tag_id as number;
         if (!byOffer.has(k)) byOffer.set(k, new Set());
@@ -262,7 +284,15 @@ function BrowseOffersPage() {
 
   return (
     <section className="space-y-3">
-      <h1 className="text-2xl font-bold">Browse Offers</h1>
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold">Browse Offers</h1>
+        <Link
+          href={authLoading ? '/offers/new' : signedIn ? '/offers/new' : '/sign-in'}
+          className="inline-flex items-center justify-center rounded-full bg-[var(--hx-brand)] text-white px-4 py-2 text-sm font-semibold shadow hover:opacity-95 active:opacity-90 whitespace-nowrap"
+        >
+          New Offer
+        </Link>
+      </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">

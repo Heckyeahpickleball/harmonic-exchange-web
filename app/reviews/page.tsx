@@ -1,33 +1,30 @@
 // /app/reviews/page.tsx
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
-type PublicReview = {
+type PublicRow = {
   id: string;
-  message: string;
   created_at: string;
+  message: string | null;
   offer_id: string;
-  owner_profile_id: string;
-  receiver_profile_id: string;
   offer_title: string | null;
-  owner_name?: string | null;
-  receiver_name?: string | null;
+  owner_id: string | null;
+  owner_name: string | null;
+  receiver_id: string | null;
+  receiver_name: string | null;
 };
 
-type PrivateReview = {
+type PrivateRow = {
   id: string;
   message: string;
   created_at: string;
   offer_id: string;
   owner_profile_id: string;
   receiver_profile_id: string;
-  published: boolean;
-  offer_title?: string | null;
-  owner_name?: string | null;
-  receiver_name?: string | null;
+  published?: boolean;
 };
 
 export default function Page() {
@@ -43,9 +40,9 @@ type Tab = 'public' | 'given' | 'received';
 function ReviewsIndex() {
   const [tab, setTab] = useState<Tab>('public');
   const [viewer, setViewer] = useState<string | null>(null);
-  const [publicRows, setPublicRows] = useState<PublicReview[]>([]);
-  const [givenRows, setGivenRows] = useState<PrivateReview[]>([]);
-  const [receivedRows, setReceivedRows] = useState<PrivateReview[]>([]);
+  const [publicRows, setPublicRows] = useState<PublicRow[]>([]);
+  const [givenRows, setGivenRows] = useState<PrivateRow[]>([]);
+  const [receivedRows, setReceivedRows] = useState<PrivateRow[]>([]);
   const [msg, setMsg] = useState('');
 
   useEffect(() => {
@@ -55,93 +52,44 @@ function ReviewsIndex() {
     })();
   }, []);
 
+  // Public tab – RLS-safe
   useEffect(() => {
     (async () => {
       setMsg('');
-      // Public carousel/list: view
-      const { data: pub } = await supabase
-        .from('public_gratitude_reviews')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(100);
-      setPublicRows((pub as any) ?? []);
-
-      // Resolve names best-effort
-      await hydrateNamesPublic(setPublicRows);
+      const { data, error } = await supabase.rpc('public_reviews_feed', { limit_n: 100 });
+      if (error) {
+        console.error('public reviews error:', error);
+        setPublicRows([]);
+        setMsg('Couldn’t load public reviews.');
+        return;
+      }
+      setPublicRows((data ?? []) as PublicRow[]);
     })();
   }, []);
 
+  // Given/Received (viewer-only, uses your view)
   useEffect(() => {
     if (!viewer) return;
     (async () => {
       setMsg('');
-      const baseSel =
-        'id,message,created_at,offer_id,owner_profile_id,receiver_profile_id,published';
-      const { data: given } = await supabase
+      const baseSel = 'id,message,created_at,offer_id,owner_profile_id,receiver_profile_id';
+      const { data: given, error: gErr } = await supabase
         .from('gratitude_reviews')
         .select(baseSel)
         .eq('owner_profile_id', viewer)
         .order('created_at', { ascending: false })
         .limit(100);
-      setGivenRows((given as any) ?? []);
+      if (!gErr) setGivenRows((given as any) ?? []);
 
-      const { data: rec } = await supabase
+      const { data: rec, error: rErr } = await supabase
         .from('gratitude_reviews')
         .select(baseSel)
         .eq('receiver_profile_id', viewer)
         .order('created_at', { ascending: false })
         .limit(100);
-      setReceivedRows((rec as any) ?? []);
-
-      await Promise.all([
-        hydrateNamesPrivate(setGivenRows),
-        hydrateNamesPrivate(setReceivedRows),
-      ]);
+      if (!rErr) setReceivedRows((rec as any) ?? []);
     })();
   }, [viewer]);
-
-  async function hydrateNamesPublic(setter: (v: any) => void) {
-    setter((rows: PublicReview[]) => rows); // placeholder no-op to keep type
-    // Lightweight name hydration for owner/receiver
-    const rows = (await supabase
-      .from('public_gratitude_reviews')
-      .select('owner_profile_id,receiver_profile_id')
-      .limit(1)).data; // we just need types here; actual names we fetch below
-
-    // In practice we hydrate on current rows:
-    const current = (await supabase
-      .from('public_gratitude_reviews')
-      .select('id,owner_profile_id,receiver_profile_id'))
-      .data as PublicReview[] | null;
-
-    if (!current || !current.length) return;
-
-    const ids = Array.from(
-      new Set(current.flatMap(r => [r.owner_profile_id, r.receiver_profile_id]))
-    );
-
-    const { data: profs } = await supabase
-      .from('profiles')
-      .select('id,display_name')
-      .in('id', ids);
-
-    const map = new Map(profs?.map(p => [p.id, p.display_name]) ?? []);
-    setter((rows: PublicReview[]) =>
-      rows.map(r => ({
-        ...r,
-        owner_name: map.get(r.owner_profile_id) ?? null,
-        receiver_name: map.get(r.receiver_profile_id) ?? null
-      }))
-    );
-  }
-
-  async function hydrateNamesPrivate(setter: (v: any) => void) {
-    setter((rows: PrivateReview[]) => rows);
-    const rows = setter as any;
-    // Pull current values from closure by re-querying (simple + reliable)
-    // We’ll just resolve names for the already-loaded lists
-    // (No-op here; names are resolved below using current state)
-  }
 
   const visible =
     tab === 'public' ? publicRows : tab === 'given' ? givenRows : receivedRows;
@@ -168,18 +116,30 @@ function ReviewsIndex() {
         <p className="text-sm text-gray-600">No gratitude to show yet.</p>
       ) : (
         <ul className="grid grid-cols-1 gap-3">
-          {visible.map((r) => (
+          {visible.map((r: any) => (
             <li key={r.id} className="hx-card p-3">
               <div className="text-xs text-gray-500">{new Date(r.created_at).toLocaleString()}</div>
-              <div className="mt-1 text-sm">
-                <span className="text-gray-600">On</span>{' '}
-                <Link href={`/offers/${r.offer_id}`} className="hx-link">{r.offer_title || 'this offer'}</Link>
-              </div>
+
+              {tab === 'public' ? (
+                <div className="mt-1 text-sm">
+                  <span className="text-gray-600">On</span>{' '}
+                  <Link href={`/offers/${r.offer_id}`} className="hx-link">
+                    {r.offer_title || 'this offer'}
+                  </Link>{' '}
+                  from <span className="font-medium">{r.owner_name || 'Provider'}</span>
+                </div>
+              ) : (
+                <div className="mt-1 text-sm">
+                  <span className="text-gray-600">On</span>{' '}
+                  <Link href={`/offers/${r.offer_id}`} className="hx-link">this offer</Link>
+                </div>
+              )}
+
               <p className="mt-2 whitespace-pre-wrap text-sm">{r.message}</p>
-              <div className="mt-2 text-xs text-gray-600">
-                <span>From receiver</span>
-                {('receiver_name' in r) && (r as any).receiver_name ? `: ${(r as any).receiver_name}` : null}
-              </div>
+
+              {tab === 'public' && r.receiver_name ? (
+                <div className="mt-2 text-xs text-gray-600">From {r.receiver_name}</div>
+              ) : null}
             </li>
           ))}
         </ul>

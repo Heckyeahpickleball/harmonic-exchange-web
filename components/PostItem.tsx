@@ -1,8 +1,20 @@
+// components/PostItem.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Image from 'next/image';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import {
+  notifyOnNewComment,
+  notifyOnHeartPost,
+  notifyOnHeartComment,
+} from '@/lib/notify';
+
+type ProfileLite = {
+  display_name: string | null;
+  avatar_url?: string | null;
+} | null;
 
 type PostRow = {
   id: string;
@@ -10,7 +22,7 @@ type PostRow = {
   body: string | null;
   images?: string[] | null;
   created_at: string;
-  profiles?: { display_name: string | null } | null;
+  profiles?: ProfileLite;
 };
 
 type CommentRow = {
@@ -20,7 +32,7 @@ type CommentRow = {
   body: string | null;
   images?: string[] | null;
   created_at: string;
-  profiles?: { display_name: string | null } | null;
+  profiles?: ProfileLite;
 };
 
 function Kebab({
@@ -60,9 +72,13 @@ function ConfirmInline({
   onCancel: () => void;
   busy?: boolean;
 }) {
+  const [ready, setReady] = useState(false);
   const confirmBtnRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
-    const t = setTimeout(() => confirmBtnRef.current?.focus(), 0);
+    const t = setTimeout(() => {
+      setReady(true);
+      confirmBtnRef.current?.focus();
+    }, 0);
     return () => clearTimeout(t);
   }, []);
   return (
@@ -74,7 +90,7 @@ function ConfirmInline({
           ref={confirmBtnRef}
           className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
           onClick={onConfirm}
-          disabled={!!busy}
+          disabled={!!busy || !ready}
         >
           {busy ? 'Working…' : confirmLabel}
         </button>
@@ -92,11 +108,158 @@ function ConfirmInline({
 
 function normalizeProfile<T extends { profiles?: any }>(row: T) {
   const p = row.profiles;
-  return { ...row, profiles: Array.isArray(p) ? p[0] ?? null : p ?? null };
+  return { ...row, profiles: Array.isArray(p) ? (p[0] ?? null) : (p ?? null) };
 }
 function byCreatedAtAsc<A extends { created_at: string }>(a: A, b: A) {
   return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
 }
+
+/** Resolve avatar URL even if it's a storage path (tries common buckets). */
+function resolveAvatarUrl(raw?: string | null): string | null {
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+
+  // Try common buckets where avatars might be stored.
+  try {
+    const a = supabase.storage.from('avatars').getPublicUrl(raw).data.publicUrl;
+    if (a) return a;
+  } catch {}
+  try {
+    const b = supabase.storage.from('profile-images').getPublicUrl(raw).data.publicUrl;
+    if (b) return b;
+  } catch {}
+  return raw; // last resort
+}
+
+/** Tiny avatar (image or initials fallback), always clickable */
+function TinyAvatar({
+  name,
+  href,
+  src,
+  size = 36,
+}: {
+  name: string;
+  href: string;
+  src?: string | null;
+  size?: number;
+}) {
+  const resolved = resolveAvatarUrl(src);
+  const initials =
+    (name || 'S')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? '')
+      .join('') || 'S';
+
+  const dimension = `${size}px`;
+
+  if (resolved) {
+    return (
+      <Link href={href} className="shrink-0" aria-label={`${name}'s profile`}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={resolved}
+          alt=""
+          className="rounded-full object-cover"
+          style={{ width: dimension, height: dimension }}
+        />
+      </Link>
+    );
+  }
+
+  return (
+    <Link
+      href={href}
+      className="grid place-items-center shrink-0 rounded-full bg-gray-300 text-xs font-semibold"
+      style={{ width: dimension, height: dimension }}
+      aria-label={`${name}'s profile`}
+      title={name}
+    >
+      {initials}
+    </Link>
+  );
+}
+
+/* ---------------- Hearts helpers (shared) ---------------- */
+
+type TargetType = 'post' | 'comment';
+
+async function fetchHeartState(targetType: TargetType, targetId: string, me: string | null) {
+  // Count
+  const { count } = await supabase
+    .from('hearts')
+    .select('id', { head: true, count: 'exact' })
+    .eq('target_type', targetType)
+    .eq('target_id', targetId);
+
+  // Mine?
+  let iHearted = false;
+  if (me) {
+    const { data: mine } = await supabase
+      .from('hearts')
+      .select('id')
+      .eq('target_type', targetType)
+      .eq('target_id', targetId)
+      .eq('profile_id', me)
+      .maybeSingle();
+    iHearted = !!mine;
+  }
+
+  return { count: count || 0, iHearted };
+}
+
+function useHeartsRealtime(targetType: TargetType, targetId: string, setCount: (n: number) => void) {
+  useEffect(() => {
+    const channel = supabase
+      .channel(`hearts:${targetType}:${targetId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'hearts',
+          filter: `target_type=eq.${targetType},target_id=eq.${targetId}`,
+        },
+        async () => {
+          // Re-count on any change for robustness
+          const { count } = await supabase
+            .from('hearts')
+            .select('id', { head: true, count: 'exact' })
+            .eq('target_type', targetType)
+            .eq('target_id', targetId);
+          setCount(count || 0);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [targetType, targetId, setCount]);
+}
+
+async function toggleHeart(targetType: TargetType, targetId: string, me: string | null) {
+  if (!me) throw new Error('NOT_SIGNED_IN');
+  // Try to insert; if unique constraint hits, fall back to delete
+  const ins = await supabase
+    .from('hearts')
+    .insert({ target_type: targetType, target_id: targetId, profile_id: me });
+  if (ins.error) {
+    // If duplicate, delete to "unheart"
+    const del = await supabase
+      .from('hearts')
+      .delete()
+      .eq('target_type', targetType)
+      .eq('target_id', targetId)
+      .eq('profile_id', me);
+    if (del.error) throw del.error;
+    return { action: 'unheart' as const };
+  }
+  return { action: 'heart' as const };
+}
+
+/* ---------------- Main PostItem ---------------- */
 
 export default function PostItem({
   post,
@@ -107,6 +270,8 @@ export default function PostItem({
   me: string | null;
   onDeleted: () => void;
 }) {
+  const router = useRouter();
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [comments, setComments] = useState<CommentRow[]>([]);
@@ -122,6 +287,10 @@ export default function PostItem({
   const commentIdsRef = useRef<Set<string>>(new Set());
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
+  // Hearts (post)
+  const [postHearts, setPostHearts] = useState(0);
+  const [iHeartedPost, setIHeartedPost] = useState(false);
+
   useEffect(() => {
     (async () => {
       const { count } = await supabase
@@ -131,6 +300,24 @@ export default function PostItem({
       setCommentCount(count || 0);
     })();
   }, [post.id]);
+
+  // Initial hearts fetch for post
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const s = await fetchHeartState('post', post.id, me);
+      if (!cancelled) {
+        setPostHearts(s.count);
+        setIHeartedPost(s.iHearted);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [post.id, me]);
+
+  // Realtime hearts for post
+  useHeartsRealtime('post', post.id, setPostHearts);
 
   useEffect(() => {
     if (!commentsOpen) {
@@ -174,7 +361,7 @@ export default function PostItem({
     if (open && comments.length === 0) {
       const { data, error } = await supabase
         .from('post_comments')
-        .select('id, post_id, profile_id, body, created_at, images, profiles(display_name)')
+        .select('id, post_id, profile_id, body, created_at, images, profiles(display_name,avatar_url)')
         .eq('post_id', post.id)
         .order('created_at', { ascending: true })
         .limit(200);
@@ -187,8 +374,12 @@ export default function PostItem({
     }
   }
 
-  async function deletePost() {
-    if (!confirm('Delete this post?')) return;
+async function deletePost() {
+  if (
+    !confirm(
+      'Delete this post?\n\nThis will remove it from the feed and can’t be undone.'
+    )
+  ) return;
     const { error } = await supabase.from('posts').delete().eq('id', post.id);
     if (!error) onDeleted();
   }
@@ -242,7 +433,7 @@ export default function PostItem({
       const { data, error } = await supabase
         .from('post_comments')
         .insert({ post_id: post.id, profile_id: uid, body: body || ' ', images: imageUrls })
-        .select('id, post_id, profile_id, body, created_at, images, profiles(display_name)')
+        .select('id, post_id, profile_id, body, created_at, images, profiles(display_name,avatar_url)')
         .single();
       if (error) throw error;
       const normalized = normalizeProfile(data) as CommentRow;
@@ -256,6 +447,16 @@ export default function PostItem({
       previews.forEach((u) => URL.revokeObjectURL(u));
       setFiles([]);
       setPreviews([]);
+
+      // 🔔 Notify the post author about the new comment
+      const myName =
+        (normalized?.profiles?.display_name as string | null) ?? null; // best available
+      await notifyOnNewComment({
+        postId: post.id,
+        postAuthorId: post.profile_id,
+        commenterName: myName ?? undefined,
+        commentText: body || undefined,
+      });
     } catch (e: any) {
       setErr(e?.message ?? 'Could not comment.');
     } finally {
@@ -277,26 +478,97 @@ export default function PostItem({
   const postGridCols =
     postImgCount <= 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';
 
+  const authorName = post.profiles?.display_name ?? 'Someone';
+  const authorAvatar = post.profiles?.avatar_url ?? null;
+  const authorHref = `/u/${post.profile_id}`;
+
+  async function onToggleHeartPost() {
+    try {
+      const res = await supabase.auth.getUser();
+      const meId = res.data.user?.id ?? null;
+
+      const result = await toggleHeart('post', post.id, meId);
+      setIHeartedPost(result.action === 'heart');
+      // Optimistic count adjustment (realtime will correct if needed)
+      setPostHearts((n) => n + (result.action === 'heart' ? 1 : -1));
+
+      // 🔔 Notify post author when hearted
+      if (result.action === 'heart') {
+        // (Optional) fetch my display name for nicer copy — non-blocking
+        let likerName: string | null = null;
+        try {
+          if (meId) {
+            const { data: meProf } = await supabase
+              .from('profiles')
+              .select('display_name')
+              .eq('id', meId)
+              .maybeSingle();
+            likerName = meProf?.display_name ?? null;
+          }
+        } catch {}
+        await notifyOnHeartPost({
+          postId: post.id,
+          postAuthorId: post.profile_id,
+          likerName: likerName ?? undefined,
+        });
+      }
+    } catch (e: any) {
+      if (String(e?.message) === 'NOT_SIGNED_IN') {
+        router.push('/signin');
+        return;
+      }
+      console.error(e);
+    }
+  }
+
   return (
     <article className="hx-card p-3">
       <header className="mb-2 flex items-center justify-between text-sm text-gray-600">
-        <div>
-          <span className="font-medium">{post.profiles?.display_name ?? 'Someone'}</span>
-          <span className="mx-1">•</span>
-          <time dateTime={post.created_at}>{new Date(post.created_at).toLocaleString()}</time>
-        </div>
-        {me === post.profile_id && (
-          <div className="relative">
-            <button
-              className="rounded border px-2 py-1 text-sm"
-              aria-label="More actions"
-              onClick={() => setMenuOpen((v) => !v)}
-            >
-              …
-            </button>
-            {menuOpen && <Kebab items={[{ label: 'Delete post', action: deletePost }]} onClose={() => setMenuOpen(false)} />}
+        <div className="flex items-center gap-2">
+          <TinyAvatar name={authorName} href={authorHref} src={authorAvatar} />
+          <div>
+            <Link href={authorHref} className="font-medium underline">
+              {authorName}
+            </Link>
+            <span className="mx-1">•</span>
+            <time dateTime={post.created_at}>{new Date(post.created_at).toLocaleString()}</time>
           </div>
-        )}
+        </div>
+
+        {/* Post actions: delete + hearts */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onToggleHeartPost}
+            className={[
+              'inline-flex items-center gap-1 rounded border px-2 py-1 text-sm',
+              iHeartedPost ? 'bg-pink-50 border-pink-300 text-pink-700' : '',
+            ].join(' ')}
+            title={iHeartedPost ? 'Unheart' : 'Heart'}
+            aria-pressed={iHeartedPost}
+          >
+            <span aria-hidden>❤️</span>
+            <span>{postHearts}</span>
+          </button>
+
+          {me === post.profile_id && (
+            <div className="relative">
+              <button
+                className="rounded border px-2 py-1 text-sm"
+                aria-label="More actions"
+                onClick={() => setMenuOpen((v) => !v)}
+              >
+                …
+              </button>
+              {menuOpen && (
+                <Kebab
+                  items={[{ label: 'Delete post', action: deletePost }]}
+                  onClose={() => setMenuOpen(false)}
+                />
+              )}
+            </div>
+          )}
+        </div>
       </header>
 
       {post.body && <p className="mb-2 whitespace-pre-wrap">{post.body}</p>}
@@ -306,7 +578,7 @@ export default function PostItem({
         <div className={`mb-2 grid ${postGridCols} gap-2`}>
           {post.images.map((src) => (
             <figure key={src} className="w-full">
-              {/* Using native img for natural aspect without cropping */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={src} alt="" className="w-full h-auto rounded" />
             </figure>
           ))}
@@ -346,6 +618,7 @@ export default function PostItem({
               <div className="flex flex-wrap gap-2">
                 {previews.map((src, idx) => (
                   <div key={src} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={src} alt="" className="h-16 w-24 rounded object-cover" />
                     <button
                       type="button"
@@ -389,6 +662,8 @@ export default function PostItem({
   );
 }
 
+/* ---------------- CommentItem (with hearts) ---------------- */
+
 function CommentItem({
   comment,
   me,
@@ -400,12 +675,83 @@ function CommentItem({
   ownerId: string;
   onDeleted: () => void;
 }) {
+  const router = useRouter();
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const canDelete = !!me && (me === comment.profile_id || me === ownerId);
+
+  // Hearts (comment)
+  const [hearts, setHearts] = useState(0);
+  const [iHearted, setIHearted] = useState(false);
+
+  // Initial heart state
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const s = await fetchHeartState('comment', comment.id, me);
+      if (!cancelled) {
+        setHearts(s.count);
+        setIHearted(s.iHearted);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [comment.id, me]);
+
+  // Realtime heart count
+  useHeartsRealtime('comment', comment.id, setHearts);
+
+  async function onToggleHeartComment() {
+    try {
+      const res = await supabase.auth.getUser();
+      const meId = res.data.user?.id ?? null;
+
+      const result = await toggleHeart('comment', comment.id, meId);
+      setIHearted(result.action === 'heart');
+      setHearts((n) => n + (result.action === 'heart' ? 1 : -1));
+
+      // 🔔 Notify comment author when hearted
+      if (result.action === 'heart') {
+        let likerName: string | null = null;
+        try {
+          if (meId) {
+            const { data: meProf } = await supabase
+              .from('profiles')
+              .select('display_name')
+              .eq('id', meId)
+              .maybeSingle();
+            likerName = meProf?.display_name ?? null;
+          }
+        } catch {}
+        await notifyOnHeartComment({
+          commentId: comment.id,
+          commentAuthorId: comment.profile_id,
+          postId: comment.post_id,
+          likerName: likerName ?? undefined,
+        });
+      }
+    } catch (e: any) {
+      if (String(e?.message) === 'NOT_SIGNED_IN') {
+        router.push('/signin');
+        return;
+      }
+      console.error(e);
+    }
+  }
+
+  // Decide grid columns for comment images:
+  const cImgCount = comment.images?.length ?? 0;
+  const commentGridCols =
+    cImgCount <= 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';
+
+  const commenterName = comment.profiles?.display_name ?? 'Someone';
+  const commenterAvatar = comment.profiles?.avatar_url ?? null;
+  const commenterHref = `/u/${comment.profile_id}`;
 
   async function reallyDelete() {
     try {
@@ -422,31 +768,53 @@ function CommentItem({
     }
   }
 
-  // Decide grid columns for comment images:
-  const cImgCount = comment.images?.length ?? 0;
-  const commentGridCols =
-    cImgCount <= 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';
-
   return (
     <div className="relative rounded border p-2">
       <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
-        <div>
-          <span className="font-medium">{comment.profiles?.display_name ?? 'Someone'}</span>
-          <span className="mx-1">•</span>
-          <time dateTime={comment.created_at}>{new Date(comment.created_at).toLocaleString()}</time>
-        </div>
-        {canDelete && (
-          <div className="relative">
-            <button
-              className="rounded border px-2 py-1 text-sm"
-              aria-label="More actions"
-              onClick={() => setMenuOpen((v) => !v)}
-            >
-              …
-            </button>
-            {menuOpen && <Kebab items={[{ label: 'Delete comment', action: () => setConfirmDel(true) }]} onClose={() => setMenuOpen(false)} />}
+        <div className="flex items-center gap-2">
+          <TinyAvatar name={commenterName} href={commenterHref} src={commenterAvatar} />
+          <div>
+            <Link href={commenterHref} className="font-medium underline">
+              {commenterName}
+            </Link>
+            <span className="mx-1">•</span>
+            <time dateTime={comment.created_at}>{new Date(comment.created_at).toLocaleString()}</time>
           </div>
-        )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onToggleHeartComment}
+            className={[
+              'inline-flex items-center gap-1 rounded border px-2 py-1 text-xs',
+              iHearted ? 'bg-pink-50 border-pink-300 text-pink-700' : '',
+            ].join(' ')}
+            title={iHearted ? 'Unheart' : 'Heart'}
+            aria-pressed={iHearted}
+          >
+            <span aria-hidden>❤️</span>
+            <span>{hearts}</span>
+          </button>
+
+          {canDelete && (
+            <div className="relative">
+              <button
+                className="rounded border px-2 py-1 text-sm"
+                aria-label="More actions"
+                onClick={() => setMenuOpen((v) => !v)}
+              >
+                …
+              </button>
+              {menuOpen && (
+                <Kebab
+                  items={[{ label: 'Delete comment', action: () => setConfirmDel(true) }]}
+                  onClose={() => setMenuOpen(false)}
+                />
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {comment.body && <p className="whitespace-pre-wrap">{comment.body}</p>}
@@ -456,6 +824,7 @@ function CommentItem({
         <div className={`mt-2 grid ${commentGridCols} gap-2`}>
           {comment.images.map((src) => (
             <figure key={src} className="w-full">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={src} alt="" className="w-full h-auto rounded" />
             </figure>
           ))}

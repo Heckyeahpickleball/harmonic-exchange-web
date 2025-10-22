@@ -1,131 +1,147 @@
+// components/GratitudeCarousel.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
-type Review = {
+type FeedRow = {
   id: string;
-  request_id: string;
-  offer_id: string;
-  owner_profile_id: string;
-  receiver_profile_id: string;
-  message: string;
   created_at: string;
+  message: string | null;
+  offer_id: string;
+  offer_title: string | null;
+  owner_id: string | null;
+  owner_name: string | null;
+  receiver_id: string | null;
+  receiver_name: string | null;
 };
 
-type OfferRow = { id: string; title: string | null };
-type ProfileRow = { id: string; display_name: string | null };
+const INTERVAL_MS = 2500;
 
 export default function GratitudeCarousel() {
-  const [items, setItems] = useState<Review[]>([]);
-  const [offers, setOffers] = useState<Record<string, OfferRow>>({});
-  const [profiles, setProfiles] = useState<Record<string, ProfileRow>>({});
+  const [rows, setRows] = useState<FeedRow[]>([]);
   const [i, setI] = useState(0);
-  const timerRef = useRef<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const timer = useRef<number | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
-  // fetch latest 24 reviews (randomize client-side once)
+  // Load public feed via SECURITY DEFINER RPC (RLS-safe for anon)
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
-        .from('review_gratitudes')
-        .select('id,request_id,offer_id,owner_profile_id,receiver_profile_id,message,created_at')
-        .order('created_at', { ascending: false })
-        .limit(24);
-
+      setErr(null);
+      const { data, error } = await supabase.rpc('public_reviews_feed', { limit_n: 25 });
       if (cancelled) return;
-      const rows = (data ?? []) as Review[];
-
-      // Randomize order for fun variety
-      for (let j = rows.length - 1; j > 0; j--) {
-        const k = Math.floor(Math.random() * (j + 1));
-        [rows[j], rows[k]] = [rows[k], rows[j]];
+      if (error) {
+        console.error('GratitudeCarousel load error:', error);
+        setErr(error.message);
+        setRows([]);
+        return;
       }
-      setItems(rows);
-
-      // hydrate labels
-      const offerIds = Array.from(new Set(rows.map(r => r.offer_id)));
-      if (offerIds.length) {
-        const { data: o } = await supabase
-          .from('offers')
-          .select('id,title')
-          .in('id', offerIds);
-        const map: Record<string, OfferRow> = {};
-        (o ?? []).forEach((row) => (map[row.id] = row));
-        setOffers(map);
-      }
-
-      const profIds = Array.from(new Set(rows.flatMap(r => [r.owner_profile_id, r.receiver_profile_id])));
-      if (profIds.length) {
-        const { data: p } = await supabase
-          .from('profiles')
-          .select('id,display_name')
-          .in('id', profIds);
-        const map: Record<string, ProfileRow> = {};
-        (p ?? []).forEach((row) => (map[row.id] = row));
-        setProfiles(map);
-      }
+      setRows((data ?? []) as FeedRow[]);
     })();
     return () => { cancelled = true; };
   }, []);
 
-  // auto-advance (does not block vertical scroll)
+  // Auto-advance
   useEffect(() => {
-    if (!items.length) return;
-    timerRef.current = window.setInterval(() => {
-      setI((x) => (x + 1) % items.length);
-    }, 3500);
+    if (!rows.length) return;
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setI((p) => (p + 1) % rows.length), INTERVAL_MS);
+    return () => { if (timer.current) window.clearTimeout(timer.current); };
+  }, [i, rows.length]);
+
+  // Pause on hover
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onEnter = () => { if (timer.current) window.clearTimeout(timer.current); };
+    const onLeave = () => setI((p) => (p + 0) % Math.max(rows.length, 1));
+    el.addEventListener('mouseenter', onEnter);
+    el.addEventListener('mouseleave', onLeave);
     return () => {
-      if (timerRef.current) window.clearInterval(timerRef.current);
+      el.removeEventListener('mouseenter', onEnter);
+      el.removeEventListener('mouseleave', onLeave);
     };
-  }, [items.length]);
+  }, [rows.length]);
 
-  if (!items.length) return null;
+  // Render states
+  if (err) {
+    return (
+      <section aria-label="Past Exchanges" className="mx-auto max-w-6xl px-4">
+        <div className="rounded-2xl border bg-white p-6">
+          <h3 className="text-lg font-semibold text-gray-800">Gratitude from Past Exchanges</h3>
+          <p className="mt-2 text-sm text-gray-600">Couldn’t load reviews.</p>
+        </div>
+      </section>
+    );
+  }
 
-  const active = items[i];
-  const owner = profiles[active.owner_profile_id]?.display_name || 'Provider';
-  const receiver = profiles[active.receiver_profile_id]?.display_name || 'Receiver';
-  const title = offers[active.offer_id]?.title || 'Offer';
-
-  return (
-    <div className="rounded-2xl border p-4 md:p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-700">From the community</h3>
-        <div className="flex items-center gap-2">
-          <Link href="/reviews" className="rounded-full border px-3 py-1 text-sm hover:bg-gray-50">
-            See all
-          </Link>
-          <div className="hidden sm:flex items-center gap-1">
-            <button
-              aria-label="Previous"
-              onClick={() => setI((p) => (p === 0 ? items.length - 1 : p - 1))}
-              className="rounded-full border px-3 py-1 hover:bg-gray-50"
-            >‹</button>
-            <button
-              aria-label="Next"
-              onClick={() => setI((p) => (p === items.length - 1 ? 0 : p + 1))}
-              className="rounded-full border px-3 py-1 hover:bg-gray-50"
-            >›</button>
+  if (rows.length === 0) {
+    return (
+      <section aria-label="Past Exchanges" className="mx-auto max-w-6xl px-4">
+        <div className="rounded-2xl border bg-white p-6">
+          <h3 className="text-lg font-semibold text-gray-800">Gratitude from Past Exchanges</h3>
+          <p className="mt-2 text-sm text-gray-600">No public reviews yet.</p>
+          <div className="mt-4">
+            <Link href="/reviews" className="hx-btn hx-btn--outline-primary text-xs px-2 py-1">
+              Past Exchanges
+            </Link>
           </div>
         </div>
-      </div>
+      </section>
+    );
+  }
 
-      <Link
-        href="/reviews"
-        className="block rounded-xl border bg-white/70 p-4 hover:bg-white/90 transition-colors"
+  const cur = rows[i];
+  const created = new Date(cur.created_at).toLocaleDateString();
+  const offerHref = `/offers/${cur.offer_id}`;
+
+  return (
+    <section aria-label="Past Exchanges" className="mx-auto max-w-6xl px-4">
+      <div
+        ref={wrapRef}
+        className="flex items-stretch gap-3 overflow-hidden rounded-2xl border bg-white p-4"
       >
-        <div className="text-[13px] text-gray-500">
-          {new Date(active.created_at).toLocaleDateString()}
+        <div className="min-w-0 flex-1">
+          <div className="text-xs text-gray-500">{created}</div>
+          <div className="mt-1 text-sm text-gray-800">
+            <span className="font-medium">{cur.receiver_name || 'Receiver'}</span> on{' '}
+            <Link href={offerHref} className="hx-link font-medium">
+              {cur.offer_title || 'an offer'}
+            </Link>{' '}
+            from <span className="font-medium">{cur.owner_name || 'Provider'}</span>
+          </div>
+          <p className="mt-2 line-clamp-4 text-[15px] text-gray-800">{cur.message}</p>
+
+          <div className="mt-3 flex items-center gap-2">
+            <Link href="/reviews" className="hx-btn hx-btn--outline-primary text-xs px-2 py-1">
+              Past Exchanges
+            </Link>
+            <div className="ml-auto text-xs text-gray-500">
+              {i + 1} / {rows.length}
+            </div>
+          </div>
         </div>
-        <div className="mt-1 text-sm text-gray-800">
-          <span className="font-semibold">{receiver}</span> received <span className="font-semibold">“{title}”</span> from{' '}
-          <span className="font-semibold">{owner}</span>
+
+        <div className="flex items-center gap-2">
+          <button
+            aria-label="Previous"
+            className="rounded-full border px-3 py-2 hover:bg-gray-50"
+            onClick={() => setI((p) => (p === 0 ? rows.length - 1 : p - 1))}
+          >
+            ‹
+          </button>
+          <button
+            aria-label="Next"
+            className="rounded-full border px-3 py-2 hover:bg-gray-50"
+            onClick={() => setI((p) => (p + 1) % rows.length)}
+          >
+            ›
+          </button>
         </div>
-        <p className="mt-2 whitespace-pre-wrap text-[15px] leading-relaxed text-gray-900 line-clamp-6">
-          {active.message}
-        </p>
-      </Link>
-    </div>
+      </div>
+    </section>
   );
 }

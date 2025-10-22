@@ -6,6 +6,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
 import RequestModal from '@/components/RequestModal';
+import OfferGratitude from '@/components/OfferGratitude';
 
 type Offer = {
   id: string;
@@ -141,8 +142,10 @@ export default function OfferDetailPage() {
     );
   }
 
-  const location = offer.is_online ? 'Online' : [offer.city, offer.country].filter(Boolean).join(', ') || '—';
-  const thumb = Array.isArray(offer.images) && offer.images.length > 0 ? offer.images[0] : null;
+  const location =
+    offer.is_online ? 'Online' : [offer.city, offer.country].filter(Boolean).join(', ') || '—';
+  const thumb =
+    Array.isArray(offer.images) && offer.images.length > 0 ? offer.images[0] : null;
 
   return (
     <section className="max-w-3xl space-y-4">
@@ -152,7 +155,6 @@ export default function OfferDetailPage() {
         <h1 className="text-2xl font-bold">{offer.title}</h1>
 
         <div className="flex items-center gap-2">
-          {/* NEW: View Provider button */}
           <Link
             href={`/u/${offer.owner_id}`}
             className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
@@ -172,7 +174,9 @@ export default function OfferDetailPage() {
         {thumb ? (
           <Image src={thumb} alt={offer.title} fill className="object-cover" />
         ) : (
-          <div className="flex h-full items-center justify-center text-xs text-gray-400">No image</div>
+          <div className="flex h-full items-center justify-center text-xs text-gray-400">
+            No image
+          </div>
         )}
       </div>
 
@@ -182,22 +186,27 @@ export default function OfferDetailPage() {
 
       {offer.description && <p className="whitespace-pre-wrap">{offer.description}</p>}
 
+      {/* ASK-TO-RECEIVE SECTION */}
       {!isOwner && (
         <div className="hx-card p-3">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div className="text-sm text-gray-700">
               {!me ? (
-                <>Please <Link href="/sign-in" className="hx-link">sign in</Link> to ask.</>
+                <>
+                  Please <Link href="/sign-in" className="hx-link">sign in</Link> to ask.
+                </>
               ) : offer.status !== 'active' ? (
                 <>This offering isn’t active yet.</>
               ) : eligibleCount < 1 ? (
-                <>To keep the circle generous, share at least one <b>active</b> gift first. <Link href="/offers/new" className="hx-link">Share Your Gifts</Link>.</>
+                <>
+                  To keep the circle generous, share at least one <b>active</b> gift first.{' '}
+                  <Link href="/offers/new" className="hx-link">Share Your Gifts</Link>.
+                </>
               ) : (
                 <>Ready to ask?</>
               )}
             </div>
 
-            {/* unified teal CTA */}
             <button
               type="button"
               disabled={!canAsk}
@@ -212,8 +221,13 @@ export default function OfferDetailPage() {
       )}
 
       {isOwner && (
-        <div className="rounded border p-3 text-sm text-gray-600">You are the owner of this offering.</div>
+        <div className="rounded border p-3 text-sm text-gray-600">
+          You are the owner of this offering.
+        </div>
       )}
+
+      {/* GRATITUDE: moved BELOW the Ask-to-Receive/owner block */}
+      <OfferGratitude offerId={offer.id} offerTitle={offer.title} limit={3} />
 
       {showModal && (
         <RequestModal
