@@ -623,6 +623,8 @@ function MessagesContent() {
   const [showListOnMobile, setShowListOnMobile] = useState(true);
   const [leftPeers, setLeftPeers] = useState<Set<string>>(new Set());
   const [desiredPeer, setDesiredPeer] = useState<string | undefined>(undefined);
+  const [rawThreadParam, setRawThreadParam] = useState<string | undefined>(undefined);
+  const [preferredRequestId, setPreferredRequestId] = useState<string | undefined>(undefined);
 
   // Read ?thread on mount
   useEffect(() => {
@@ -631,10 +633,47 @@ function MessagesContent() {
       const pid = sp.get('thread') || undefined;
       if (pid) {
         setDesiredPeer(pid);
+        setRawThreadParam(pid);
+        setPreferredRequestId(undefined);
         setShowListOnMobile(false);
       }
     }
   }, []);
+
+  useEffect(() => {
+    if (!rawThreadParam) return;
+    if (!me) return;
+
+    let cancelled = false;
+    (async () => {
+      const raw = rawThreadParam;
+      let resolved = raw;
+      let matchedRequest: string | undefined = undefined;
+      try {
+        const { data } = await supabase
+          .from('requests')
+          .select('id, requester_profile_id, offers!inner ( owner_id )')
+          .eq('id', raw)
+          .maybeSingle();
+        const row: any = data;
+        if (row?.id) {
+          const ownerId = row.offers?.owner_id as string | undefined;
+          const requesterId = row.requester_profile_id as string | undefined;
+          if (ownerId && requesterId && (ownerId === me || requesterId === me)) {
+            resolved = ownerId === me ? requesterId : ownerId;
+            matchedRequest = row.id;
+          }
+        }
+      } catch {}
+      if (cancelled) return;
+      setPreferredRequestId(matchedRequest);
+      setDesiredPeer(resolved === me ? undefined : resolved);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rawThreadParam, me]);
 
   // Load hidden peers
   useEffect(() => {
@@ -675,6 +714,9 @@ const handleLeaveChat = useCallback(
 
     if (selected?.peer_id === peerId) {
       setSelected(undefined);
+      setDesiredPeer(undefined);
+      setRawThreadParam(undefined);
+      setPreferredRequestId(undefined);
       setShowListOnMobile(true);
       if (typeof window !== 'undefined') {
         const url = new URL(window.location.href);
@@ -729,8 +771,28 @@ const handleLeaveChat = useCallback(
   const ensureRequestWithPeer = useCallback(
     async (
       uid: string,
-      peerId: string
+      peerId: string,
+      anchorRequestId?: string
     ): Promise<{ request_id: string | null; offer_id: string | null; offer_title?: string } | null> => {
+      if (anchorRequestId) {
+        const { data } = await supabase
+          .from('requests')
+          .select('id, offer_id, requester_profile_id, offers!inner ( id, title, owner_id )')
+          .eq('id', anchorRequestId)
+          .maybeSingle();
+        const row: any = data;
+        if (row?.id) {
+          const ownerId = row.offers?.owner_id as string | undefined;
+          const requesterId = row.requester_profile_id as string | undefined;
+          if (ownerId && requesterId && (ownerId === uid || requesterId === uid)) {
+            const other = ownerId === uid ? requesterId : ownerId;
+            if (other === peerId) {
+              return { request_id: row.id, offer_id: row.offer_id ?? null, offer_title: row.offers?.title };
+            }
+          }
+        }
+      }
+
       // A) uid -> peer
       {
         const { data } = await supabase
@@ -917,7 +979,7 @@ const handleLeaveChat = useCallback(
 
       // Deep-link synth if none exists yet
       if (desiredPeer && !filtered.some((t) => t.peer_id === desiredPeer)) {
-        const ensured = await ensureRequestWithPeer(uid, desiredPeer);
+        const ensured = await ensureRequestWithPeer(uid, desiredPeer, preferredRequestId);
         const { data: peerProfile } = await supabase
           .from('profiles')
           .select('id, display_name, avatar_url')
@@ -989,7 +1051,7 @@ const handleLeaveChat = useCallback(
         setMsgCache((prev) => ({ ...prev, [t.peer_id]: mapped }));
       }
     },
-    [msgCache, selected, leftPeers, desiredPeer, ensureRequestWithPeer]
+    [msgCache, selected, leftPeers, desiredPeer, preferredRequestId, ensureRequestWithPeer]
   );
 
   useEffect(() => {
@@ -999,6 +1061,9 @@ const handleLeaveChat = useCallback(
 
   const selectThread = useCallback((t: Thread) => {
     setSelected(t);
+    setDesiredPeer(t.peer_id);
+    setRawThreadParam(t.peer_id);
+    setPreferredRequestId(undefined);
     setShowListOnMobile(false);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
@@ -1011,6 +1076,9 @@ const handleLeaveChat = useCallback(
   const backToListMobile = useCallback(() => {
     setShowListOnMobile(true);
     setSelected(undefined);
+    setDesiredPeer(undefined);
+    setRawThreadParam(undefined);
+    setPreferredRequestId(undefined);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       url.searchParams.delete('thread');

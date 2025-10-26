@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
@@ -25,6 +25,7 @@ type Offer = {
 export default function OfferDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [me, setMe] = useState<string | null>(null);
   const [offer, setOffer] = useState<Offer | null>(null);
@@ -33,6 +34,7 @@ export default function OfferDetailPage() {
   const [eligibleCount, setEligibleCount] = useState<number>(0);
 
   const [showModal, setShowModal] = useState(false);
+  const [autoAskHandled, setAutoAskHandled] = useState(false);
 
   useEffect(() => {
     let cancel = false;
@@ -77,21 +79,43 @@ export default function OfferDetailPage() {
   }, [id]);
 
   const isOwner = useMemo(() => !!offer && me === offer?.owner_id, [offer, me]);
+  const canOpenModal = useMemo(() => {
+    if (!offer) return false;
+    if (isOwner) return false;
+    if (offer.status !== 'active') return false;
+    if (!me) return false;
+    return eligibleCount > 0;
+  }, [offer, isOwner, me, eligibleCount]);
+
   const canAsk = useMemo(() => {
     if (!offer) return false;
     if (isOwner) return false;
     if (offer.status !== 'active') return false;
+    if (!me) return true;
     return eligibleCount > 0;
-  }, [offer, isOwner, eligibleCount]);
+  }, [offer, isOwner, me, eligibleCount]);
+
+  const askQueryActive = searchParams.get('ask') === '1';
+
+  useEffect(() => {
+    if (!askQueryActive) return;
+    if (autoAskHandled) return;
+    if (!offer) return;
+    if (!me) return;
+    if (!canOpenModal) return;
+    setShowModal(true);
+    setAutoAskHandled(true);
+  }, [askQueryActive, autoAskHandled, offer, me, canOpenModal]);
 
   async function createRequest(note: string) {
     if (!offer || !me) return;
 
+    const cleanedNote = note.trim() || '—';
     let requestId: string | null = null;
 
     const { data: rpcData, error: rpcErr } = await supabase.rpc('create_request', {
       p_offer: offer.id,
-      p_note: note.trim() || '—',
+      p_note: cleanedNote,
     });
 
     if (!rpcErr && rpcData) {
@@ -102,7 +126,7 @@ export default function OfferDetailPage() {
         .insert({
           offer_id: offer.id,
           requester_profile_id: me,
-          note: note.trim() || '—',
+          note: cleanedNote,
         })
         .select('id')
         .single();
@@ -110,9 +134,8 @@ export default function OfferDetailPage() {
       requestId = ins!.id as string;
     }
 
-    // best-effort notifications
     if (requestId) {
-      const payload = { request_id: requestId, offer_id: offer.id, sender_id: me, text: note.trim() || '—' };
+      const payload = { request_id: requestId, offer_id: offer.id, sender_id: me, text: cleanedNote };
       try {
         await supabase.from('notifications').insert([
           { profile_id: me, type: 'message', data: payload, read_at: new Date().toISOString() },
@@ -121,7 +144,22 @@ export default function OfferDetailPage() {
       } catch {}
     }
 
-    router.push(requestId ? `/messages?thread=${requestId}` : '/messages');
+    const peer = offer.owner_id;
+    router.push(peer ? `/messages?thread=${peer}` : '/messages');
+  }
+
+  function handleAskClick() {
+    if (!offer) return;
+    if (!me) {
+      const next = `/offers/${offer.id}?ask=1`;
+      router.push(`/sign-in?next=${encodeURIComponent(next)}`);
+      return;
+    }
+    if (!canOpenModal) return;
+    setShowModal(true);
+    if (askQueryActive && !autoAskHandled) {
+      setAutoAskHandled(true);
+    }
   }
 
   if (loading) return <section className="max-w-3xl"><p>Loading…</p></section>;
@@ -146,6 +184,8 @@ export default function OfferDetailPage() {
     offer.is_online ? 'Online' : [offer.city, offer.country].filter(Boolean).join(', ') || '—';
   const thumb =
     Array.isArray(offer.images) && offer.images.length > 0 ? offer.images[0] : null;
+
+  const signInNextHref = `/sign-in?next=${encodeURIComponent(`/offers/${offer.id}?ask=1`)}`;
 
   return (
     <section className="max-w-3xl space-y-4">
@@ -193,7 +233,7 @@ export default function OfferDetailPage() {
             <div className="text-sm text-gray-700">
               {!me ? (
                 <>
-                  Please <Link href="/sign-in" className="hx-link">sign in</Link> to ask.
+                  Please <Link href={signInNextHref} className="hx-link">sign in</Link> to ask.
                 </>
               ) : offer.status !== 'active' ? (
                 <>This offering isn’t active yet.</>
@@ -210,7 +250,7 @@ export default function OfferDetailPage() {
             <button
               type="button"
               disabled={!canAsk}
-              onClick={() => setShowModal(true)}
+              onClick={handleAskClick}
               className="hx-btn hx-btn--primary disabled:opacity-50"
               aria-label="Ask to Receive"
             >
