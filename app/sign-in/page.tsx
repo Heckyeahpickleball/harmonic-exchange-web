@@ -1,8 +1,7 @@
-// /app/sign-in/page.tsx
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { Suspense, useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
 import Link from 'next/link'
 import { getAuthCallbackUrl, getResetCallbackUrl } from '@/lib/url'
@@ -10,9 +9,19 @@ import { getAuthCallbackUrl, getResetCallbackUrl } from '@/lib/url'
 type Mode = 'signin' | 'signup'
 
 export default function SignInPage() {
-  const [mode, setMode] = useState<Mode>('signin')
+  return (
+    <Suspense fallback="Loading…">
+      <SignInContent />
+    </Suspense>
+  )
+}
+
+function SignInContent() {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const nextPath = searchParams?.get('next') || '/profile'
+
+  const [mode, setMode] = useState<Mode>('signin')
 
   // common
   const [status, setStatus] = useState('')
@@ -22,7 +31,7 @@ export default function SignInPage() {
   // email+password
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false) // ← NEW
+  const [showPassword, setShowPassword] = useState(false)
 
   // NAME (separate first/last) for signup
   const [firstName, setFirstName] = useState('')
@@ -42,7 +51,7 @@ export default function SignInPage() {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     setBusy(false)
     setStatus(error ? `Error: ${error.message}` : 'Signed in! Redirecting…')
-    if (!error) window.location.href = nextPath
+    if (!error) router.replace(nextPath || '/profile')
   }
 
   async function handleSignUp(e: React.FormEvent) {
