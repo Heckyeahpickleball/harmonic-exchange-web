@@ -1,73 +1,78 @@
-'use client'
+// app/sign-in/page.tsx
+'use client';
 
-import { Suspense, useEffect, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { supabase } from '@/lib/supabaseClient'
-import Link from 'next/link'
-import { getAuthCallbackUrl, getResetCallbackUrl } from '@/lib/url'
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
+import Link from 'next/link';
+import { getAuthCallbackUrl, getResetCallbackUrl } from '@/lib/url';
 
-type Mode = 'signin' | 'signup'
+export const dynamic = 'force-dynamic';
+
+type Mode = 'signin' | 'signup';
 
 export default function SignInPage() {
   return (
     <Suspense fallback="Loading…">
       <SignInContent />
     </Suspense>
-  )
+  );
 }
 
 function SignInContent() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const rawNext = searchParams?.get('next') || '/profile'
-  const nextPath =
-    rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/profile'
-  const nextPath = searchParams?.get('next') || '/profile'
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
-  const [mode, setMode] = useState<Mode>('signin')
+  // ---- sanitize ?next= ----
+  const rawNext = searchParams?.get('next') || '/profile';
+  const nextPath =
+    rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/profile';
+
+  const [mode, setMode] = useState<Mode>('signin');
 
   // common
-  const [status, setStatus] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [alreadySignedIn, setAlreadySignedIn] = useState(false)
+  const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [alreadySignedIn, setAlreadySignedIn] = useState(false);
 
   // email+password
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   // NAME (separate first/last) for signup
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
 
   useEffect(() => {
-    ;(async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      setAlreadySignedIn(!!session)
-    })()
-  }, [])
+    (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      setAlreadySignedIn(!!session);
+    })();
+  }, []);
 
   async function handleSignIn(e: React.FormEvent) {
-    e.preventDefault()
-    setBusy(true)
-    setStatus('Signing in…')
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    setBusy(false)
-    setStatus(error ? `Error: ${error.message}` : 'Signed in! Redirecting…')
-    if (!error) router.replace(nextPath)
-    if (!error) router.replace(nextPath || '/profile')
+    e.preventDefault();
+    setBusy(true);
+    setStatus('Signing in…');
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setBusy(false);
+    setStatus(error ? `Error: ${error.message}` : 'Signed in! Redirecting…');
+    if (!error) router.replace(nextPath); // single sanitized redirect
   }
 
   async function handleSignUp(e: React.FormEvent) {
-    e.preventDefault()
+    e.preventDefault();
     if (!firstName.trim() || !lastName.trim()) {
-      setStatus('Please enter your first and last name.')
-      return
+      setStatus('Please enter your first and last name.');
+      return;
     }
-    setBusy(true)
-    setStatus('Creating account…')
+    setBusy(true);
+    setStatus('Creating account…');
 
-    const display = `${firstName.trim()} ${lastName.trim()}`.replace(/\s+/g, ' ')
+    const display = `${firstName.trim()} ${lastName.trim()}`.replace(/\s+/g, ' ');
 
     const { error } = await supabase.auth.signUp({
       email,
@@ -81,50 +86,61 @@ function SignInContent() {
           full_name: display,
         },
       },
-    })
+    });
 
-    setBusy(false)
-    if (error) setStatus(`Error: ${error.message}`)
-    else setStatus('Account created. Check your email to confirm your address before signing in.')
+    setBusy(false);
+    if (error)
+      setStatus(`Error: ${error.message}`);
+    else
+      setStatus('Account created. Check your email to confirm your address before signing in.');
   }
 
   async function sendResetLink() {
-    if (!email) { setStatus('Enter your email first.'); return }
-    setBusy(true)
-    setStatus('Sending password reset link…')
+    if (!email) {
+      setStatus('Enter your email first.');
+      return;
+    }
+    setBusy(true);
+    setStatus('Sending password reset link…');
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: getResetCallbackUrl(),
-    })
-    setBusy(false)
-    setStatus(error ? `Error: ${error.message}` : 'Check your email for a reset link.')
+    });
+    setBusy(false);
+    setStatus(error ? `Error: ${error.message}` : 'Check your email for a reset link.');
   }
 
   function Eye({ open }: { open: boolean }) {
     return open ? (
       // Eye (open)
       <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden>
-        <path stroke="currentColor" strokeWidth="1.5" d="M12 5c5.2 0 8.7 3.6 10 6.5-.9 2-4 7-10 7s-9.1-5-10-7C3.3 8.6 6.8 5 12 5Z"/>
+        <path
+          stroke="currentColor"
+          strokeWidth="1.5"
+          d="M12 5c5.2 0 8.7 3.6 10 6.5-.9 2-4 7-10 7s-9.1-5-10-7C3.3 8.6 6.8 5 12 5Z"
+        />
         <circle cx="12" cy="12" r="3.25" stroke="currentColor" strokeWidth="1.5" />
       </svg>
     ) : (
       // Eye (off)
       <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden>
-        <path stroke="currentColor" strokeWidth="1.5" d="M3 3l18 18M9.9 9.9A3.5 3.5 0 0012 15.5c1 0 1.9-.4 2.6-1.1M7.2 7.9C5 9.1 3.6 10.8 3 11.5c.9 2 4 7 10 7 2.1 0 3.9-.6 5.5-1.6M16 8.1C14.7 7.4 13.4 7 12 7c-1.2 0-2.3.2-3.3.6" />
+        <path
+          stroke="currentColor"
+          strokeWidth="1.5"
+          d="M3 3l18 18M9.9 9.9A3.5 3.5 0 0012 15.5c1 0 1.9-.4 2.6-1.1M7.2 7.9C5 9.1 3.6 10.8 3 11.5c.9 2 4 7 10 7 2.1 0 3.9-.6 5.5-1.6M16 8.1C14.7 7.4 13.4 7 12 7c-1.2 0-2.3.2-3.3.6"
+        />
       </svg>
-    )
+    );
   }
 
   const passwordInputClasses =
-    "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-sm outline-none ring-teal-500/30 transition focus:border-teal-600 focus:ring"
+    'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 pr-10 text-sm outline-none ring-teal-500/30 transition focus:border-teal-600 focus:ring';
 
   return (
     <div className="min-h-[calc(100vh-4rem)] sm:min-h-screen bg-gradient-to-b from-white via-teal-50/60 to-white">
       <div className="mx-auto w-full max-w-6xl px-3 py-6 sm:px-6 sm:py-10">
         {/* Header (pill removed, spacing tightened) */}
         <div className="mb-5 sm:mb-8 text-center">
-          <h1 className="mt-0 text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">
-            Welcome
-          </h1>
+          <h1 className="mt-0 text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">Welcome</h1>
           <p className="mt-1 text-sm text-gray-600">
             Sign in or create an account to join the exchange.
           </p>
@@ -138,10 +154,15 @@ function SignInContent() {
             {alreadySignedIn && (
               <div className="mb-4 rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
                 You’re already signed in.{` `}
-                <Link href={nextPath} className="underline">Go to Profile</Link>
+                <Link href={nextPath} className="underline">
+                  Go to Profile
+                </Link>
                 <button
                   className="ml-2 rounded border border-teal-300 px-2 py-1 text-xs text-teal-800 hover:bg-teal-50"
-                  onClick={async () => { await supabase.auth.signOut(); location.reload() }}
+                  onClick={async () => {
+                    await supabase.auth.signOut();
+                    location.reload();
+                  }}
                 >
                   Sign Out
                 </button>
@@ -159,7 +180,7 @@ function SignInContent() {
                       required
                       placeholder="you@example.com"
                       value={email}
-                      onChange={e => setEmail(e.target.value)}
+                      onChange={(e) => setEmail(e.target.value)}
                       autoComplete="email"
                       className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none ring-teal-500/30 transition focus:border-teal-600 focus:ring"
                     />
@@ -172,13 +193,13 @@ function SignInContent() {
                         required
                         placeholder="Your password"
                         value={password}
-                        onChange={e => setPassword(e.target.value)}
+                        onChange={(e) => setPassword(e.target.value)}
                         autoComplete="current-password"
                         className={passwordInputClasses}
                       />
                       <button
                         type="button"
-                        onClick={() => setShowPassword(v => !v)}
+                        onClick={() => setShowPassword((v) => !v)}
                         aria-label={showPassword ? 'Hide password' : 'Show password'}
                         aria-pressed={showPassword}
                         className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:text-gray-700 focus:outline-none focus:ring"
@@ -190,11 +211,7 @@ function SignInContent() {
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <button
-                        type="submit"
-                        disabled={busy}
-                        className="hx-btn hx-btn--primary disabled:opacity-60"
-                      >
+                      <button type="submit" disabled={busy} className="hx-btn hx-btn--primary disabled:opacity-60">
                         {busy ? 'Please wait…' : 'Sign in'}
                       </button>
                       <button
@@ -206,11 +223,7 @@ function SignInContent() {
                       </button>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={sendResetLink}
-                      className="text-xs font-medium text-teal-700 underline"
-                    >
+                    <button type="button" onClick={sendResetLink} className="text-xs font-medium text-teal-700 underline">
                       Forgot password?
                     </button>
                   </div>
@@ -227,7 +240,7 @@ function SignInContent() {
                         required
                         placeholder="Jane"
                         value={firstName}
-                        onChange={e => setFirstName(e.target.value)}
+                        onChange={(e) => setFirstName(e.target.value)}
                         autoComplete="given-name"
                         className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none ring-teal-500/30 transition focus:border-teal-600 focus:ring"
                       />
@@ -239,7 +252,7 @@ function SignInContent() {
                         required
                         placeholder="Doe"
                         value={lastName}
-                        onChange={e => setLastName(e.target.value)}
+                        onChange={(e) => setLastName(e.target.value)}
                         autoComplete="family-name"
                         className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none ring-teal-500/30 transition focus:border-teal-600 focus:ring"
                       />
@@ -253,7 +266,7 @@ function SignInContent() {
                       required
                       placeholder="you@example.com"
                       value={email}
-                      onChange={e => setEmail(e.target.value)}
+                      onChange={(e) => setEmail(e.target.value)}
                       autoComplete="email"
                       className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none ring-teal-500/30 transition focus:border-teal-600 focus:ring"
                     />
@@ -266,13 +279,13 @@ function SignInContent() {
                         required
                         placeholder="Create a password"
                         value={password}
-                        onChange={e => setPassword(e.target.value)}
+                        onChange={(e) => setPassword(e.target.value)}
                         autoComplete="new-password"
                         className={passwordInputClasses}
                       />
                       <button
                         type="button"
-                        onClick={() => setShowPassword(v => !v)}
+                        onClick={() => setShowPassword((v) => !v)}
                         aria-label={showPassword ? 'Hide password' : 'Show password'}
                         aria-pressed={showPassword}
                         className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 hover:text-gray-700 focus:outline-none focus:ring"
@@ -306,7 +319,10 @@ function SignInContent() {
 
             {/* Status / errors */}
             {status && (
-              <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900" role="status">
+              <div
+                className="mt-4 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900"
+                role="status"
+              >
                 {status}
               </div>
             )}
@@ -317,8 +333,8 @@ function SignInContent() {
               <button
                 className="font-medium text-teal-700 underline"
                 onClick={async () => {
-                  await supabase.auth.signOut()
-                  window.location.href = '/auth'
+                  await supabase.auth.signOut();
+                  window.location.href = '/auth';
                 }}
               >
                 sign out & try again
@@ -332,8 +348,8 @@ function SignInContent() {
             <div className="relative z-10 m-auto w-full max-w-md text-left">
               <h2 className="text-center text-2xl font-semibold tracking-tight sm:text-3xl">The Flow Economy</h2>
               <p className="mt-3 text-balance text-center text-base/7 text-teal-50/95 sm:text-[17px]">
-                Join chapters, share offerings, and build momentum together. Your account works across
-                Global Exchange, Local Chapters, and more.
+                Join chapters, share offerings, and build momentum together. Your account works across Global
+                Exchange, Local Chapters, and more.
               </p>
               <ul className="mx-auto mt-5 max-w-md space-y-3 text-base/7 text-teal-50/95">
                 <li className="flex items-start gap-3">
@@ -371,5 +387,5 @@ function SignInContent() {
         </div>
       </div>
     </div>
-  )
+  );
 }
