@@ -12,7 +12,7 @@
 
 'use client';
 
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import ResetQuotaButton from '@/components/ResetQuotaButton';
@@ -80,6 +80,11 @@ type ReviewRow = {
 
 type Tab = 'users' | 'offers' | 'chapters' | 'reviews' | 'audit';
 
+type AskQuota = {
+  used: number;
+  limit: number;
+};
+
 /** Small component to show "Fulfilled received" (view created in SQL) */
 function FulfilledCount({ profileId }: { profileId: string }) {
   const [count, setCount] = useState<number | null>(null);
@@ -111,13 +116,24 @@ function FulfilledCount({ profileId }: { profileId: string }) {
 }
 
 /** Row-level wrapper so each user row can refresh its 30d usage after a reset */
-function RowAskControls({ profileId }: { profileId: string }) {
-  const [refreshToken, setRefreshToken] = useState(0);
+function RowAskControls({
+  profileId,
+  quota,
+  loading,
+  error,
+  onQuotaReset,
+}: {
+  profileId: string;
+  quota?: AskQuota | null;
+  loading?: boolean;
+  error?: string | null;
+  onQuotaReset: () => void;
+}) {
   return (
     <div className="flex flex-wrap items-center gap-2 sm:gap-3">
       <FulfilledCount profileId={profileId} />
-      <AskWindowUsage profileId={profileId} refreshToken={refreshToken} />
-      <ResetQuotaButton profileId={profileId} onSuccess={() => setRefreshToken((n) => n + 1)} />
+      <AskWindowUsage used={quota?.used ?? null} limit={quota?.limit ?? null} loading={loading} error={error} />
+      <ResetQuotaButton profileId={profileId} onSuccess={onQuotaReset} />
     </div>
   );
 }
@@ -147,6 +163,10 @@ function AdminContent() {
 
   const [users, setUsers] = useState<Profile[]>([]);
   const [userEmails, setUserEmails] = useState<Record<string, string | null>>({});
+  const [askQuotaMap, setAskQuotaMap] = useState<Record<string, AskQuota>>({});
+  const [askQuotaLoading, setAskQuotaLoading] = useState(false);
+  const [askQuotaError, setAskQuotaError] = useState<string | null>(null);
+  const [askQuotaPendingIds, setAskQuotaPendingIds] = useState<Set<string>>(() => new Set());
 
   const [offers, setOffers] = useState<OfferRow[]>([]);
   const ownerRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
@@ -176,6 +196,88 @@ function AdminContent() {
     setMsg(m);
     console.error(e);
   }
+
+  const reloadQuota = useCallback(
+    async (ids: string[], replace = false) => {
+      const unique = Array.from(
+        new Set(ids.filter((id) => typeof id === 'string' && id.trim().length > 0))
+      );
+
+      if (replace) {
+        setAskQuotaPendingIds(() => new Set());
+      }
+
+      if (unique.length === 0) {
+        if (replace) {
+          setAskQuotaMap({});
+          setAskQuotaLoading(false);
+          setAskQuotaError(null);
+        }
+        return;
+      }
+
+      setAskQuotaError(null);
+
+      if (replace) {
+        setAskQuotaLoading(true);
+      } else {
+        setAskQuotaPendingIds((prev) => {
+          const next = new Set(prev);
+          unique.forEach((id) => next.add(id));
+          return next;
+        });
+      }
+
+      try {
+        const res = await fetch('/api/requests/quota/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profile_ids: unique }),
+          cache: 'no-store',
+        });
+
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j?.error || 'Failed to load quota');
+        }
+
+        const payload = await res.json();
+        if (!Array.isArray(payload)) throw new Error('Invalid quota response');
+
+        setAskQuotaMap((prev) => {
+          const base = replace ? {} : { ...prev };
+          for (const id of unique) {
+            const match = payload.find((item: any) => item?.profile_id === id);
+            base[id] = {
+              used: Number(match?.used ?? 0),
+              limit: Number(match?.limit ?? 3),
+            };
+          }
+          return base;
+        });
+      } catch (error: any) {
+        setAskQuotaError(error?.message ?? 'Failed to load quota');
+      } finally {
+        if (replace) {
+          setAskQuotaLoading(false);
+        } else {
+          setAskQuotaPendingIds((prev) => {
+            const next = new Set(prev);
+            unique.forEach((id) => next.delete(id));
+            return next;
+          });
+        }
+      }
+    },
+    []
+  );
+
+  const handleQuotaRefresh = useCallback(
+    (id: string) => {
+      void reloadQuota([id]);
+    },
+    [reloadQuota]
+  );
 
   // Load current user
   useEffect(() => {
@@ -430,6 +532,21 @@ function AdminContent() {
       }
     })();
   }, [canViewAdmin, tab, isAdmin]);
+
+  useEffect(() => {
+    if (!canViewAdmin) return;
+    if (tab !== 'users') return;
+
+    if (!users.length) {
+      setAskQuotaMap({});
+      setAskQuotaPendingIds(() => new Set());
+      setAskQuotaLoading(false);
+      setAskQuotaError(null);
+      return;
+    }
+
+    void reloadQuota(users.map((u) => u.id), true);
+  }, [canViewAdmin, tab, users, reloadQuota]);
 
   // helper — fetch emails via view (no RPC; avoids 404s)
   async function fetchEmails(ids: string[]) {
@@ -999,7 +1116,13 @@ function AdminContent() {
 
                   {/* Counters + Reset */}
                   <div className="mt-2">
-                    <RowAskControls profileId={u.id} />
+                    <RowAskControls
+                      profileId={u.id}
+                      quota={askQuotaMap[u.id]}
+                      loading={askQuotaLoading || askQuotaPendingIds.has(u.id)}
+                      error={askQuotaError}
+                      onQuotaReset={() => handleQuotaRefresh(u.id)}
+                    />
                   </div>
                 </li>
               );
@@ -1093,7 +1216,13 @@ function AdminContent() {
                             )}
                           </div>
 
-                          <RowAskControls profileId={u.id} />
+                          <RowAskControls
+                            profileId={u.id}
+                            quota={askQuotaMap[u.id]}
+                            loading={askQuotaLoading || askQuotaPendingIds.has(u.id)}
+                            error={askQuotaError}
+                            onQuotaReset={() => handleQuotaRefresh(u.id)}
+                          />
                         </div>
                       </td>
                     </tr>

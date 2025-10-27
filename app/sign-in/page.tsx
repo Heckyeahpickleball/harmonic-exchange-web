@@ -1,7 +1,7 @@
-// /app/sign-in/page.tsx
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
 import Link from 'next/link'
 import { getAuthCallbackUrl, getResetCallbackUrl } from '@/lib/url'
@@ -9,6 +9,20 @@ import { getAuthCallbackUrl, getResetCallbackUrl } from '@/lib/url'
 type Mode = 'signin' | 'signup'
 
 export default function SignInPage() {
+  return (
+    <Suspense fallback="Loading…">
+      <SignInContent />
+    </Suspense>
+  )
+}
+
+function SignInContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const rawNext = searchParams?.get('next') || '/profile'
+  const nextPath =
+    rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/profile'
+
   const [mode, setMode] = useState<Mode>('signin')
 
   // common
@@ -19,7 +33,7 @@ export default function SignInPage() {
   // email+password
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false) // ← NEW
+  const [showPassword, setShowPassword] = useState(false)
 
   // NAME (separate first/last) for signup
   const [firstName, setFirstName] = useState('')
@@ -39,7 +53,7 @@ export default function SignInPage() {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     setBusy(false)
     setStatus(error ? `Error: ${error.message}` : 'Signed in! Redirecting…')
-    if (!error) window.location.href = '/profile'
+    if (!error) router.replace(nextPath)
   }
 
   async function handleSignUp(e: React.FormEvent) {
@@ -122,7 +136,7 @@ export default function SignInPage() {
             {alreadySignedIn && (
               <div className="mb-4 rounded-lg border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
                 You’re already signed in.{` `}
-                <Link href="/profile" className="underline">Go to Profile</Link>
+                <Link href={nextPath} className="underline">Go to Profile</Link>
                 <button
                   className="ml-2 rounded border border-teal-300 px-2 py-1 text-xs text-teal-800 hover:bg-teal-50"
                   onClick={async () => { await supabase.auth.signOut(); location.reload() }}
