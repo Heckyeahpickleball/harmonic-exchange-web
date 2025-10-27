@@ -1,43 +1,30 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
-
 export default function AskWindowUsage({
-  profileId,
-  refreshToken = 0, // bump this number to force a refetch
+  used,
+  limit,
+  loading = false,
+  error,
 }: {
-  profileId: string;
-  refreshToken?: number;
+  used?: number | null;
+  limit?: number | null;
+  loading?: boolean;
+  error?: string | null;
 }) {
-  const [count, setCount] = useState<number | null>(null);
-  const [err, setErr] = useState('');
+  if (error) return <span className="text-xs text-red-600">quota err</span>;
 
-  async function load() {
-    try {
-      const { data, error } = await supabase
-        .from('profile_request_window_usage')
-        .select('asks_in_window')
-        .eq('profile_id', profileId)
-        .maybeSingle();
-      if (error) throw error;
-      setCount((data?.asks_in_window as number | undefined) ?? 0);
-    } catch (e: any) {
-      setErr(e?.message ?? 'err');
-    }
+  const isNumber = (val: unknown): val is number => typeof val === 'number' && Number.isFinite(val);
+
+  const resolvedUsed = isNumber(used) ? used : null;
+  const resolvedLimit = isNumber(limit) ? limit : null;
+
+  if (loading || resolvedUsed === null || resolvedLimit === null) {
+    return <span className="text-xs text-gray-500">…</span>;
   }
-
-  useEffect(() => {
-    load();
-    // we intentionally only depend on profileId + refreshToken
-  }, [profileId, refreshToken]);
-
-  if (err) return <span className="text-xs text-red-600">window err</span>;
-  if (count === null) return <span className="text-xs text-gray-500">…</span>;
 
   return (
     <span className="text-xs text-gray-700">
-      Asks used (30d): <b>{count}/3</b>
+      Asks used (last 30 days): <b>{resolvedUsed}/{resolvedLimit}</b>
     </span>
   );
 }

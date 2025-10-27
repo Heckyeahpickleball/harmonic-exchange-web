@@ -19,6 +19,9 @@ export default function SignInPage() {
 function SignInContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const rawNext = searchParams?.get('next') || '/profile'
+  const nextPath =
+    rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/profile'
   const nextPath = searchParams?.get('next') || '/profile'
 
   const [mode, setMode] = useState<Mode>('signin')
@@ -51,6 +54,7 @@ function SignInContent() {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     setBusy(false)
     setStatus(error ? `Error: ${error.message}` : 'Signed in! Redirecting…')
+    if (!error) router.replace(nextPath)
     if (!error) router.replace(nextPath || '/profile')
   }
 
