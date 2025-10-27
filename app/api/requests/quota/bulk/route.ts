@@ -1,5 +1,4 @@
 // app/api/requests/quota/bulk/route.ts
-'use server';
 
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
@@ -18,12 +17,13 @@ function getLimit(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_LIMIT;
 }
 
-// (Optional) gate to admins/moderators only.
-// If you don’t have a role column, you can remove this check safely.
+// (Optional) auth gate; keep or relax as you wish.
 async function requireAuth() {
   const cookieStore = cookies();
   const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) {
     throw Object.assign(new Error('not_authenticated'), { status: 401 });
   }
@@ -43,7 +43,7 @@ export async function POST(req: Request) {
     const cutoff = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const admin = supabaseAdmin();
 
-    // Use aggregate select to group by requester_profile_id
+    // Aggregate select => GROUP BY requester_profile_id
     const { data, error } = await admin
       .from('requests')
       .select('requester_profile_id, count:id', { head: false })
@@ -57,7 +57,6 @@ export async function POST(req: Request) {
 
     const usedById: Record<string, number> = {};
     for (const row of data ?? []) {
-      // row has shape { requester_profile_id: string, count: number }
       const pid = (row as any).requester_profile_id as string;
       const cnt = Number((row as any).count) || 0;
       usedById[pid] = cnt;
