@@ -1,5 +1,4 @@
-// app/api/requests/quota/bulk/route.ts
-'use server';
+// app/api/requests/quota/route.ts
 
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
@@ -8,6 +7,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 export const dynamic = 'force-dynamic';
 
+const WINDOW_LABEL = 'last_30_days' as const;
 const WINDOW_DAYS = 30;
 const STATUSES = ['pending', 'accepted', 'fulfilled'] as const;
 const DEFAULT_LIMIT = 3;
@@ -18,36 +18,29 @@ function getLimit(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_LIMIT;
 }
 
-// (Optional) gate to admins/moderators only.
-// If you don’t have a role column, you can remove this check safely.
-async function requireAuth() {
-  const cookieStore = cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    throw Object.assign(new Error('not_authenticated'), { status: 401 });
-  }
-  return user;
-}
-
-export async function POST(req: Request) {
+export async function GET() {
   try {
-    await requireAuth();
+    // Identify the current user
+    const cookieStore = cookies();
+    const client = createRouteHandlerClient({ cookies: () => cookieStore });
+    const {
+      data: { user },
+    } = await client.auth.getUser();
 
-    const body = await req.json().catch(() => ({}));
-    const ids: string[] = Array.isArray(body?.profile_ids) ? body.profile_ids : [];
-    if (ids.length === 0) {
-      return NextResponse.json({ error: 'no_profile_ids' }, { status: 400 });
+    if (!user) {
+      return NextResponse.json({ error: 'not_authenticated' }, { status: 401 });
     }
+
+    const profileId = user.id; // profiles.id matches auth user id
 
     const cutoff = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const admin = supabaseAdmin();
 
-    // Use aggregate select to group by requester_profile_id
-    const { data, error } = await admin
+    // Count requests made by this requester in the rolling window
+    const { count, error } = await admin
       .from('requests')
-      .select('requester_profile_id, count:id', { head: false })
-      .in('requester_profile_id', ids)
+      .select('id', { count: 'exact', head: true })
+      .eq('requester_profile_id', profileId)
       .in('status', STATUSES as unknown as string[])
       .gte('created_at', cutoff);
 
@@ -55,24 +48,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const usedById: Record<string, number> = {};
-    for (const row of data ?? []) {
-      // row has shape { requester_profile_id: string, count: number }
-      const pid = (row as any).requester_profile_id as string;
-      const cnt = Number((row as any).count) || 0;
-      usedById[pid] = cnt;
-    }
-
+    const used = count ?? 0;
     const limit = getLimit();
-    const result = ids.map((profile_id) => ({
-      profile_id,
-      used: usedById[profile_id] ?? 0,
-      limit,
-    }));
 
-    return NextResponse.json(result, { status: 200 });
+    return NextResponse.json(
+      {
+        used,
+        limit,
+        remaining: Math.max(0, limit - used),
+        window: WINDOW_LABEL,
+      },
+      { status: 200 },
+    );
   } catch (e: any) {
-    const status = e?.status ?? 500;
-    return NextResponse.json({ error: e?.message ?? 'unexpected_error' }, { status });
+    return NextResponse.json({ error: e?.message ?? 'unexpected_error' }, { status: 500 });
   }
 }
