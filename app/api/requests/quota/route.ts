@@ -1,3 +1,6 @@
+// app/api/requests/quota/bulk/route.ts
+'use server';
+
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
@@ -5,86 +8,71 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 export const dynamic = 'force-dynamic';
 
-const WINDOW_LABEL = 'last_30_days' as const;
 const WINDOW_DAYS = 30;
 const STATUSES = ['pending', 'accepted', 'fulfilled'] as const;
 const DEFAULT_LIMIT = 3;
 
 function getLimit(): number {
   const raw = process.env.HX_REQUEST_QUOTA_LIMIT;
-  const parsed = raw ? Number(raw) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_LIMIT;
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_LIMIT;
 }
 
-async function summarizeQuota(profileId: string) {
-  const admin = supabaseAdmin();
-  const limit = getLimit();
-  const cutoff = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
-
-  const { error, count } = await admin
-    .from('requests')
-    .select('id', { head: true, count: 'exact' })
-    .eq('requester_profile_id', profileId)
-    .in('status', [...STATUSES])
-    .gte('created_at', cutoff);
-
-  if (error) throw error;
-
-  const used = count ?? 0;
-  const remaining = Math.max(limit - used, 0);
-
-  return {
-    used,
-    limit,
-    remaining,
-    window: WINDOW_LABEL,
-  } as const;
-}
-
-async function getUserId() {
-  const supabase = createRouteHandlerClient({ cookies });
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  return user?.id ?? null;
-}
-
-export async function GET() {
-  try {
-    const userId = await getUserId();
-    if (!userId) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
-
-    const quota = await summarizeQuota(userId);
-    return NextResponse.json(quota);
-  } catch (error) {
-    console.error('quota GET failed', error);
-    return NextResponse.json({ error: 'Unable to load quota' }, { status: 500 });
+// (Optional) gate to admins/moderators only.
+// If you don’t have a role column, you can remove this check safely.
+async function requireAuth() {
+  const cookieStore = cookies();
+  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    throw Object.assign(new Error('not_authenticated'), { status: 401 });
   }
+  return user;
 }
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
-    const userId = await getUserId();
-    if (!userId) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    await requireAuth();
+
+    const body = await req.json().catch(() => ({}));
+    const ids: string[] = Array.isArray(body?.profile_ids) ? body.profile_ids : [];
+    if (ids.length === 0) {
+      return NextResponse.json({ error: 'no_profile_ids' }, { status: 400 });
     }
 
-    const quota = await summarizeQuota(userId);
-    if (quota.remaining <= 0) {
-      return NextResponse.json(
-        {
-          error: `You have reached your ask limit (${quota.used} of ${quota.limit}) in the last 30 days.`,
-          quota,
-        },
-        { status: 429 }
-      );
+    const cutoff = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const admin = supabaseAdmin();
+
+    // Use aggregate select to group by requester_profile_id
+    const { data, error } = await admin
+      .from('requests')
+      .select('requester_profile_id, count:id', { head: false })
+      .in('requester_profile_id', ids)
+      .in('status', STATUSES as unknown as string[])
+      .gte('created_at', cutoff);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ quota });
-  } catch (error) {
-    console.error('quota POST failed', error);
-    return NextResponse.json({ error: 'Unable to verify quota' }, { status: 500 });
+    const usedById: Record<string, number> = {};
+    for (const row of data ?? []) {
+      // row has shape { requester_profile_id: string, count: number }
+      const pid = (row as any).requester_profile_id as string;
+      const cnt = Number((row as any).count) || 0;
+      usedById[pid] = cnt;
+    }
+
+    const limit = getLimit();
+    const result = ids.map((profile_id) => ({
+      profile_id,
+      used: usedById[profile_id] ?? 0,
+      limit,
+    }));
+
+    return NextResponse.json(result, { status: 200 });
+  } catch (e: any) {
+    const status = e?.status ?? 500;
+    return NextResponse.json({ error: e?.message ?? 'unexpected_error' }, { status });
   }
 }
